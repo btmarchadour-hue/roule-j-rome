@@ -169,7 +169,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           : roulage toute la journée (sans contrainte de marée)
         </label>
 
-        <label className="ck">
+        <label className="ck" title="Surcote barométrique : ajoute +1 cm d'eau par hPa sous 1013 hPa selon la prévision AROME/GFS. Voir explications détaillées en bas de page.">
           <input
             type="checkbox"
             checked={settings.pcor}

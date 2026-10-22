@@ -44,6 +44,7 @@ interface DayDetailPanelProps {
   onValidateDay?: (ds: string, record: DayFocusData) => void;
   onClearValidation?: (ds: string) => void;
   onToggleSlotValidation?: (record: DayFocusData, slot: SessionItem) => void;
+  onOpenPrintAgenda?: () => void;
 }
 
 export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
@@ -60,6 +61,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   onValidateDay,
   onClearValidation,
   onToggleSlotValidation,
+  onOpenPrintAgenda,
 }) => {
   const [y, m0, d] = selectedDate.split('-').map(Number);
   const m = m0 - 1;
@@ -337,6 +339,30 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                 title="Exporter toutes les séances validées (CSV)"
               >
                 📥 Exporter CSV
+              </button>
+            )}
+
+            {onOpenPrintAgenda && (
+              <button
+                type="button"
+                className="fbtn"
+                style={{
+                  margin: 0,
+                  background: 'var(--cell, #f3f4f6)',
+                  color: 'var(--tx, #111)',
+                  border: '1px solid var(--bd, #e5e7eb)',
+                  fontWeight: 700,
+                  fontSize: '0.72rem',
+                  padding: '7px 9px',
+                  borderRadius: '6px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+                onClick={onOpenPrintAgenda}
+                title="Imprimer la fiche agenda papier (horaires, hauteurs d'eau, météo)"
+              >
+                📋 Fiche Agenda
               </button>
             )}
           </div>

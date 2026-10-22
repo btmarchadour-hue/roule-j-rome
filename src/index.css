@@ -762,31 +762,87 @@ td.n {
   }
 }
 
+.printable-agenda-wrapper {
+  margin-bottom: 24px;
+}
+
+.printable-agenda-sheet {
+  background: #fff;
+  color: #111;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--bd, #e5e7eb);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.agenda-strip {
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.agenda-strip:hover {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
 @media print {
   body {
-    background: #fff;
-    color: #000;
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
+
   .nop,
+  .noprint,
   .cal,
   .tabs,
-  header.brand button {
+  .print-toolbar,
+  header.brand,
+  .tide-header-card,
+  .ft,
+  .hyp {
     display: none !important;
   }
-  .tvc {
-    display: block !important;
-    border: 0;
-    padding: 0;
-  }
+
   main {
-    max-width: none;
-    padding: 0;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
+
+  .printable-agenda-wrapper {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .printable-agenda-sheet {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  .agenda-strip {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    border-color: #333 !important;
+  }
+
+  .print-cut-line {
+    border-left: 1px dashed #666 !important;
+  }
+
   table {
     min-width: 0;
-    font-size: 9pt;
+    font-size: 8.5pt;
   }
-  .brand {
-    border-bottom: 3px solid #ffc40d;
+
+  @page {
+    size: auto;
+    margin: 8mm 6mm;
   }
 }
+

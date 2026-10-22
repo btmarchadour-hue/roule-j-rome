@@ -5,6 +5,7 @@ import { FocusTab } from './components/FocusTab';
 import { Header } from './components/Header';
 import { MarnageChart } from './components/MarnageChart';
 import { NotesAndHypotheses } from './components/NotesAndHypotheses';
+import { PrintableAgendaSheet } from './components/PrintableAgendaSheet';
 import { SettingsCard } from './components/SettingsCard';
 import { TableView } from './components/TableView';
 import { TideHeaderCard } from './components/TideHeaderCard';
@@ -474,6 +475,13 @@ export const App: React.FC = () => {
           >
             Focus Lendemain
           </button>
+          <button
+            type="button"
+            className={activeTab === 3 ? 'on' : ''}
+            onClick={() => handleTabChange(3)}
+          >
+            📋 Fiche Agenda Papier
+          </button>
         </nav>
 
         {/* Tab 1: Calendrier */}
@@ -518,6 +526,7 @@ export const App: React.FC = () => {
               onValidateDay={handleValidateDay}
               onClearValidation={handleClearValidation}
               onToggleSlotValidation={handleToggleSlotValidation}
+              onOpenPrintAgenda={() => handleTabChange(3)}
             />
 
             <TableView
@@ -572,6 +581,25 @@ export const App: React.FC = () => {
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
+            onOpenPrintAgenda={() => handleTabChange(3)}
+          />
+        )}
+
+        {/* Tab 3: Fiche Agenda Papier (Impression et collage agenda) */}
+        {activeTab === 3 && (
+          <PrintableAgendaSheet
+            settings={settings}
+            EX={EX}
+            W={tideW}
+            first={first}
+            last={last}
+            windList={windList}
+            validations={validations}
+            customSlotsMap={customSlotsMap}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            onValidateDay={handleValidateDay}
+            onToggleSlotValidation={handleToggleSlotValidation}
           />
         )}
       </main>

@@ -39,6 +39,7 @@ interface FocusTabProps {
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
+  onOpenPrintAgenda?: () => void;
 }
 
 export const FocusTab: React.FC<FocusTabProps> = ({
@@ -55,6 +56,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onToggleSlotValidation,
   onSelectDayInCalendar,
   customSlotsMap = {},
+  onOpenPrintAgenda,
 }) => {
   const td = tdy();
   const tomorrowDs = shf(td, 1);
@@ -347,13 +349,25 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         <div className="note">
           L'export ne contient que les journées que vous avez validées sur cet appareil.
         </div>
-        <button
-          className="fbtn"
-          type="button"
-          onClick={() => exportValidCsv(validations, settings.cap)}
-        >
-          Exporter les jours validés (CSV)
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            className="fbtn"
+            type="button"
+            onClick={() => exportValidCsv(validations, settings.cap)}
+          >
+            Exporter les jours validés (CSV)
+          </button>
+          {onOpenPrintAgenda && (
+            <button
+              className="fbtn"
+              type="button"
+              style={{ background: '#16a34a', color: '#fff' }}
+              onClick={onOpenPrintAgenda}
+            >
+              📋 Imprimer la fiche agenda papier
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Minimum sessions setting */}

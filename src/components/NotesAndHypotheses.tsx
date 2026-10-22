@@ -31,18 +31,39 @@ export const NotesAndHypotheses: React.FC = () => {
             nœuds, arrêt à 35 nœuds (appliqué aux rafales).
           </li>
           <li>
-            <b>Hypothèses encore ouvertes :</b> première séance 1 h après le lever du soleil ; seuil de
-            hauteur d'eau 4,50 m sans calage (il roule parfois dès 5 m selon le vent) ; décalage
-            Lestrevet estimé et désactivé par défaut ; correction de pression de +1 cm par hPa sous
-            1013 hPa quand la prévision est disponible ; sud-ouest = meilleur vent et vents de terre
+            <b>Hypothèses encore ouvertes :</b> première séance calée par défaut 1 h après le lever du soleil ;
+            seuil de hauteur d'eau 4,50 m sans calage (il roule parfois dès 5 m selon la force et l'orientation du vent) ;
+            décalage Lestrevet estimé et désactivé par défaut ; sud-ouest = meilleur vent et vents de terre
             d'est/nord-est = moins favorables (non confirmé).
           </li>
           <li>
-            <b>Méthode de création des séances :</b> à partir de la dernière séance, comme le fait le
-            moniteur : la dernière séance se termine au plus près de la contrainte de fin (coucher du
-            soleil − 30 min, ou fin de plage de marée), puis les précédentes sont calées vers l'arrière
-            avec la pause. Le jeu éventuel se retrouve donc en début de plage, là où les séances sont les
-            moins prisées (tôt le matin). Le nombre de séances reste le maximum possible.
+            <b>Fonctionnement et pertinence du correcteur de pression atmosphérique (surcote / décote) :</b>
+            <div style={{ marginTop: '6px', lineHeight: '1.5' }}>
+              <p style={{ margin: '0 0 6px' }}>
+                <b>1. Principe physique (loi du baromètre inverse) :</b> Les annuaires de marée (SHOM et PDF fourni) calculent les hauteurs d'eau pour une pression atmosphérique standard au niveau de la mer de <b>1013,25 hPa</b>. Lorsqu'une dépression atmosphérique s'installe, la colonne d'air pèse moins lourd sur la surface de l'océan : l'eau « monte » sous l'effet de cette aspiration hydrostatique à raison d'environ <b>+1 cm de hauteur d'eau par hPa en dessous de 1013 hPa</b> (ex. à 985 hPa lors d'un coup de vent, la surcote barométrique brute est de <b>+28 cm</b>). À l'inverse, un anticyclone lourd (ex. 1030 hPa) écrase le plan d'eau et génère une décote d'environ −17 cm.
+              </p>
+              <p style={{ margin: '0 0 6px' }}>
+                <b>2. Calcul appliqué dans l'outil :</b> Lorsque la case <i>« Correction de pression »</i> est cochée et que la prévision météo (AROME / GFS) est disponible, l'application lit la pression atmosphérique prévue à l'instant de la marée et applique la formule : <code>Hauteur d'eau réelle = Hauteur PDF + max(0, (1013 − Pression) / 100)</code>. Le seuil de roulage (4,50 m) est donc atteint plus tard à marée descendante et submergé plus tôt à marée montante.
+              </p>
+              <p style={{ margin: '0 0 6px' }}>
+                <b>3. Impact direct sur la plage de Lestrevet (Plomodiern) :</b>
+                Lestrevet présente un estran à pente très douce (≈ 1 % à 1,5 %). Une surcote de +25 cm d'eau ne se résume pas à une simple hauteur verticale : elle repousse le trait de côte de <b>15 à 25 mètres à l'horizontale</b> sur le banc de sable dur roulable. Sur le plan horaire, elle retarde le moment où l'eau redescend sous 4,50 m de <b>20 à 35 minutes</b>. Sans cette correction lors d'un fort coup de vent dépressionnaire, le planning risque de proposer une première séance alors que la zone d'évolution est encore sous l'eau ou détrempée.
+              </p>
+              <p style={{ margin: '0' }}>
+                <b>4. Pertinence et limites pour le moniteur :</b>
+                <br />
+                • <i>Pourquoi c'est pertinent :</i> En Bretagne, les vents forts favorables au char à voile (20 à 35 nœuds) coïncident presque toujours avec des dépressions d'automne/hiver creuses (980 à 1000 hPa). La surcote d'eau y est bien réelle et tangible sur le sable.
+                <br />
+                • <i>Les limites physiques :</i> La pression atmosphérique n'explique qu'environ la moitié de la surcote totale. Le reste provient de la <b>surcote dynamique</b> : le vent d'ouest qui pousse l'eau au fond de la baie de Douarnenez (effet d'entonnoir / <i>wind setup</i>) et le déferlement de la houle sur les barres de sable (<i>wave setup</i>), qui peuvent rajouter 10 à 30 cm d'eau en plus. À l'inverse, par vent de terre d'Est anticyclonique, l'eau se retire plus vite et plus loin que prévu.
+                <br />
+                • <i>Recommandation pratique :</i> Pour ouvrir des plannings de réservation plusieurs semaines à l'avance dans Booking Activities, désactiver le correcteur (ou utiliser une marge fixe de sécurité de +10 à +20 cm) garantit des horaires stables qui ne bougent pas au fil des sorties de modèles météo. En revanche, pour la décision opérationnelle du moniteur à J−2 / J−1 par gros temps, activer ce correcteur évite les surprises de début de séance les pieds dans l'eau.
+              </p>
+            </div>
+          </li>
+          <li>
+            <b>Méthode de création des séances :</b> calage par défaut dès le début de plage praticable
+            (ou depuis la fin selon réglage), 1 h après le lever du soleil. Les séances s'enchaînent avec la pause
+            réglementaire (15 min en été, 30 min l'hiver) pour maximiser le nombre de créneaux réalisables.
           </li>
           <li>
             <b>Créneau optionnel (à la discrétion du moniteur) :</b> une séance complète de 60 min qui
