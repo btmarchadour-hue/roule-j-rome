@@ -129,10 +129,10 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           Placement des séances
           <select
             value={settings.xpl}
-            onChange={e => onUpdateSettings({ xpl: e.target.value as 'fin' | 'debut' })}
+            onChange={e => onUpdateSettings({ xpl: e.target.value as 'fin' | 'debut', xplCustomized: true })}
           >
-            <option value="fin">À partir de la dernière séance (méthode du moniteur)</option>
-            <option value="debut">À partir de la première séance</option>
+            <option value="debut">Dès la 1re plage disponible (1h après le lever de soleil)</option>
+            <option value="fin">À partir de la fin de plage (dernière séance)</option>
           </select>
         </label>
 

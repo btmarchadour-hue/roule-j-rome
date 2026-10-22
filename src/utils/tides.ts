@@ -795,16 +795,35 @@ export const sigOf = (f: DayFocusData) => f.list.map(kOf).join('|');
 
 export function vstat(f: DayFocusData, validations: ValidationsMap) {
   const V = validations[f.ds];
-  if (!V) return { st: 'none' as const };
-  if (V.sig === sigOf(f) && V.k === f.k) return { st: 'ok' as const, V };
-  const old = new Set(V.items.map(x => x.k));
-  const cur = new Set(f.list.map(kOf));
+  if (!V || !V.items || V.items.length === 0) {
+    return { st: 'none' as const, valCount: 0, totalCount: f.list.length, isPartial: false };
+  }
+
+  const valKeys = new Set(V.items.map(x => x.k));
+  const curMap = new Map(f.list.map(x => [kOf(x), x]));
+  const missing = V.items.filter(x => !curMap.has(x.k));
+  const kchg = V.k !== f.k;
+  const isPartial = V.items.length < f.list.length;
+
+  if (missing.length > 0 || kchg) {
+    return {
+      st: 'chg' as const,
+      V,
+      add: f.list.filter(x => !valKeys.has(kOf(x))),
+      rem: missing,
+      kchg,
+      valCount: V.items.length,
+      totalCount: f.list.length,
+      isPartial,
+    };
+  }
+
   return {
-    st: 'chg' as const,
+    st: 'ok' as const,
     V,
-    add: f.list.filter(x => !old.has(kOf(x))),
-    rem: V.items.filter(x => !cur.has(x.k)),
-    kchg: V.k !== f.k,
+    valCount: V.items.length,
+    totalCount: f.list.length,
+    isPartial,
   };
 }
 

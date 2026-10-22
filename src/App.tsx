@@ -14,7 +14,9 @@ import {
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
+  SessionItem,
   TidePoint,
+  ValidationItem,
   ValidationsMap,
   WindPoint,
 } from './types';
@@ -47,7 +49,7 @@ const defaultSettings: AppSettings = {
   rnd: 15,
   xon: true,
   xtol: 20,
-  xpl: 'fin',
+  xpl: 'debut', // Caler par défaut le début des séances sur la première plage disponible (1h après le lever)
   cap: 1,
   all: true,
   cmax: 50,
@@ -85,7 +87,14 @@ export const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('cvSettings');
-      if (saved) return { ...defaultSettings, ...JSON.parse(saved) };
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...defaultSettings,
+          ...parsed,
+          xpl: parsed.xplCustomized ? parsed.xpl : 'debut',
+        };
+      }
     } catch {
       // ignore
     }
@@ -362,6 +371,72 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleClearValidation = useCallback((ds: string) => {
+    setValidations(prev => {
+      const updated = { ...prev };
+      delete updated[ds];
+      try {
+        localStorage.setItem(VK, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  }, []);
+
+  const handleToggleSlotValidation = useCallback((record: DayFocusData, slot: SessionItem) => {
+    setValidations(prev => {
+      const ds = record.ds;
+      const existing = prev[ds];
+      const slotKey = kOf(slot);
+      const currentItems = existing?.items || [];
+      const isAlreadyValidated = currentItems.some(item => item.k === slotKey);
+
+      let nextItems: ValidationItem[];
+      if (isAlreadyValidated) {
+        nextItems = currentItems.filter(item => item.k !== slotKey);
+      } else {
+        const newItem: ValidationItem = {
+          k: slotKey,
+          s: lc(slot.a, record.y, record.m, record.d),
+          e: lc(slot.b, record.y, record.m, record.d),
+          opt: slot.opt,
+          over: slot.over,
+          lim: slot.lim,
+          customTitle: slot.customTitle,
+        };
+        nextItems = [...currentItems, newItem].sort((p, q) => {
+          const aStart = record.list.find(x => kOf(x) === p.k)?.a || 0;
+          const bStart = record.list.find(x => kOf(x) === q.k)?.a || 0;
+          return aStart - bStart;
+        });
+      }
+
+      let updated: ValidationsMap;
+      if (nextItems.length === 0) {
+        updated = { ...prev };
+        delete updated[ds];
+      } else {
+        updated = {
+          ...prev,
+          [ds]: {
+            sig: sigOf(record),
+            ts: Date.now(),
+            k: record.k,
+            items: nextItems,
+          },
+        };
+      }
+
+      try {
+        localStorage.setItem(VK, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  }, []);
+
   // Calculations for tides and windows
   const EX: TidePoint[] = useMemo(() => {
     return build(settings.les, settings.pcor, windList);
@@ -417,6 +492,8 @@ export const App: React.FC = () => {
               first={first}
               last={last}
               windList={windList}
+              validations={validations}
+              customSlotsMap={customSlotsMap}
             />
 
             {/* Météo au format Windguru directement sous le calendrier */}
@@ -437,6 +514,10 @@ export const App: React.FC = () => {
               windList={windList}
               customSlotsMap={customSlotsMap}
               onUpdateCustomSlots={handleUpdateCustomSlots}
+              validations={validations}
+              onValidateDay={handleValidateDay}
+              onClearValidation={handleClearValidation}
+              onToggleSlotValidation={handleToggleSlotValidation}
             />
 
             <TableView
@@ -486,6 +567,8 @@ export const App: React.FC = () => {
             windList={windList}
             validations={validations}
             onValidateDay={handleValidateDay}
+            onClearValidation={handleClearValidation}
+            onToggleSlotValidation={handleToggleSlotValidation}
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}

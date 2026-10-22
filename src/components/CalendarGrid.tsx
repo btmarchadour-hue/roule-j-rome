@@ -1,6 +1,6 @@
 import React from 'react';
-import { AppSettings, TidePoint, WindPoint } from '../types';
-import { dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan } from '../utils/tides';
+import { AppSettings, CustomSlotsMap, TidePoint, ValidationsMap, WindPoint } from '../types';
+import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, vstat } from '../utils/tides';
 
 interface CalendarGridProps {
   year: number;
@@ -15,6 +15,8 @@ interface CalendarGridProps {
   first: number;
   last: number;
   windList: WindPoint[];
+  validations?: ValidationsMap;
+  customSlotsMap?: CustomSlotsMap;
 }
 
 export const CalendarGrid: React.FC<CalendarGridProps> = ({
@@ -30,6 +32,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
   first,
   last,
   windList,
+  validations = {},
+  customSlotsMap = {},
 }) => {
   const dayNames = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
   const firstDayOffset = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
@@ -40,6 +44,11 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     emptyCells.push(<div key={`empty-${i}`} />);
   }
 
+  const validatedThisMonth = Object.keys(validations || {}).filter(ds => {
+    const [y, m] = ds.split('-').map(Number);
+    return y === year && m === month + 1;
+  }).length;
+
   const dayCells = [];
   for (let d = 1; d <= numDays; d++) {
     const ds = `${year}-${p2(month + 1)}-${p2(d)}`;
@@ -49,6 +58,10 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     let dotClass = '';
     let badgeText = '';
     let keyTideLabel = '';
+    let valStatus: 'none' | 'ok' | 'chg' = 'none';
+    let valCount = 0;
+    let totalCount = 0;
+    let isPartial = false;
 
     let dayTooltip = '';
 
@@ -67,12 +80,27 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         badgeText = (n ? String(n) : '') + (e ? `+${e}` : '');
       }
 
+      if (validations && validations[ds]) {
+        const fDay = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
+        const vInfo = vstat(fDay, validations);
+        valStatus = vInfo.st;
+        valCount = vInfo.valCount;
+        totalCount = vInfo.totalCount;
+        isPartial = vInfo.isPartial;
+      }
+
       const kt = getDayKeyTide(EX, ds);
       if (kt) {
         keyTideLabel = kt.label;
         dayTooltip = `${d} ${MOIS[month]} ${year} · ${kt.label}${kt.coef ? ` · Coef ${kt.coef}` : ''}`;
       } else {
         dayTooltip = `${d} ${MOIS[month]} ${year}`;
+      }
+
+      if (valStatus === 'ok') {
+        dayTooltip += ` · ✓ ${isPartial ? `${valCount}/${totalCount} créneaux validés` : 'Créneaux validés'}`;
+      } else if (valStatus === 'chg') {
+        dayTooltip += ' · ⚠️ À revalider (météo modifiée)';
       }
     }
 
@@ -96,6 +124,19 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         disabled={!inRange}
         title={inRange ? dayTooltip : undefined}
       >
+        {valStatus === 'ok' && (
+          <span
+            className="cal-val-tag ok"
+            title={isPartial ? `${valCount}/${totalCount} créneaux validés` : 'Créneaux validés'}
+          >
+            {isPartial ? `${valCount}/${totalCount}` : '✓'}
+          </span>
+        )}
+        {valStatus === 'chg' && (
+          <span className="cal-val-tag warn" title="Prévisions modifiées depuis validation">
+            ⚠️
+          </span>
+        )}
         <span style={{ lineHeight: 1 }}>{d}</span>
         <i />
         {badgeText && <small>{badgeText}</small>}
@@ -122,7 +163,25 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     <div className="card cal">
       <div className="top">
         <div>
-          <h1>Horaires de roulage</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h1>Horaires de roulage</h1>
+            {validatedThisMonth > 0 && (
+              <span
+                style={{
+                  fontSize: '0.62rem',
+                  background: 'var(--okbg, #e2f4e8)',
+                  color: 'var(--ok, #166534)',
+                  padding: '2px 7px',
+                  borderRadius: '12px',
+                  fontWeight: 800,
+                  border: '1px solid currentColor',
+                }}
+                title={`${validatedThisMonth} jour(s) validé(s) ce mois`}
+              >
+                ✓ {validatedThisMonth} validé{validatedThisMonth > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
           <div className="sub">Plage de Lestrevet · Plomodiern</div>
         </div>
         <div className="nav">

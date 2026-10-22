@@ -34,6 +34,8 @@ interface FocusTabProps {
   windList: WindPoint[];
   validations: ValidationsMap;
   onValidateDay: (ds: string, record: DayFocusData) => void;
+  onClearValidation?: (ds: string) => void;
+  onToggleSlotValidation?: (record: DayFocusData, slot: SessionItem) => void;
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
@@ -49,6 +51,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   windList,
   validations,
   onValidateDay,
+  onClearValidation,
+  onToggleSlotValidation,
   onSelectDayInCalendar,
   customSlotsMap = {},
 }) => {
@@ -75,6 +79,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
   const renderSessRow = (f: DayFocusData, x: SessionItem, key: string) => {
     const t = `${lc(x.a, f.y, f.m, f.d)} - ${lc(x.b, f.y, f.m, f.d)}`;
+    const slotKey = kOf(x);
+    const valRecord = validations[f.ds];
+    const isSlotValidated = valRecord?.items?.some(item => item.k === slotKey) ?? false;
+
     let chip = <span className="fchip">VENT ?</span>;
     if (x.isCustom) {
       chip = (
@@ -108,7 +116,22 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           <b>{t}</b>
           <small>{sub + (x.past ? ' · passée' : '')}</small>
         </div>
-        {chip}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {chip}
+          {onToggleSlotValidation && (
+            <button
+              type="button"
+              className={`slot-toggle-btn ${isSlotValidated ? 'val-on' : 'val-off'}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSlotValidation(f, x);
+              }}
+              title={isSlotValidated ? 'Cliquer pour retirer la validation de ce créneau' : 'Cliquer pour valider individuellement ce créneau'}
+            >
+              {isSlotValidated ? '✓ Validé' : '+ Valider'}
+            </button>
+          )}
+        </div>
       </div>
     );
   };
@@ -116,20 +139,25 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const renderVBox = (f: DayFocusData) => {
     const v = vstat(f, validations);
     let msg: React.ReactNode = null;
-    let btnText = 'Valider la journée';
+    let btnText = '✓ Tout valider';
 
     if (v.st === 'none') {
-      msg = <>Proposition non encore validée pour cette journée.</>;
-      btnText = 'Valider la journée';
+      msg = <>Proposition non encore validée pour cette journée ({f.list.length} créneau{f.list.length > 1 ? 'x' : ''} disponibles).</>;
+      btnText = '✓ Tout valider';
     } else if (v.st === 'ok') {
-      msg = <>✅ Journée validée le {new Date(v.V.ts).toLocaleString('fr-FR')}.</>;
-      btnText = 'Valider à nouveau';
+      msg = (
+        <>
+          ✅ <b>{v.valCount} sur {v.totalCount} créneau{v.totalCount > 1 ? 'x' : ''} validé{v.valCount > 1 ? 's' : ''}</b> le {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
+          {v.isPartial && <span style={{ opacity: 0.9 }}> (validation partielle)</span>}
+        </>
+      );
+      btnText = '✓ Tout valider';
     } else {
-      btnText = 'Revalider la journée';
+      btnText = '🔄 Tout revalider';
       msg = (
         <>
           ⚠️ <b>Prévisions modifiées depuis ta validation</b> du{' '}
-          {new Date(v.V.ts).toLocaleString('fr-FR')}.
+          {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
           {v.add.length > 0 && (
             <>
               <br />
@@ -160,13 +188,31 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         <div className="note" style={{ marginTop: '10px' }}>
           {msg}
         </div>
-        <button
-          className="fbtn"
-          type="button"
-          onClick={() => onValidateDay(f.ds, f)}
-        >
-          {btnText}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+          <button
+            className="fbtn"
+            type="button"
+            onClick={() => onValidateDay(f.ds, f)}
+            title="Valider l'ensemble des créneaux de cette journée"
+          >
+            {btnText}
+          </button>
+          {v.st !== 'none' && onClearValidation && (
+            <button
+              className="fbtn"
+              type="button"
+              style={{
+                background: 'transparent',
+                color: '#dc2626',
+                border: '1px solid #fca5a5',
+              }}
+              onClick={() => onClearValidation(f.ds)}
+              title="Supprimer la validation pour cette journée"
+            >
+              ✕ Tout dévalider
+            </button>
+          )}
+        </div>
       </>
     );
   };

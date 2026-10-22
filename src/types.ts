@@ -10,6 +10,7 @@ export interface AppSettings {
   xon: boolean;
   xtol: number;
   xpl: 'fin' | 'debut';
+  xplCustomized?: boolean;
   cap: number;
   all: boolean;
   cmax: number;

@@ -266,6 +266,70 @@ h1 {
   color: var(--selt);
 }
 
+.cal-val-tag {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: .52rem;
+  font-weight: 900;
+  line-height: 1;
+  border-radius: 4px;
+  padding: 1px 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cal-val-tag.ok {
+  background: var(--ok, #16a34a);
+  color: #fff;
+}
+
+.cal-val-tag.warn {
+  background: #ea580c;
+  color: #fff;
+}
+
+.slot-toggle-btn {
+  font-family: inherit;
+  font-size: 0.70rem;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.2;
+}
+
+.slot-toggle-btn.val-on {
+  background: var(--okbg, #dcfce7);
+  color: var(--ok, #15803d);
+  border-color: #86efac;
+}
+
+.slot-toggle-btn.val-on:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.slot-toggle-btn.val-off {
+  background: var(--cell, #f1f5f9);
+  color: var(--mu, #64748b);
+  border-color: var(--bd, #cbd5e1);
+}
+
+.slot-toggle-btn.val-off:hover {
+  background: var(--okbg, #dcfce7);
+  color: var(--ok, #15803d);
+  border-color: var(--ok, #16a34a);
+}
+
 .pan {
   background: var(--pan);
   border: 1px solid var(--ac);
