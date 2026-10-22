@@ -1,0 +1,7 @@
+{
+  "name": "Horaires de roulage – Char à Voile du Bout du Monde",
+  "description": "Calcul et prévision des créneaux de roulage pour le Char à Voile du Bout du Monde à la plage de Lestrevet (marées, soleil, météo et vent AROME).",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
