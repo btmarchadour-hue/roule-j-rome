@@ -47,7 +47,7 @@ interface PrintableAgendaSheetProps {
 
 type RangeOption = '5days' | 'week' | 'month' | 'selected' | 'custom' | 'all';
 type LayoutOption = 'strips' | 'cards' | 'table';
-type FilterOption = 'validated' | 'all';
+type FilterOption = 'validated' | 'all' | 'valid_or_pending';
 
 interface DayPrintData {
   ds: string;
@@ -56,6 +56,8 @@ interface DayPrintData {
   fullDateStr: string;
   coeff: number;
   bmInfo: string;
+  bmTimeStr: string;
+  bmHeight: number | null;
   pmInfo: string;
   sunRise: string;
   sunSet: string;
@@ -70,6 +72,10 @@ interface DayPrintData {
     cloudText: string;
     rainMm: number | null;
     model: string;
+    waveH: number | null;
+    wavePeriod: number | null;
+    waveDirComp: string | null;
+    waveDirDeg: number | null;
   } | null;
   slots: {
     slot: SessionItem;
@@ -89,6 +95,9 @@ interface DayPrintData {
       dir: string;
       temp: number | null;
       cond: string;
+      waveH: number | null;
+      wavePeriod: number | null;
+      waveDir: string | null;
     } | null;
   }[];
   focusData: DayFocusData;
@@ -187,11 +196,15 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const pmList = dayTides.filter(p => p.pm);
 
       const bmInfo = bmList
-        .map(p => `${lc(p.t, y, m, d)} (${p.h.toFixed(2)} m)`)
+        .map(p => `${lc(p.t, y, m, d)} (haut. ${p.h.toFixed(2)} m)`)
         .join(', ') || '—';
       const pmInfo = pmList
-        .map(p => `${lc(p.t, y, m, d)} (${p.h.toFixed(2)} m)`)
+        .map(p => `${lc(p.t, y, m, d)} (haut. ${p.h.toFixed(2)} m)`)
         .join(', ') || '—';
+
+      const mainBm = bmList[0];
+      const bmTimeStr = mainBm ? lc(mainBm.t, y, m, d) : '—';
+      const bmHeight = mainBm ? mainBm.h : null;
 
       // Sunlight
       const sun = sunInfo(y, m, d, settings.lum, settings.lmg);
@@ -230,6 +243,10 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             cloudText,
             rainMm: wMid.pr != null ? +wMid.pr.toFixed(1) : null,
             model: wMid.s === 'A' ? 'AROME' : 'Modèle global',
+            waveH: wMid.wvh != null ? +wMid.wvh.toFixed(1) : null,
+            wavePeriod: wMid.wvp != null ? Math.round(wMid.wvp) : null,
+            waveDirComp: wMid.wvd != null ? comp(wMid.wvd) : null,
+            waveDirDeg: wMid.wvd != null ? Math.round(wMid.wvd) : null,
           };
         }
       }
@@ -274,6 +291,9 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
               dir: comp(wSlot.a),
               temp: wSlot.tp != null ? Math.round(wSlot.tp) : null,
               cond,
+              waveH: wSlot.wvh != null ? +wSlot.wvh.toFixed(1) : null,
+              wavePeriod: wSlot.wvp != null ? Math.round(wSlot.wvp) : null,
+              waveDir: wSlot.wvd != null ? comp(wSlot.wvd) : null,
             };
           }
         }
@@ -298,6 +318,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const filteredSlots =
         filterMode === 'validated'
           ? rawSlots.filter(s => s.isValidated)
+          : filterMode === 'valid_or_pending'
+          ? rawSlots.filter(s => !s.isRejected)
           : rawSlots;
 
       return {
@@ -307,6 +329,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
         fullDateStr,
         coeff,
         bmInfo,
+        bmTimeStr,
+        bmHeight,
         pmInfo,
         sunRise: sun.lev,
         sunSet: sun.cou,
@@ -563,20 +587,55 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', color: '#666', marginRight: '2px' }}>Filtre :</span>
             <button
               type="button"
               className="fbtn"
               style={{
                 margin: 0,
-                padding: '4px 8px',
+                padding: '3px 8px',
                 fontSize: '0.72rem',
                 background: filterMode === 'validated' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
                 color: '#111',
+                fontWeight: filterMode === 'validated' ? 800 : 500,
               }}
-              onClick={() => setFilterMode(filterMode === 'validated' ? 'all' : 'validated')}
+              onClick={() => setFilterMode('validated')}
+              title="Uniquement les séances marquées ✓ Validées"
             >
-              {filterMode === 'validated' ? 'Afficher toutes les séances' : '✓ Validées uniquement'}
+              ✓ Validées seuls
+            </button>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                background: filterMode === 'valid_or_pending' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
+                color: '#111',
+                fontWeight: filterMode === 'valid_or_pending' ? 800 : 500,
+              }}
+              onClick={() => setFilterMode('valid_or_pending')}
+              title="Séances validées et séances en attente (masque les séances refusées)"
+            >
+              ✓ + ⏳ Validées & Attente
+            </button>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                background: filterMode === 'all' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
+                color: '#111',
+                fontWeight: filterMode === 'all' ? 800 : 500,
+              }}
+              onClick={() => setFilterMode('all')}
+              title="Toutes les séances calculées, y compris celles refusées (affichées barrées avec motif)"
+            >
+              📋 Tout imprimer
             </button>
             {onValidateDay && (
               <>
@@ -669,19 +728,25 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       C.{day.coeff}
                     </span>
                   </div>
-                  <div style={{ fontSize: '0.66rem', color: '#444', display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
-                    <span>BM : <strong>{day.bmInfo.split(',')[0]}</strong></span>
+                  <div style={{ fontSize: '0.66rem', color: '#333', display: 'flex', justifyContent: 'space-between', marginTop: '2px', flexWrap: 'wrap', gap: '2px' }}>
+                    <span>BM : <strong>{day.bmTimeStr}</strong> · Eau : <strong>{day.bmHeight != null ? `${day.bmHeight.toFixed(2)} m` : '—'}</strong></span>
                     <span>☀️ {day.sunRise}–{day.sunSet}</span>
                   </div>
                 </div>
 
-                {/* Météo 5 jours si disponible */}
+                {/* Météo 5 jours avec Houle si disponible */}
                 {day.isNear5Days && day.dayWeather && (
                   <div style={{ background: '#f3f4f6', padding: '4px 6px', borderRadius: '4px', marginBottom: '6px', fontSize: '0.66rem', border: '1px solid #e5e7eb' }}>
                     <div style={{ fontWeight: 800, color: '#1f2937', display: 'flex', justifyContent: 'space-between' }}>
                       <span>💨 {day.dayWeather.windRange}</span>
                       <span>{day.dayWeather.dirComp}</span>
                     </div>
+                    {day.dayWeather.waveH != null && (
+                      <div style={{ color: '#0369a1', fontWeight: 700, display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
+                        <span>🌊 Houle : <strong>{day.dayWeather.waveH} m</strong></span>
+                        <span>{day.dayWeather.wavePeriod ? `${day.dayWeather.wavePeriod}s` : ''} {day.dayWeather.waveDirComp || ''}</span>
+                      </div>
+                    )}
                     <div style={{ color: '#4b5563', display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
                       <span>{day.dayWeather.temp != null ? `${day.dayWeather.temp}°C` : ''} · {day.dayWeather.cloudText.split('·')[0]}</span>
                       <span style={{ fontSize: '0.6rem', color: '#6b7280' }}>{day.dayWeather.model}</span>
@@ -728,11 +793,19 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           <span>Fin : <strong>{s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}</strong></span>
                         </div>
 
-                        {/* Météo spécifique du créneau */}
+                        {/* Météo et houle spécifiques du créneau */}
                         {s.weather && (
-                          <div style={{ fontSize: '0.62rem', color: '#4b5563', display: 'flex', justifyContent: 'space-between' }}>
-                            <span>💨 {s.weather.windKts} nds {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''}</span>
-                            <span>{s.weather.dir}</span>
+                          <div style={{ fontSize: '0.62rem', color: '#4b5563', display: 'flex', flexDirection: 'column', gap: '1px', marginTop: '2px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>💨 {s.weather.windKts} nds {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''}</span>
+                              <span style={{ fontWeight: 700 }}>{s.weather.dir}</span>
+                            </div>
+                            {s.weather.waveH != null && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0284c7', fontWeight: 600 }}>
+                                <span>🌊 Houle : <strong>{s.weather.waveH} m</strong></span>
+                                <span>{s.weather.wavePeriod ? `${s.weather.wavePeriod}s` : ''} {s.weather.waveDir || ''}</span>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -795,16 +868,22 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   </div>
                 </div>
 
-                {/* Météo proche */}
+                {/* Météo proche avec Houle */}
                 {day.isNear5Days && day.dayWeather && (
                   <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '6px 8px', marginBottom: '8px', fontSize: '0.72rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800 }}>
                       <span>💨 Vent : {day.dayWeather.windRange} {day.dayWeather.gustMax ? `(rafales ${day.dayWeather.gustMax} nds)` : ''}</span>
                       <span>Secteur {day.dayWeather.dirComp} ({day.dayWeather.dirDeg}°)</span>
                     </div>
+                    {day.dayWeather.waveH != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0284c7', fontWeight: 700, marginTop: '2px' }}>
+                        <span>🌊 Houle / Vagues : {day.dayWeather.waveH} m (période {day.dayWeather.wavePeriod}s)</span>
+                        <span>Provenance : {day.dayWeather.waveDirComp} ({day.dayWeather.waveDirDeg}°)</span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginTop: '2px', fontSize: '0.68rem' }}>
                       <span>🌡️ {day.dayWeather.temp != null ? `${day.dayWeather.temp}°C` : '—'} (ressenti {day.dayWeather.tempChill != null ? `${day.dayWeather.tempChill}°C` : '—'}) · {day.dayWeather.cloudText}</span>
-                      <span style={{ fontStyle: 'italic' }}>Source {day.dayWeather.model}</span>
+                      <span style={{ fontStyle: 'italic' }}>Source {day.dayWeather.model} + Marine</span>
                     </div>
                   </div>
                 )}
@@ -818,11 +897,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', margin: 0 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #aaa', color: '#555', textAlign: 'left', fontSize: '0.66rem' }}>
-                        <th style={{ padding: '3px 4px' }}>Horaires</th>
+                        <th style={{ padding: '3px 4px' }}>Horaires & Décision</th>
                         <th style={{ padding: '3px 4px' }}>Hauteur Début</th>
                         <th style={{ padding: '3px 4px' }}>Hauteur Fin</th>
                         <th style={{ padding: '3px 4px' }}>Évolution</th>
-                        {day.isNear5Days && <th style={{ padding: '3px 4px' }}>Vent créneau</th>}
+                        {day.isNear5Days && <th style={{ padding: '3px 4px' }}>Météo & Houle</th>}
                         {includeNotesBox && <th style={{ padding: '3px 4px' }}>Pointage / Inscrits</th>}
                       </tr>
                     </thead>
@@ -855,7 +934,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           </td>
                           {day.isNear5Days && (
                             <td style={{ padding: '5px 4px', fontSize: '0.68rem' }}>
-                              {s.weather ? `${s.weather.windKts} nds · ${s.weather.dir}` : '—'}
+                              {s.weather ? (
+                                <div>
+                                  <div>💨 <strong>{s.weather.windKts} nds</strong> · {s.weather.dir}</div>
+                                  {s.weather.waveH != null && (
+                                    <div style={{ color: '#0284c7', fontWeight: 600, fontSize: '0.64rem' }}>
+                                      🌊 {s.weather.waveH} m ({s.weather.wavePeriod}s {s.weather.waveDir || ''})
+                                    </div>
+                                  )}
+                                </div>
+                              ) : '—'}
                             </td>
                           )}
                           {includeNotesBox && (
@@ -881,12 +969,12 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 <tr style={{ background: '#f3f4f6', borderBottom: '2px solid #111', textAlign: 'left', fontSize: '0.68rem', textTransform: 'uppercase' }}>
                   <th style={{ padding: '6px 8px' }}>Date</th>
                   <th style={{ padding: '6px 8px' }}>Coeff</th>
-                  <th style={{ padding: '6px 8px' }}>Basse Mer (BM)</th>
+                  <th style={{ padding: '6px 8px' }}>Basse Mer & Haut. d'eau</th>
                   <th style={{ padding: '6px 8px' }}>Séance & Décision</th>
                   <th style={{ padding: '6px 8px' }}>Eau Début</th>
                   <th style={{ padding: '6px 8px' }}>Eau Fin</th>
                   <th style={{ padding: '6px 8px' }}>Tendance</th>
-                  <th style={{ padding: '6px 8px' }}>Météo / Vent</th>
+                  <th style={{ padding: '6px 8px' }}>Météo, Vent & Houle</th>
                   {includeNotesBox && <th style={{ padding: '6px 8px' }}>Émargement / Inscrits</th>}
                 </tr>
               </thead>
@@ -952,11 +1040,25 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       </td>
                       <td style={{ padding: '6px 8px', fontSize: '0.7rem' }}>
                         {day.isNear5Days && s.weather ? (
-                          <span>
-                            <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
-                          </span>
+                          <div>
+                            <div>
+                              <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
+                            </div>
+                            {s.weather.waveH != null && (
+                              <div style={{ color: '#0284c7', fontSize: '0.65rem', fontWeight: 600 }}>
+                                🌊 Houle {s.weather.waveH} m ({s.weather.wavePeriod}s {s.weather.waveDir || ''})
+                              </div>
+                            )}
+                          </div>
                         ) : day.isNear5Days && day.dayWeather ? (
-                          <span style={{ color: '#666' }}>{day.dayWeather.windRange}</span>
+                          <div>
+                            <span style={{ color: '#666' }}>{day.dayWeather.windRange}</span>
+                            {day.dayWeather.waveH != null && (
+                              <div style={{ color: '#0284c7', fontSize: '0.65rem' }}>
+                                🌊 Houle {day.dayWeather.waveH} m ({day.dayWeather.wavePeriod}s)
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span style={{ color: '#999', fontStyle: 'italic' }}>Marée seule (&gt; 5j)</span>
                         )}
@@ -980,7 +1082,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             Char à Voile du Bout du Monde · Plage de Lestrevet · 06 81 63 83 74 · charavoileduboutdumonde.com
           </div>
           <div>
-            Hauteurs calculées par interpolation sinusoïdale SHOM/Lestrevet · Météo AROME Météo-France via Open-Meteo
+            Hauteurs calculées par interpolation SHOM/Lestrevet · Météo AROME Météo-France & Houle ECMWF/WAM via Open-Meteo
           </div>
         </div>
       </div>

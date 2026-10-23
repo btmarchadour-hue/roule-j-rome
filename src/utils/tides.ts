@@ -432,6 +432,14 @@ export function windAt(u: number, windList: WindPoint[]): WindPoint | null {
     cc: f < 0.5 ? a.cc : b.cc,
     rh: a.rh != null && b.rh != null ? a.rh + (b.rh - a.rh) * f : null,
     pop: a.pop != null && b.pop != null ? a.pop + (b.pop - a.pop) * f : null,
+    wvh: a.wvh != null && b.wvh != null ? +(a.wvh + (b.wvh - a.wvh) * f).toFixed(1) : (a.wvh ?? b.wvh ?? null),
+    wvp: a.wvp != null && b.wvp != null ? Math.round(a.wvp + (b.wvp - a.wvp) * f) : (a.wvp ?? b.wvp ?? null),
+    wvd: f < 0.5 ? a.wvd : b.wvd,
+    rad: a.rad != null && b.rad != null ? Math.round(a.rad + (b.rad - a.rad) * f) : (a.rad ?? b.rad ?? null),
+    uv: a.uv != null && b.uv != null ? +(a.uv + (b.uv - a.uv) * f).toFixed(1) : (a.uv ?? b.uv ?? null),
+    ccl: f < 0.5 ? a.ccl : b.ccl,
+    ccm: f < 0.5 ? a.ccm : b.ccm,
+    cch: f < 0.5 ? a.cch : b.cch,
   };
 }
 
