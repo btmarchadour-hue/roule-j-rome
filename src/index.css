@@ -285,6 +285,11 @@ h1 {
   color: #fff;
 }
 
+.cal-val-tag.rej {
+  background: #dc2626;
+  color: #fff;
+}
+
 .cal-val-tag.warn {
   background: #ea580c;
   color: #fff;
@@ -760,6 +765,47 @@ td.n {
   .brand .bt {
     font-size: .82rem;
   }
+.slot-decision-group {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.slot-toggle-btn {
+  border: 1px solid var(--bd, #e5e7eb);
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--cell, #f9fafb);
+  color: var(--tx, #111);
+}
+
+.slot-toggle-btn:hover {
+  filter: brightness(0.95);
+}
+
+.slot-toggle-btn.val-on {
+  background: #16a34a;
+  color: #fff;
+  border-color: #16a34a;
+}
+
+.slot-toggle-btn.rej-on {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+
+.slot-toggle-btn.neutral {
+  background: transparent;
+  color: var(--mu, #666);
+  border-color: var(--bd, #e5e7eb);
 }
 
 .printable-agenda-wrapper {

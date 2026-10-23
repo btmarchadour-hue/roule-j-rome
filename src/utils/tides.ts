@@ -796,14 +796,22 @@ export const sigOf = (f: DayFocusData) => f.list.map(kOf).join('|');
 export function vstat(f: DayFocusData, validations: ValidationsMap) {
   const V = validations[f.ds];
   if (!V || !V.items || V.items.length === 0) {
-    return { st: 'none' as const, valCount: 0, totalCount: f.list.length, isPartial: false };
+    return {
+      st: 'none' as const,
+      valCount: 0,
+      rejCount: 0,
+      totalCount: f.list.length,
+      isPartial: false,
+    };
   }
 
+  const validItems = V.items.filter(x => x.status !== 'rejected');
+  const rejectedItems = V.items.filter(x => x.status === 'rejected');
   const valKeys = new Set(V.items.map(x => x.k));
   const curMap = new Map(f.list.map(x => [kOf(x), x]));
   const missing = V.items.filter(x => !curMap.has(x.k));
   const kchg = V.k !== f.k;
-  const isPartial = V.items.length < f.list.length;
+  const isPartial = validItems.length < f.list.length;
 
   if (missing.length > 0 || kchg) {
     return {
@@ -812,7 +820,8 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
       add: f.list.filter(x => !valKeys.has(kOf(x))),
       rem: missing,
       kchg,
-      valCount: V.items.length,
+      valCount: validItems.length,
+      rejCount: rejectedItems.length,
       totalCount: f.list.length,
       isPartial,
     };
@@ -821,7 +830,8 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
   return {
     st: 'ok' as const,
     V,
-    valCount: V.items.length,
+    valCount: validItems.length,
+    rejCount: rejectedItems.length,
     totalCount: f.list.length,
     isPartial,
   };
@@ -1004,25 +1014,28 @@ export function exportMonthCsv(
 
 export function exportValidCsv(validations: ValidationsMap, cap: number) {
   const rows: (string | number)[][] = [
-    ['Date', 'Début', 'Fin', 'Type', 'Dépassement (min)', 'Limité par', 'Places', 'Validé le']
+    ['Date', 'Début', 'Fin', 'Décision', 'Type', 'Dépassement (min)', 'Limité par', 'Places', 'Motif / Notes', 'Enregistré le']
   ];
   for (const ds of Object.keys(validations).sort()) {
     const [y, m, d] = ds.split('-');
     for (const x of validations[ds].items) {
+      const isRej = x.status === 'rejected';
       rows.push([
         d + '/' + m + '/' + y,
         x.s.replace('h', ':'),
         x.e.replace('h', ':'),
+        isRej ? 'REFUSÉ' : 'VALIDÉ',
         x.customTitle || (x.opt ? 'optionnel' : 'séance'),
         x.over || '',
         x.lim || '',
-        cap || 1,
+        isRej ? 0 : (cap || 1),
+        x.rejectReason || '',
         new Date(validations[ds].ts).toLocaleString('fr-FR'),
       ]);
     }
   }
   if (rows.length < 2) {
-    alert('Aucune journée validée.');
+    alert('Aucun créneau enregistré.');
     return;
   }
   dl('planning-valide.csv', rows);

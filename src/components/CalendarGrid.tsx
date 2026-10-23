@@ -60,6 +60,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     let keyTideLabel = '';
     let valStatus: 'none' | 'ok' | 'chg' = 'none';
     let valCount = 0;
+    let rejCount = 0;
     let totalCount = 0;
     let isPartial = false;
 
@@ -85,6 +86,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         const vInfo = vstat(fDay, validations);
         valStatus = vInfo.st;
         valCount = vInfo.valCount;
+        rejCount = vInfo.rejCount;
         totalCount = vInfo.totalCount;
         isPartial = vInfo.isPartial;
       }
@@ -98,7 +100,9 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       }
 
       if (valStatus === 'ok') {
-        dayTooltip += ` · ✓ ${isPartial ? `${valCount}/${totalCount} créneaux validés` : 'Créneaux validés'}`;
+        dayTooltip += ` · ✓ ${valCount} validé${valCount > 1 ? 's' : ''}${
+          rejCount ? `, ${rejCount} refusé${rejCount > 1 ? 's' : ''}` : ''
+        }`;
       } else if (valStatus === 'chg') {
         dayTooltip += ' · ⚠️ À revalider (météo modifiée)';
       }
@@ -124,12 +128,20 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         disabled={!inRange}
         title={inRange ? dayTooltip : undefined}
       >
-        {valStatus === 'ok' && (
+        {valStatus === 'ok' && valCount > 0 && (
           <span
             className="cal-val-tag ok"
             title={isPartial ? `${valCount}/${totalCount} créneaux validés` : 'Créneaux validés'}
           >
             {isPartial ? `${valCount}/${totalCount}` : '✓'}
+          </span>
+        )}
+        {valStatus === 'ok' && valCount === 0 && rejCount > 0 && (
+          <span
+            className="cal-val-tag rej"
+            title={`${rejCount} créneau${rejCount > 1 ? 'x' : ''} refusé${rejCount > 1 ? 's' : ''}`}
+          >
+            ✕
           </span>
         )}
         {valStatus === 'chg' && (

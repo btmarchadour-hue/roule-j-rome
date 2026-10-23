@@ -35,11 +35,17 @@ interface PrintableAgendaSheetProps {
   customSlotsMap?: CustomSlotsMap;
   selectedDate: string;
   onSelectDate?: (ds: string) => void;
-  onValidateDay?: (ds: string, record: DayFocusData) => void;
+  onValidateDay?: (ds: string, record: DayFocusData, mode?: 'all' | 'wind_only') => void;
   onToggleSlotValidation?: (record: DayFocusData, slot: SessionItem) => void;
+  onSetSlotDecision?: (
+    record: DayFocusData,
+    slot: SessionItem,
+    decision: 'valid' | 'rejected' | 'pending',
+    reason?: string
+  ) => void;
 }
 
-type RangeOption = '5days' | 'week' | 'month' | 'selected' | 'all';
+type RangeOption = '5days' | 'week' | 'month' | 'selected' | 'custom' | 'all';
 type LayoutOption = 'strips' | 'cards' | 'table';
 type FilterOption = 'validated' | 'all';
 
@@ -70,7 +76,10 @@ interface DayPrintData {
     key: string;
     startStr: string;
     endStr: string;
+    status: 'valid' | 'rejected' | 'pending';
+    rejectReason?: string;
     isValidated: boolean;
+    isRejected: boolean;
     hStart: number | null;
     hEnd: number | null;
     trend: 'down' | 'up' | 'flat';
@@ -106,6 +115,9 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   const todayStr = useMemo(() => tdy(), []);
   const allAvailableDates = useMemo(() => DATA.map(d => d[0]), []);
 
+  const [customStartDate, setCustomStartDate] = useState<string>(todayStr);
+  const [customEndDate, setCustomEndDate] = useState<string>(shf(todayStr, 7));
+
   // Compute active date list according to rangeMode
   const targetDates = useMemo(() => {
     if (rangeMode === 'selected') {
@@ -132,9 +144,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const prefix = `${sy}-${p2(sm)}`;
       return allAvailableDates.filter(d => d.startsWith(prefix));
     }
+    if (rangeMode === 'custom') {
+      const start = customStartDate || todayStr;
+      const end = customEndDate || shf(start, 7);
+      const minD = start <= end ? start : end;
+      const maxD = start <= end ? end : start;
+      return allAvailableDates.filter(d => d >= minD && d <= maxD);
+    }
     // 'all'
     return allAvailableDates;
-  }, [rangeMode, selectedDate, todayStr, allAvailableDates]);
+  }, [rangeMode, selectedDate, todayStr, allAvailableDates, customStartDate, customEndDate]);
 
   // Compute 5-day horizon boundary for detailed weather indications
   const fiveDaysHorizon = useMemo(() => shf(todayStr, 4), [todayStr]);
@@ -218,7 +237,15 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       // Format each slot with exact water levels at start and end
       const rawSlots = focus.list.map(slot => {
         const key = kOf(slot);
-        const isValidated = valRecord?.items?.some(it => it.k === key) ?? false;
+        const valItem = valRecord?.items?.find(it => it.k === key);
+        const status: 'valid' | 'rejected' | 'pending' = valItem
+          ? valItem.status === 'rejected'
+            ? 'rejected'
+            : 'valid'
+          : 'pending';
+        const isValidated = status === 'valid';
+        const isRejected = status === 'rejected';
+        const rejectReason = valItem?.rejectReason;
         const startStr = lc(slot.a, y, m, d);
         const endStr = lc(slot.b, y, m, d);
 
@@ -256,7 +283,10 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
           key,
           startStr,
           endStr,
+          status,
+          rejectReason,
           isValidated,
+          isRejected,
           hStart,
           hEnd,
           trend,
@@ -311,11 +341,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     window.print();
   };
 
-  const handleValidateAllInView = () => {
+  const handleValidateAllInView = (mode: 'all' | 'wind_only' = 'all') => {
     if (!onValidateDay) return;
     for (const d of daysData) {
       if (d.focusData && d.focusData.list.length > 0) {
-        onValidateDay(d.ds, d.focusData);
+        onValidateDay(d.ds, d.focusData, mode);
       }
     }
   };
@@ -391,11 +421,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
               </button>
               <button
                 type="button"
-                className={`cal-nav-btn ${rangeMode === 'selected' ? 'on' : ''}`}
+                className={`cal-nav-btn ${rangeMode === 'custom' ? 'on' : ''}`}
                 style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('selected')}
+                onClick={() => setRangeMode('custom')}
               >
-                Jour sélectionné
+                📅 De date à date
               </button>
               <button
                 type="button"
@@ -406,6 +436,43 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 Toute la saison
               </button>
             </div>
+
+            {rangeMode === 'custom' && (
+              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <label style={{ fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>Du :</span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={e => setCustomStartDate(e.target.value)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--bd, #cbd5e1)',
+                      fontSize: '0.75rem',
+                      background: 'var(--card, #fff)',
+                      color: 'inherit',
+                    }}
+                  />
+                </label>
+                <label style={{ fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>Au :</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={e => setCustomEndDate(e.target.value)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--bd, #cbd5e1)',
+                      fontSize: '0.75rem',
+                      background: 'var(--card, #fff)',
+                      color: 'inherit',
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Filtrage séances */}
@@ -496,28 +563,56 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             )}
           </div>
 
-          {filterMode === 'validated' && totalSlotsCount === 0 && (
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                type="button"
-                className="fbtn"
-                style={{ margin: 0, padding: '4px 8px', fontSize: '0.72rem', background: '#ffc40d', color: '#111' }}
-                onClick={() => setFilterMode('all')}
-              >
-                Afficher toutes les séances
-              </button>
-              {onValidateDay && (
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '4px 8px',
+                fontSize: '0.72rem',
+                background: filterMode === 'validated' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
+                color: '#111',
+              }}
+              onClick={() => setFilterMode(filterMode === 'validated' ? 'all' : 'validated')}
+            >
+              {filterMode === 'validated' ? 'Afficher toutes les séances' : '✓ Validées uniquement'}
+            </button>
+            {onValidateDay && (
+              <>
                 <button
                   type="button"
                   className="fbtn"
-                  style={{ margin: 0, padding: '4px 8px', fontSize: '0.72rem', background: '#16a34a', color: '#fff' }}
-                  onClick={handleValidateAllInView}
+                  style={{
+                    margin: 0,
+                    padding: '4px 8px',
+                    fontSize: '0.72rem',
+                    background: '#0284c7',
+                    color: '#fff',
+                  }}
+                  onClick={() => handleValidateAllInView('wind_only')}
+                  title="Valider automatiquement les créneaux vent OK et refuser les hors vent sur cette période"
                 >
-                  ✓ Tout valider sur cette période
+                  ⚡ Valider si Vent OK
                 </button>
-              )}
-            </div>
-          )}
+                <button
+                  type="button"
+                  className="fbtn"
+                  style={{
+                    margin: 0,
+                    padding: '4px 8px',
+                    fontSize: '0.72rem',
+                    background: '#16a34a',
+                    color: '#fff',
+                  }}
+                  onClick={() => handleValidateAllInView('all')}
+                  title="Valider toutes les séances sans exception sur cette période"
+                >
+                  ✓ Tout valider
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -605,20 +700,26 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       <div
                         key={s.key}
                         style={{
-                          border: '1px solid #bbb',
+                          border: s.isRejected ? '1px dashed #fca5a5' : '1px solid #bbb',
                           borderRadius: '4px',
                           padding: '4px 6px',
-                          background: s.isValidated ? '#f0fdf4' : '#fff',
+                          background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : '#fff',
+                          opacity: s.isRejected ? 0.75 : 1,
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 900, fontSize: '0.8rem', color: '#111' }}>
+                          <span style={{ fontWeight: 900, fontSize: '0.8rem', color: '#111', textDecoration: s.isRejected ? 'line-through' : 'none' }}>
                             {s.startStr} – {s.endStr}
                           </span>
-                          <span style={{ fontSize: '0.6rem', fontWeight: 700, color: s.isValidated ? '#15803d' : '#888' }}>
-                            {s.isValidated ? '✓ VALIDÉ' : 'SÉANCE'}
+                          <span style={{ fontSize: '0.6rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#888' }}>
+                            {s.isValidated ? '✓ VALIDÉ' : s.isRejected ? '✕ REFUSÉ' : 'EN ATTENTE'}
                           </span>
                         </div>
+                        {s.isRejected && s.rejectReason && (
+                          <div style={{ fontSize: '0.58rem', color: '#b91c1c', fontStyle: 'italic', marginTop: '1px' }}>
+                            {s.rejectReason}
+                          </div>
+                        )}
 
                         {/* Hauteur d'eau précise en début et fin */}
                         <div style={{ margin: '3px 0', fontSize: '0.67rem', color: '#0369a1', fontWeight: 600, display: 'flex', justifyContent: 'space-between', background: '#e0f2fe', padding: '2px 4px', borderRadius: '3px' }}>
@@ -731,11 +832,17 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           key={s.key}
                           style={{
                             borderBottom: '1px solid #ddd',
-                            background: s.isValidated ? '#f0fdf4' : 'transparent',
+                            background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : 'transparent',
+                            opacity: s.isRejected ? 0.75 : 1,
                           }}
                         >
                           <td style={{ padding: '5px 4px', fontWeight: 800, fontSize: '0.78rem' }}>
-                            {s.startStr} – {s.endStr}
+                            <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                              {s.startStr} – {s.endStr}
+                            </div>
+                            <div style={{ fontSize: '0.62rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#6b7280' }}>
+                              {s.isValidated ? '✓ Validé' : s.isRejected ? `✕ Refusé ${s.rejectReason ? `(${s.rejectReason})` : ''}` : 'En attente'}
+                            </div>
                           </td>
                           <td style={{ padding: '5px 4px', color: '#0369a1', fontWeight: 700 }}>
                             {s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}
@@ -775,7 +882,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   <th style={{ padding: '6px 8px' }}>Date</th>
                   <th style={{ padding: '6px 8px' }}>Coeff</th>
                   <th style={{ padding: '6px 8px' }}>Basse Mer (BM)</th>
-                  <th style={{ padding: '6px 8px' }}>Séance</th>
+                  <th style={{ padding: '6px 8px' }}>Séance & Décision</th>
                   <th style={{ padding: '6px 8px' }}>Eau Début</th>
                   <th style={{ padding: '6px 8px' }}>Eau Fin</th>
                   <th style={{ padding: '6px 8px' }}>Tendance</th>
@@ -805,7 +912,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       key={`${day.ds}-${s.key}`}
                       style={{
                         borderBottom: idx === day.slots.length - 1 ? '2px solid #bbb' : '1px solid #e5e7eb',
-                        background: s.isValidated ? '#f0fdf4' : idx % 2 === 0 ? '#fff' : '#fafafa',
+                        background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : idx % 2 === 0 ? '#fff' : '#fafafa',
+                        opacity: s.isRejected ? 0.75 : 1,
                       }}
                     >
                       {idx === 0 && (
@@ -826,7 +934,12 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       )}
 
                       <td style={{ padding: '6px 8px', fontWeight: 900, fontSize: '0.8rem' }}>
-                        {s.startStr} – {s.endStr}
+                        <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                          {s.startStr} – {s.endStr}
+                        </div>
+                        <div style={{ fontSize: '0.62rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#6b7280' }}>
+                          {s.isValidated ? '✓ Validé' : s.isRejected ? `✕ Refusé ${s.rejectReason ? `(${s.rejectReason})` : ''}` : 'En attente'}
+                        </div>
                       </td>
                       <td style={{ padding: '6px 8px', color: '#0369a1', fontWeight: 800 }}>
                         {s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}

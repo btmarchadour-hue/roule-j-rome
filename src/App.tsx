@@ -345,23 +345,34 @@ export const App: React.FC = () => {
     fetchWind();
   }, [fetchWind, processWind]);
 
-  // Validation handler
-  const handleValidateDay = (ds: string, record: DayFocusData) => {
+  // Validation handler with optional mode: 'all' | 'wind_only'
+  const handleValidateDay = (
+    ds: string,
+    record: DayFocusData,
+    mode: 'all' | 'wind_only' = 'all'
+  ) => {
     const updated: ValidationsMap = {
       ...validations,
       [ds]: {
         sig: sigOf(record),
         ts: Date.now(),
         k: record.k,
-        items: record.list.map(x => ({
-          k: kOf(x),
-          s: lc(x.a, record.y, record.m, record.d),
-          e: lc(x.b, record.y, record.m, record.d),
-          opt: x.opt,
-          over: x.over,
-          lim: x.lim,
-          customTitle: x.customTitle,
-        })),
+        items: record.list.map(x => {
+          const isBadWind = x.ok === false;
+          const status: 'valid' | 'rejected' = mode === 'wind_only' && isBadWind ? 'rejected' : 'valid';
+          const rejectReason = isBadWind ? 'Vent hors plage' : undefined;
+          return {
+            k: kOf(x),
+            s: lc(x.a, record.y, record.m, record.d),
+            e: lc(x.b, record.y, record.m, record.d),
+            opt: x.opt,
+            over: x.over,
+            lim: x.lim,
+            customTitle: x.customTitle,
+            status,
+            rejectReason,
+          };
+        }),
       },
     };
     setValidations(updated);
@@ -385,58 +396,94 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  const handleToggleSlotValidation = useCallback((record: DayFocusData, slot: SessionItem) => {
-    setValidations(prev => {
+  const handleSetSlotDecision = useCallback(
+    (
+      record: DayFocusData,
+      slot: SessionItem,
+      decision: 'valid' | 'rejected' | 'pending',
+      reason?: string
+    ) => {
+      setValidations(prev => {
+        const ds = record.ds;
+        const existing = prev[ds];
+        const slotKey = kOf(slot);
+        const currentItems = existing?.items || [];
+        const existingItem = currentItems.find(it => it.k === slotKey);
+
+        let nextItems: ValidationItem[];
+        if (decision === 'pending') {
+          nextItems = currentItems.filter(item => item.k !== slotKey);
+        } else {
+          const isBadWind = slot.ok === false;
+          const defaultReason = reason || (isBadWind ? 'Vent hors plage' : 'Refusé / Annulé');
+          const updatedItem: ValidationItem = {
+            k: slotKey,
+            s: lc(slot.a, record.y, record.m, record.d),
+            e: lc(slot.b, record.y, record.m, record.d),
+            opt: slot.opt,
+            over: slot.over,
+            lim: slot.lim,
+            customTitle: slot.customTitle,
+            status: decision,
+            rejectReason: decision === 'rejected' ? defaultReason : undefined,
+          };
+
+          if (existingItem) {
+            nextItems = currentItems.map(it => (it.k === slotKey ? updatedItem : it));
+          } else {
+            nextItems = [...currentItems, updatedItem];
+          }
+
+          nextItems.sort((p, q) => {
+            const aStart = record.list.find(x => kOf(x) === p.k)?.a || 0;
+            const bStart = record.list.find(x => kOf(x) === q.k)?.a || 0;
+            return aStart - bStart;
+          });
+        }
+
+        let updated: ValidationsMap;
+        if (nextItems.length === 0) {
+          updated = { ...prev };
+          delete updated[ds];
+        } else {
+          updated = {
+            ...prev,
+            [ds]: {
+              sig: sigOf(record),
+              ts: Date.now(),
+              k: record.k,
+              items: nextItems,
+            },
+          };
+        }
+
+        try {
+          localStorage.setItem(VK, JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+    },
+    []
+  );
+
+  const handleToggleSlotValidation = useCallback(
+    (record: DayFocusData, slot: SessionItem) => {
       const ds = record.ds;
-      const existing = prev[ds];
+      const existing = validations[ds];
       const slotKey = kOf(slot);
-      const currentItems = existing?.items || [];
-      const isAlreadyValidated = currentItems.some(item => item.k === slotKey);
-
-      let nextItems: ValidationItem[];
-      if (isAlreadyValidated) {
-        nextItems = currentItems.filter(item => item.k !== slotKey);
+      const item = existing?.items?.find(it => it.k === slotKey);
+      if (!item) {
+        handleSetSlotDecision(record, slot, 'valid');
+      } else if (item.status === 'valid' || !item.status) {
+        handleSetSlotDecision(record, slot, 'rejected');
       } else {
-        const newItem: ValidationItem = {
-          k: slotKey,
-          s: lc(slot.a, record.y, record.m, record.d),
-          e: lc(slot.b, record.y, record.m, record.d),
-          opt: slot.opt,
-          over: slot.over,
-          lim: slot.lim,
-          customTitle: slot.customTitle,
-        };
-        nextItems = [...currentItems, newItem].sort((p, q) => {
-          const aStart = record.list.find(x => kOf(x) === p.k)?.a || 0;
-          const bStart = record.list.find(x => kOf(x) === q.k)?.a || 0;
-          return aStart - bStart;
-        });
+        handleSetSlotDecision(record, slot, 'pending');
       }
-
-      let updated: ValidationsMap;
-      if (nextItems.length === 0) {
-        updated = { ...prev };
-        delete updated[ds];
-      } else {
-        updated = {
-          ...prev,
-          [ds]: {
-            sig: sigOf(record),
-            ts: Date.now(),
-            k: record.k,
-            items: nextItems,
-          },
-        };
-      }
-
-      try {
-        localStorage.setItem(VK, JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
-      return updated;
-    });
-  }, []);
+    },
+    [validations, handleSetSlotDecision]
+  );
 
   // Calculations for tides and windows
   const EX: TidePoint[] = useMemo(() => {
@@ -526,6 +573,7 @@ export const App: React.FC = () => {
               onValidateDay={handleValidateDay}
               onClearValidation={handleClearValidation}
               onToggleSlotValidation={handleToggleSlotValidation}
+              onSetSlotDecision={handleSetSlotDecision}
               onOpenPrintAgenda={() => handleTabChange(3)}
             />
 
@@ -578,6 +626,7 @@ export const App: React.FC = () => {
             onValidateDay={handleValidateDay}
             onClearValidation={handleClearValidation}
             onToggleSlotValidation={handleToggleSlotValidation}
+            onSetSlotDecision={handleSetSlotDecision}
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
@@ -600,6 +649,7 @@ export const App: React.FC = () => {
             onSelectDate={setSelectedDate}
             onValidateDay={handleValidateDay}
             onToggleSlotValidation={handleToggleSlotValidation}
+            onSetSlotDecision={handleSetSlotDecision}
           />
         )}
       </main>

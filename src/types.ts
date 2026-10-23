@@ -127,6 +127,8 @@ export interface ValidationItem {
   over: number;
   lim: string;
   customTitle?: string;
+  status?: 'valid' | 'rejected';
+  rejectReason?: string;
 }
 
 export interface ValidationDayRecord {

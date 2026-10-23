@@ -33,9 +33,15 @@ interface FocusTabProps {
   last: number;
   windList: WindPoint[];
   validations: ValidationsMap;
-  onValidateDay: (ds: string, record: DayFocusData) => void;
+  onValidateDay: (ds: string, record: DayFocusData, mode?: 'all' | 'wind_only') => void;
   onClearValidation?: (ds: string) => void;
   onToggleSlotValidation?: (record: DayFocusData, slot: SessionItem) => void;
+  onSetSlotDecision?: (
+    record: DayFocusData,
+    slot: SessionItem,
+    decision: 'valid' | 'rejected' | 'pending',
+    reason?: string
+  ) => void;
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
@@ -54,6 +60,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onValidateDay,
   onClearValidation,
   onToggleSlotValidation,
+  onSetSlotDecision,
   onSelectDayInCalendar,
   customSlotsMap = {},
   onOpenPrintAgenda,
@@ -83,7 +90,12 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     const t = `${lc(x.a, f.y, f.m, f.d)} - ${lc(x.b, f.y, f.m, f.d)}`;
     const slotKey = kOf(x);
     const valRecord = validations[f.ds];
-    const isSlotValidated = valRecord?.items?.some(item => item.k === slotKey) ?? false;
+    const valItem = valRecord?.items?.find(item => item.k === slotKey);
+    const decision: 'valid' | 'rejected' | 'pending' = valItem
+      ? valItem.status === 'rejected'
+        ? 'rejected'
+        : 'valid'
+      : 'pending';
 
     let chip = <span className="fchip">VENT ?</span>;
     if (x.isCustom) {
@@ -108,30 +120,119 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         } au ${x.side} · à ta discrétion`
       : x.txt || '';
 
-    const rowClass = ['fs', x.opt ? 'fo' : '', x.past ? 'fp' : '']
+    const rowClass = [
+      'fs',
+      x.opt ? 'fo' : '',
+      x.past ? 'fp' : '',
+    ]
       .filter(Boolean)
       .join(' ');
 
     return (
-      <div key={key} className={rowClass}>
+      <div
+        key={key}
+        className={rowClass}
+        style={{
+          opacity: decision === 'rejected' ? 0.7 : 1,
+          background: decision === 'rejected' ? '#fafafa' : undefined,
+        }}
+      >
         <div>
-          <b>{t}</b>
+          <b style={{ textDecoration: decision === 'rejected' ? 'line-through' : 'none' }}>{t}</b>
           <small>{sub + (x.past ? ' · passée' : '')}</small>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           {chip}
-          {onToggleSlotValidation && (
-            <button
-              type="button"
-              className={`slot-toggle-btn ${isSlotValidated ? 'val-on' : 'val-off'}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSlotValidation(f, x);
-              }}
-              title={isSlotValidated ? 'Cliquer pour retirer la validation de ce créneau' : 'Cliquer pour valider individuellement ce créneau'}
-            >
-              {isSlotValidated ? '✓ Validé' : '+ Valider'}
-            </button>
+
+          {onSetSlotDecision ? (
+            <div className="slot-decision-group" onClick={e => e.stopPropagation()}>
+              {decision === 'valid' && (
+                <>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#16a34a', background: '#dcfce7', padding: '3px 7px', borderRadius: '4px' }}>
+                    ✓ VALIDÉ
+                  </span>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn"
+                    style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                    onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
+                    title="Refuser / annuler ce créneau"
+                  >
+                    ✕ Refuser
+                  </button>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn neutral"
+                    onClick={() => onSetSlotDecision(f, x, 'pending')}
+                    title="Remettre en attente"
+                  >
+                    ↩
+                  </button>
+                </>
+              )}
+
+              {decision === 'rejected' && (
+                <>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#dc2626', background: '#fee2e2', padding: '3px 7px', borderRadius: '4px' }}>
+                    ✕ REFUSÉ {valItem?.rejectReason ? `· ${valItem.rejectReason}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn"
+                    style={{ color: '#16a34a', borderColor: '#86efac' }}
+                    onClick={() => onSetSlotDecision(f, x, 'valid')}
+                    title="Valider et maintenir ce créneau"
+                  >
+                    ✓ Valider
+                  </button>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn neutral"
+                    onClick={() => onSetSlotDecision(f, x, 'pending')}
+                    title="Remettre en attente"
+                  >
+                    ↩
+                  </button>
+                </>
+              )}
+
+              {decision === 'pending' && (
+                <>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn"
+                    style={{ background: '#f0fdf4', color: '#15803d', borderColor: '#86efac' }}
+                    onClick={() => onSetSlotDecision(f, x, 'valid')}
+                    title="Valider ce créneau"
+                  >
+                    ✓ Valider
+                  </button>
+                  <button
+                    type="button"
+                    className="slot-toggle-btn"
+                    style={{ background: '#fef2f2', color: '#b91c1c', borderColor: '#fca5a5' }}
+                    onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
+                    title="Refuser ce créneau"
+                  >
+                    ✕ Refuser
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            onToggleSlotValidation && (
+              <button
+                type="button"
+                className={`slot-toggle-btn ${decision === 'valid' ? 'val-on' : 'val-off'}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleSlotValidation(f, x);
+                }}
+                title={decision === 'valid' ? 'Cliquer pour retirer' : 'Cliquer pour valider'}
+              >
+                {decision === 'valid' ? '✓ Validé' : '+ Valider'}
+              </button>
+            )
           )}
         </div>
       </div>
@@ -141,24 +242,20 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const renderVBox = (f: DayFocusData) => {
     const v = vstat(f, validations);
     let msg: React.ReactNode = null;
-    let btnText = '✓ Tout valider';
 
     if (v.st === 'none') {
       msg = <>Proposition non encore validée pour cette journée ({f.list.length} créneau{f.list.length > 1 ? 'x' : ''} disponibles).</>;
-      btnText = '✓ Tout valider';
     } else if (v.st === 'ok') {
       msg = (
         <>
-          ✅ <b>{v.valCount} sur {v.totalCount} créneau{v.totalCount > 1 ? 'x' : ''} validé{v.valCount > 1 ? 's' : ''}</b> le {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
-          {v.isPartial && <span style={{ opacity: 0.9 }}> (validation partielle)</span>}
+          ✅ <b>{v.valCount} validé{v.valCount > 1 ? 's' : ''}{v.rejCount ? ` · ${v.rejCount} refusé${v.rejCount > 1 ? 's' : ''}` : ''}</b> (sur {v.totalCount}) le {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
+          {v.isPartial && <span style={{ opacity: 0.9 }}> (sélection partielle)</span>}
         </>
       );
-      btnText = '✓ Tout valider';
     } else {
-      btnText = '🔄 Tout revalider';
       msg = (
         <>
-          ⚠️ <b>Prévisions modifiées depuis ta validation</b> du{' '}
+          ⚠️ <b>Prévisions modifiées depuis ton enregistrement</b> du{' '}
           {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
           {v.add.length > 0 && (
             <>
@@ -194,10 +291,19 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           <button
             className="fbtn"
             type="button"
-            onClick={() => onValidateDay(f.ds, f)}
-            title="Valider l'ensemble des créneaux de cette journée"
+            style={{ background: '#0284c7', color: '#fff' }}
+            onClick={() => onValidateDay(f.ds, f, 'wind_only')}
+            title="Valider uniquement les créneaux vent OK et refuser les hors vent"
           >
-            {btnText}
+            ⚡ Valider si Vent OK
+          </button>
+          <button
+            className="fbtn"
+            type="button"
+            onClick={() => onValidateDay(f.ds, f, 'all')}
+            title="Valider l'ensemble des créneaux de cette journée sans exception"
+          >
+            ✓ Tout valider
           </button>
           {v.st !== 'none' && onClearValidation && (
             <button
@@ -211,7 +317,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               onClick={() => onClearValidation(f.ds)}
               title="Supprimer la validation pour cette journée"
             >
-              ✕ Tout dévalider
+              ✕ Réinitialiser
             </button>
           )}
         </div>
