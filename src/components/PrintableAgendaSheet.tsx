@@ -1183,6 +1183,35 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                                   })}
                                 </tbody>
                               </table>
+
+                              {/* POINTAGE & NOTES DE LA SÉANCE */}
+                              <div
+                                style={{
+                                  borderTop: '1px solid #cbd5e1',
+                                  background: '#f8fafc',
+                                  padding: '6px 10px',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  flexWrap: 'wrap',
+                                  gap: '8px',
+                                  fontSize: '0.72rem',
+                                  color: '#334155',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                                    🏁 Pointage séance ({s.startStr}–{s.endStr}) :
+                                  </span>
+                                  <span>Chars : <strong>____</strong> (Mono : ___ · Bi : ___)</span>
+                                  <span>· Participants : <strong>____</strong></span>
+                                  <span>· Encaissé séance : <strong>______ €</strong></span>
+                                </div>
+                                <div style={{ flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontWeight: 700, color: '#475569' }}>Voiles & Notes :</span>
+                                  <span style={{ flex: 1, borderBottom: '1px dotted #94a3b8', minWidth: '100px', display: 'inline-block' }}>&nbsp;</span>
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1422,20 +1451,40 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           </div>
                         )}
 
-                        {/* Zone d'émargement pour agenda papier si non refusé */}
+                        {/* Zone d'émargement et inscriptions après chaque séance */}
                         {includeNotesBox && !s.isRejected && (
-                          <div style={{ marginTop: '4px', paddingTop: '3px', borderTop: '1px dotted #cbd5e1', fontSize: '0.6rem', color: '#475569', lineHeight: 1.35 }}>
-                            <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.62rem' }}>
-                              Nom : ___________________________
+                          <div style={{ marginTop: '5px', paddingTop: '4px', borderTop: '1px dotted #94a3b8', fontSize: '0.62rem', color: '#334155', lineHeight: 1.35 }}>
+                            {/* Ligne 1 */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: 700, color: '#0f172a' }}>1. Nom : __________________</span>
+                              <span>Chars (M/Bi) : ____</span>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
-                              <span>Chars (M/Bi) : _______</span>
-                              <span>Âges : _____</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
-                              <span>Tél : _________________</span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', color: '#64748b', marginTop: '1px' }}>
+                              <span>Âges : ____ · Tél : _________________</span>
                               <span>Règlt : _____</span>
                             </div>
+
+                            {/* Ligne 2 */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px', paddingTop: '2px', borderTop: '1px dashed #e2e8f0' }}>
+                              <span style={{ fontWeight: 700, color: '#0f172a' }}>2. Nom : __________________</span>
+                              <span>Chars (M/Bi) : ____</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', color: '#64748b', marginTop: '1px' }}>
+                              <span>Âges : ____ · Tél : _________________</span>
+                              <span>Règlt : _____</span>
+                            </div>
+
+                            {/* Pointage séance */}
+                            <div style={{ marginTop: '3px', paddingTop: '2px', borderTop: '1px dotted #cbd5e1', fontSize: '0.58rem', color: '#0f172a', fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                              <span>🏁 Total Chars : ____ (M:__ Bi:__)</span>
+                              <span>Encaissé : _____ €</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {includeNotesBox && s.isRejected && (
+                          <div style={{ marginTop: '4px', paddingTop: '3px', borderTop: '1px dotted #fca5a5', fontSize: '0.58rem', color: '#991b1b' }}>
+                            Notes / Suivi reports : ___________________________
                           </div>
                         )}
 
@@ -1486,10 +1535,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   )}
                 </div>
 
-                {/* Espace notes en bas de bandelette */}
+                {/* Espace notes / bilan en bas de bandelette */}
                 {includeNotesBox && (
-                  <div style={{ marginTop: '8px', paddingTop: '4px', borderTop: '1px solid #eee', fontSize: '0.6rem', color: '#888' }}>
-                    Notes : ___________________________
+                  <div style={{ marginTop: '8px', paddingTop: '4px', borderTop: '1px solid #333', fontSize: '0.62rem', color: '#333' }}>
+                    <div style={{ fontWeight: 800 }}>🏁 Bilan journée :</div>
+                    <div>Total chars sortis : ______ · Total caisse : ______ €</div>
                   </div>
                 )}
               </div>
