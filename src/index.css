@@ -839,6 +839,7 @@ td.n {
 
   .nop,
   .noprint,
+  .print-hide,
   .cal,
   .tabs,
   .print-toolbar,
@@ -875,6 +876,23 @@ td.n {
     page-break-inside: avoid !important;
     box-shadow: none !important;
     border-color: #333 !important;
+  }
+
+  .agenda-daily-page {
+    border: 1.5px solid #000 !important;
+    box-shadow: none !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    break-after: page !important;
+    page-break-after: always !important;
+    margin-bottom: 0 !important;
+    padding: 10mm 8mm !important;
+  }
+
+  .agenda-daily-input {
+    border: none !important;
+    background: transparent !important;
+    color: #000 !important;
   }
 
   .print-cut-line {

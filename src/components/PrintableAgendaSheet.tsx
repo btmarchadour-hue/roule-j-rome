@@ -23,6 +23,7 @@ import {
   toU,
   windAt,
 } from '../utils/tides';
+import { getFrenchHolidayInfo, HolidayInfo } from '../utils/frenchHolidays';
 
 interface PrintableAgendaSheetProps {
   settings: AppSettings;
@@ -46,8 +47,8 @@ interface PrintableAgendaSheetProps {
 }
 
 type RangeOption = '5days' | 'week' | 'month' | 'selected' | 'custom' | 'all';
-type LayoutOption = 'strips' | 'cards' | 'table';
-type FilterOption = 'validated' | 'all' | 'valid_or_pending';
+export type LayoutOption = 'agenda' | 'strips' | 'cards' | 'table';
+export type FilterOption = 'validated' | 'validated_only' | 'all' | 'rejected_only';
 
 interface DayPrintData {
   ds: string;
@@ -59,6 +60,9 @@ interface DayPrintData {
   bmTimeStr: string;
   bmHeight: number | null;
   pmInfo: string;
+  pmTimeStr: string;
+  pmHeight: number | null;
+  holiday: HolidayInfo;
   sunRise: string;
   sunSet: string;
   isNear5Days: boolean;
@@ -100,7 +104,38 @@ interface DayPrintData {
       waveDir: string | null;
     } | null;
   }[];
+  rawSlots: {
+    slot: SessionItem;
+    key: string;
+    startStr: string;
+    endStr: string;
+    status: 'valid' | 'rejected' | 'pending';
+    rejectReason?: string;
+    isValidated: boolean;
+    isRejected: boolean;
+    hStart: number | null;
+    hEnd: number | null;
+    trend: 'down' | 'up' | 'flat';
+    weather: {
+      windKts: number | null;
+      gustKts: number | null;
+      dir: string;
+      temp: number | null;
+      cond: string;
+      waveH: number | null;
+      wavePeriod: number | null;
+      waveDir: string | null;
+    } | null;
+  }[];
   focusData: DayFocusData;
+}
+
+export interface AgendaBookingItem {
+  name: string;
+  chars: string;
+  ages: string;
+  phone: string;
+  payment: string;
 }
 
 export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
@@ -115,11 +150,51 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   selectedDate,
   onSelectDate,
   onValidateDay,
+  onToggleSlotValidation,
+  onSetSlotDecision,
 }) => {
   const [rangeMode, setRangeMode] = useState<RangeOption>('5days');
-  const [layoutMode, setLayoutMode] = useState<LayoutOption>('strips');
+  const [layoutMode, setLayoutMode] = useState<LayoutOption>('agenda');
   const [filterMode, setFilterMode] = useState<FilterOption>('validated');
+  const [showRejected, setShowRejected] = useState<boolean>(true);
   const [includeNotesBox, setIncludeNotesBox] = useState<boolean>(true);
+
+  // Inscriptions & réservations terrain (mémorisation locale)
+  const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>(() => {
+    try {
+      const saved = localStorage.getItem('char_agenda_bookings_v2');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const getBooking = (slotKey: string, lineIndex: number): AgendaBookingItem => {
+    const list = bookingsMap[slotKey] || [];
+    return list[lineIndex] || { name: '', chars: '', ages: '', phone: '', payment: '' };
+  };
+
+  const updateBooking = (
+    slotKey: string,
+    lineIndex: number,
+    field: keyof AgendaBookingItem,
+    value: string
+  ) => {
+    setBookingsMap(prev => {
+      const list = [...(prev[slotKey] || [])];
+      while (list.length <= lineIndex) {
+        list.push({ name: '', chars: '', ages: '', phone: '', payment: '' });
+      }
+      list[lineIndex] = { ...list[lineIndex], [field]: value };
+      const next = { ...prev, [slotKey]: list };
+      try {
+        localStorage.setItem('char_agenda_bookings_v2', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   const todayStr = useMemo(() => tdy(), []);
   const allAvailableDates = useMemo(() => DATA.map(d => d[0]), []);
@@ -206,6 +281,12 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const bmTimeStr = mainBm ? lc(mainBm.t, y, m, d) : '—';
       const bmHeight = mainBm ? mainBm.h : null;
 
+      const mainPm = pmList[0];
+      const pmTimeStr = mainPm ? lc(mainPm.t, y, m, d) : '—';
+      const pmHeight = mainPm ? mainPm.h : null;
+
+      const holiday = getFrenchHolidayInfo(ds);
+
       // Sunlight
       const sun = sunInfo(y, m, d, settings.lum, settings.lmg);
 
@@ -255,14 +336,28 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const rawSlots = focus.list.map(slot => {
         const key = kOf(slot);
         const valItem = valRecord?.items?.find(it => it.k === key);
-        const status: 'valid' | 'rejected' | 'pending' = valItem
-          ? valItem.status === 'rejected'
-            ? 'rejected'
-            : 'valid'
-          : 'pending';
+
+        let status: 'valid' | 'rejected' | 'pending';
+        let rejectReason: string | undefined = valItem?.rejectReason;
+
+        if (valItem) {
+          status = valItem.status === 'rejected' ? 'rejected' : 'valid';
+        } else if (slot.ok === false) {
+          // Vent hors plage selon les critères (vitesse max dépassée, rafales)
+          status = 'rejected';
+          const gStr = slot.st?.g ? `, raf. ${Math.round(slot.st.g)} nds` : '';
+          const vStr = slot.st ? `${Math.round(slot.st.lo)}–${Math.round(slot.st.hi)} nds` : '';
+          rejectReason = `Vent hors plage ${vStr ? `(${vStr}${gStr})` : 'défavorable'}`.trim();
+        } else {
+          status = 'pending';
+        }
+
         const isValidated = status === 'valid';
         const isRejected = status === 'rejected';
-        const rejectReason = valItem?.rejectReason;
+        if (isRejected && !rejectReason) {
+          rejectReason = slot.ok === false ? 'Vent hors plage' : 'Séance refusée';
+        }
+
         const startStr = lc(slot.a, y, m, d);
         const endStr = lc(slot.b, y, m, d);
 
@@ -315,12 +410,21 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       });
 
       // Filter slots according to user filter
-      const filteredSlots =
-        filterMode === 'validated'
-          ? rawSlots.filter(s => s.isValidated)
-          : filterMode === 'valid_or_pending'
-          ? rawSlots.filter(s => !s.isRejected)
-          : rawSlots;
+      const filteredSlots = rawSlots.filter(s => {
+        if (s.isRejected) {
+          if (!showRejected) return false;
+          if (filterMode === 'validated_only') return false;
+          return true; // Included in 'validated' (decisions), 'all', and 'rejected_only'
+        }
+        if (filterMode === 'rejected_only') {
+          return false;
+        }
+        if (filterMode === 'validated' || filterMode === 'validated_only') {
+          return s.isValidated;
+        }
+        // 'all' includes pending as well
+        return true;
+      });
 
       return {
         ds,
@@ -332,11 +436,15 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
         bmTimeStr,
         bmHeight,
         pmInfo,
+        pmTimeStr,
+        pmHeight,
+        holiday,
         sunRise: sun.lev,
         sunSet: sun.cou,
         isNear5Days,
         dayWeather,
         slots: filteredSlots,
+        rawSlots,
         focusData: focus,
       };
     });
@@ -353,12 +461,17 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     customSlotsMap,
     validations,
     filterMode,
+    showRejected,
     EX,
   ]);
 
-  // Total validated slots in the current view
+  // Total validated & rejected slots in the current view
   const totalSlotsCount = useMemo(() => {
-    return daysData.reduce((acc, d) => acc + d.slots.length, 0);
+    return daysData.reduce((acc, d) => acc + d.slots.filter(s => s.isValidated).length, 0);
+  }, [daysData]);
+
+  const totalRejectedSlotsCount = useMemo(() => {
+    return daysData.reduce((acc, d) => acc + d.slots.filter(s => s.isRejected).length, 0);
   }, [daysData]);
 
   const handlePrint = () => {
@@ -419,6 +532,15 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
               Période à imprimer
             </label>
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`cal-nav-btn ${rangeMode === 'selected' ? 'on' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
+                onClick={() => setRangeMode('selected')}
+                title="Imprimer uniquement la journée sélectionnée"
+              >
+                🎯 Jour ({selectedDate})
+              </button>
               <button
                 type="button"
                 className={`cal-nav-btn ${rangeMode === '5days' ? 'on' : ''}`}
@@ -504,24 +626,52 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
               Séances affichées
             </label>
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                className={`cal-nav-btn ${filterMode === 'validated' ? 'on' : ''}`}
+                className={`cal-nav-btn ${filterMode === 'validated' && showRejected ? 'on' : ''}`}
                 style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setFilterMode('validated')}
+                onClick={() => {
+                  setFilterMode('validated');
+                  setShowRejected(true);
+                }}
+                title="Affiche les décisions prises : séances validées (vert) et séances refusées (rouge avec motif)"
               >
-                ✓ Validées uniquement
+                ✓ Validées & Refusées
+              </button>
+              <button
+                type="button"
+                className={`cal-nav-btn ${filterMode === 'validated_only' || (filterMode === 'validated' && !showRejected) ? 'on' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
+                onClick={() => {
+                  setFilterMode('validated_only');
+                  setShowRejected(false);
+                }}
+                title="Affiche uniquement les séances validées"
+              >
+                Validées seules
               </button>
               <button
                 type="button"
                 className={`cal-nav-btn ${filterMode === 'all' ? 'on' : ''}`}
                 style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setFilterMode('all')}
+                onClick={() => {
+                  setFilterMode('all');
+                  setShowRejected(true);
+                }}
+                title="Toutes les séances (y compris créneaux en attente)"
               >
-                Toutes les séances
+                Toutes (avec en attente)
               </button>
             </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.73rem', cursor: 'pointer', marginTop: '6px', color: '#b91c1c', fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                checked={showRejected}
+                onChange={e => setShowRejected(e.target.checked)}
+              />
+              <span>⛔ Indiquer clairement les refus sur l'étiquette</span>
+            </label>
           </div>
 
           {/* Format mise en page */}
@@ -529,7 +679,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
               Format de découpe / collage
             </label>
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`cal-nav-btn ${layoutMode === 'agenda' ? 'on' : ''}`}
+                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px', fontWeight: layoutMode === 'agenda' ? 900 : 500 }}
+                onClick={() => setLayoutMode('agenda')}
+                title="Page Agenda Quotidien type carnet de bord : Marées manuscrites, Coeff, Vacances scolaires, et tableau spacieux pour Noms, Chars, Tél et Âges"
+              >
+                📖 Page Agenda Quotidien (Carnet & Inscriptions)
+              </button>
               <button
                 type="button"
                 className={`cal-nav-btn ${layoutMode === 'strips' ? 'on' : ''}`}
@@ -596,14 +755,17 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 margin: 0,
                 padding: '3px 8px',
                 fontSize: '0.72rem',
-                background: filterMode === 'validated' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
+                background: filterMode === 'validated' && showRejected ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
                 color: '#111',
-                fontWeight: filterMode === 'validated' ? 800 : 500,
+                fontWeight: filterMode === 'validated' && showRejected ? 800 : 500,
               }}
-              onClick={() => setFilterMode('validated')}
-              title="Uniquement les séances marquées ✓ Validées"
+              onClick={() => {
+                setFilterMode('validated');
+                setShowRejected(true);
+              }}
+              title="Affiche toutes les décisions : séances validées et séances refusées (avec motif clair)"
             >
-              ✓ Validées seuls
+              ✓ Décisions (Validées & Refusées)
             </button>
             <button
               type="button"
@@ -612,14 +774,17 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 margin: 0,
                 padding: '3px 8px',
                 fontSize: '0.72rem',
-                background: filterMode === 'valid_or_pending' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
+                background: filterMode === 'validated_only' || (filterMode === 'validated' && !showRejected) ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
                 color: '#111',
-                fontWeight: filterMode === 'valid_or_pending' ? 800 : 500,
+                fontWeight: filterMode === 'validated_only' ? 800 : 500,
               }}
-              onClick={() => setFilterMode('valid_or_pending')}
-              title="Séances validées et séances en attente (masque les séances refusées)"
+              onClick={() => {
+                setFilterMode('validated_only');
+                setShowRejected(false);
+              }}
+              title="Uniquement les séances validées (masque les refus)"
             >
-              ✓ + ⏳ Validées & Attente
+              Validées seules
             </button>
             <button
               type="button"
@@ -632,8 +797,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 color: '#111',
                 fontWeight: filterMode === 'all' ? 800 : 500,
               }}
-              onClick={() => setFilterMode('all')}
-              title="Toutes les séances calculées, y compris celles refusées (affichées barrées avec motif)"
+              onClick={() => {
+                setFilterMode('all');
+                setShowRejected(true);
+              }}
+              title="Toutes les séances calculées, y compris créneaux en attente"
             >
               📋 Tout imprimer
             </button>
@@ -690,10 +858,365 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
             </div>
             <div style={{ textAlign: 'right', fontSize: '0.74rem', color: '#444' }}>
               <div>Édition du {new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-              <div><strong>{totalSlotsCount} séances</strong> · Seuil roulage : <strong>{settings.L.toFixed(2)} m</strong></div>
+              <div>
+                <strong>{totalSlotsCount} séance{totalSlotsCount > 1 ? 's' : ''} validée{totalSlotsCount > 1 ? 's' : ''}</strong>
+                {totalRejectedSlotsCount > 0 && <span style={{ color: '#dc2626', fontWeight: 800 }}> · {totalRejectedSlotsCount} refusée{totalRejectedSlotsCount > 1 ? 's' : ''}</span>}
+                <span> · Seuil roulage : <strong>{settings.L.toFixed(2)} m</strong></span>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* VIEW 0: PAGE AGENDA QUOTIDIEN (Réplique & Optimisation Carnet de Bord / Inscriptions Terrain) */}
+        {layoutMode === 'agenda' && (
+          <div className="agenda-daily-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {daysData.map(day => (
+              <div
+                key={day.ds}
+                className="agenda-daily-page"
+                style={{
+                  background: '#fff',
+                  border: '2px solid #0f172a',
+                  borderRadius: '10px',
+                  padding: '16px 20px',
+                  color: '#0f172a',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
+                  breakInside: 'avoid',
+                  pageBreakInside: 'avoid',
+                  pageBreakAfter: 'always',
+                  breakAfter: 'page',
+                }}
+              >
+                {/* 1. EN-TÊTE : DATE, SEMAINE ET VACANCES SCOLAIRES */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #0f172a', paddingBottom: '10px', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <div style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>
+                      Char à Voile du Bout du Monde · Plage de Lestrevet · Agenda de Bord
+                    </div>
+                    <h1 style={{ margin: '2px 0 0', fontSize: '1.5rem', fontWeight: 900, textTransform: 'capitalize', color: '#0f172a', letterSpacing: '-0.01em' }}>
+                      {day.fullDateStr}
+                    </h1>
+                    <div style={{ fontSize: '0.76rem', color: '#475569', fontWeight: 600, marginTop: '2px' }}>
+                      Semaine n° {day.holiday.weekNumber} · Édition du {new Date().toLocaleDateString('fr-FR')}
+                    </div>
+                  </div>
+
+                  {/* INDICATEUR VACANCES SCOLAIRES (Inspiré des 3 pastilles de couleur de l'agenda papier !) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    {day.holiday.isHoliday ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fef2f2', border: '1.5px solid #dc2626', padding: '6px 12px', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '1.25rem' }}>🎒</span>
+                        <div style={{ textAlign: 'left' }}>
+                          <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#b91c1c', textTransform: 'uppercase' }}>
+                            {day.holiday.holidayName}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#7f1d1d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{day.holiday.isZoneB ? '★ Bretagne (Zone B)' : 'Zones :'}</span>
+                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#94a3b8' }}>Zone A</span>
+                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#94a3b8' }}>Zone B</span>
+                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#94a3b8' }}>Zone C</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1.5px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', color: '#475569' }}>
+                        <span>🏫</span>
+                        <span style={{ fontWeight: 800 }}>Période scolaire (Hors vacances)</span>
+                      </div>
+                    )}
+
+                    {day.holiday.publicHolidayName && (
+                      <div style={{ background: '#fef3c7', color: '#92400e', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', border: '1px solid #fcd34d' }}>
+                        ⭐ Férié : {day.holiday.publicHolidayName}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. BLOC MARÉES MANUSCRIT DU JOUR (Inspiré de 'Bn 11h15 · Pn 17h25 · (100)' manuscrit) */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '8px 12px', marginBottom: '14px' }}>
+                  {/* Basse Mer */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0284c7', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
+                      BM
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Basse Mer</div>
+                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
+                        {day.bmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.bmHeight != null ? `${day.bmHeight.toFixed(2)} m` : '—'})</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pleine Mer */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0369a1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
+                      PM
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Pleine Mer</div>
+                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
+                        {day.pmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.pmHeight != null ? `${day.pmHeight.toFixed(2)} m` : '—'})</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Coefficient de marée dans son macaron rond entouré comme sur la photo ! */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ border: '2.5px solid #0f172a', width: '38px', height: '38px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '1.05rem', background: '#fff', color: '#0f172a', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)' }}>
+                      {day.coeff}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Coefficient</div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a' }}>
+                        {day.coeff >= 90 ? 'Grande Marée' : day.coeff >= 70 ? 'Marée Moyenne +' : 'Morte Eau'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Soleil & Seuil */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', fontSize: '0.72rem', color: '#334155' }}>
+                    <div>☀️ Soleil : <strong>{day.sunRise} – {day.sunSet}</strong></div>
+                    <div>🏖️ Seuil roulage : <strong>{settings.L.toFixed(2)} m</strong></div>
+                  </div>
+                </div>
+
+                {/* 3. MÉTÉO & HOULE SI PROCHE 5 JOURS */}
+                {day.isNear5Days && day.dayWeather && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '6px 12px', marginBottom: '14px', fontSize: '0.74rem' }}>
+                    <div style={{ fontWeight: 800, color: '#166534' }}>
+                      💨 Vent : <strong>{day.dayWeather.windRange}</strong> {day.dayWeather.gustMax ? `(rafales max ${day.dayWeather.gustMax} nds)` : ''} · Secteur <strong>{day.dayWeather.dirComp}</strong> ({day.dayWeather.dirDeg}°)
+                    </div>
+                    {day.dayWeather.waveH != null && (
+                      <div style={{ color: '#0284c7', fontWeight: 700 }}>
+                        🌊 Houle : <strong>{day.dayWeather.waveH} m</strong> (période {day.dayWeather.wavePeriod}s {day.dayWeather.waveDirComp || ''})
+                      </div>
+                    )}
+                    <div style={{ color: '#475569' }}>
+                      🌡️ {day.dayWeather.temp != null ? `${day.dayWeather.temp}°C` : ''} · {day.dayWeather.cloudText}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. LISTE DES CRÉNEAUX DE LA JOURNÉE AVEC GRILLE D'INSCRIPTION */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {day.slots.length === 0 ? (
+                    day.rawSlots.some(s => s.isRejected) ? (
+                      <div style={{ padding: '16px', background: '#fef2f2', border: '2px dashed #dc2626', borderRadius: '8px', textAlign: 'center' }}>
+                        <div style={{ color: '#b91c1c', fontWeight: 900, fontSize: '0.9rem', marginBottom: '4px' }}>
+                          ⛔ AUCUNE SÉANCE DISPONIBLE AUJOURD'HUI — CRÉNEAUX REFUSÉS
+                        </div>
+                        <div style={{ color: '#7f1d1d', fontSize: '0.78rem', fontWeight: 700 }}>
+                          {day.rawSlots.filter(s => s.isRejected).map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`).join(' · ')}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', color: '#64748b', fontStyle: 'italic', padding: '24px 0', fontSize: '0.85rem' }}>
+                        Pas de séance calculable pour ce jour (contraintes marée / nuit).
+                      </div>
+                    )
+                  ) : (
+                    day.slots.map(s => {
+                      const slotStorageKey = `${day.ds}-${s.key}`;
+                      return (
+                        <div
+                          key={s.key}
+                          className="agenda-slot-section"
+                          style={{
+                            border: s.isRejected ? '2px solid #dc2626' : s.isValidated ? '2px solid #16a34a' : '1.5px solid #64748b',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            background: s.isRejected ? '#fff5f5' : '#fff',
+                          }}
+                        >
+                          {/* BANDEAU DU CRÉNEAU */}
+                          <div
+                            style={{
+                              background: s.isRejected ? '#fee2e2' : s.isValidated ? '#dcfce7' : '#f1f5f9',
+                              borderBottom: '1.5px solid',
+                              borderColor: s.isRejected ? '#fca5a5' : s.isValidated ? '#86efac' : '#cbd5e1',
+                              padding: '6px 12px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                            }}
+                          >
+                            {/* Heure encadrée comme sur la photo */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  background: s.isRejected ? '#dc2626' : s.isValidated ? '#15803d' : '#0f172a',
+                                  color: '#fff',
+                                  padding: '3px 10px',
+                                  borderRadius: '16px',
+                                  fontWeight: 900,
+                                  fontSize: '0.95rem',
+                                  letterSpacing: '0.02em',
+                                  textDecoration: s.isRejected ? 'line-through' : 'none',
+                                }}
+                              >
+                                {s.startStr} – {s.endStr}
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '0.68rem',
+                                  fontWeight: 900,
+                                  color: '#fff',
+                                  background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#64748b',
+                                  padding: '2px 7px',
+                                  borderRadius: '4px',
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ SÉANCE VALIDÉE' : 'EN ATTENTE'}
+                              </span>
+                              {s.isRejected && (
+                                <span style={{ fontSize: '0.72rem', color: '#b91c1c', fontWeight: 800 }}>
+                                  ⚠️ Motif : {s.rejectReason || 'Vent hors plage'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Hauteur d'eau début/fin et météo du créneau */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.75rem', fontWeight: 700 }}>
+                              <span style={{ color: '#0369a1', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px', border: '1px solid #bae6fd' }}>
+                                🌊 Début : <strong>{s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}</strong> {s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'} Fin : <strong>{s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}</strong>
+                              </span>
+                              {s.weather && (
+                                <span style={{ color: '#334155' }}>
+                                  💨 <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
+                                  {s.weather.waveH != null && ` · 🌊 ${s.weather.waveH} m`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* GRILLE D'INSCRIPTION : NOMS, CHARS, ÂGES, TÉLÉPHONE, RÈGLEMENT */}
+                          {s.isRejected ? (
+                            <div style={{ padding: '14px', textAlign: 'center', color: '#991b1b', background: '#fef2f2', fontStyle: 'italic', fontSize: '0.8rem', fontWeight: 700 }}>
+                              ⛔ Ce créneau est refusé / annulé pour conditions météo défavorables (aucune inscription).
+                            </div>
+                          ) : (
+                            <div style={{ padding: '4px 6px' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                                <thead>
+                                  <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    <th style={{ width: '28px', padding: '4px', textAlign: 'center' }}>N°</th>
+                                    <th style={{ width: '34%', padding: '4px 8px', textAlign: 'left' }}>1. Nom du client / Réservation</th>
+                                    <th style={{ width: '20%', padding: '4px 8px', textAlign: 'left' }}>2. Nombre de Chars (Mono / Bi)</th>
+                                    <th style={{ width: '14%', padding: '4px 8px', textAlign: 'left' }}>3. Âges</th>
+                                    <th style={{ width: '18%', padding: '4px 8px', textAlign: 'left' }}>4. Téléphone portable</th>
+                                    <th style={{ width: '14%', padding: '4px 8px', textAlign: 'left' }}>5. Règlement / Solde</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {[0, 1, 2, 3, 4].map(idx => {
+                                    const b = getBooking(slotStorageKey, idx);
+                                    return (
+                                      <tr
+                                        key={idx}
+                                        style={{
+                                          height: '32px',
+                                          borderBottom: '1px solid #e2e8f0',
+                                          background: idx % 2 === 0 ? '#fff' : '#fcfcfc',
+                                        }}
+                                      >
+                                        <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '0.72rem', borderRight: '1px solid #f1f5f9' }}>
+                                          {idx + 1}.
+                                        </td>
+                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                          <input
+                                            type="text"
+                                            className="agenda-daily-input"
+                                            placeholder="ex: Famille RAOULT"
+                                            value={b.name}
+                                            onChange={e => updateBooking(slotStorageKey, idx, 'name', e.target.value)}
+                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                          <input
+                                            type="text"
+                                            className="agenda-daily-input"
+                                            placeholder="ex: 2 biplaces"
+                                            value={b.chars}
+                                            onChange={e => updateBooking(slotStorageKey, idx, 'chars', e.target.value)}
+                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                          <input
+                                            type="text"
+                                            className="agenda-daily-input"
+                                            placeholder="ex: 6/8 ans"
+                                            value={b.ages}
+                                            onChange={e => updateBooking(slotStorageKey, idx, 'ages', e.target.value)}
+                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                          <input
+                                            type="text"
+                                            className="agenda-daily-input"
+                                            placeholder="ex: 07 65 70 43 89"
+                                            value={b.phone}
+                                            onChange={e => updateBooking(slotStorageKey, idx, 'phone', e.target.value)}
+                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '1px 6px' }}>
+                                          <input
+                                            type="text"
+                                            className="agenda-daily-input"
+                                            placeholder="ex: CB 70 €"
+                                            value={b.payment}
+                                            onChange={e => updateBooking(slotStorageKey, idx, 'payment', e.target.value)}
+                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                          />
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* 5. BAS DE PAGE JOURNALIER : POINTAGE & ENCAISSEMENTS */}
+                <div style={{ marginTop: '16px', paddingTop: '10px', borderTop: '2px solid #0f172a', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', fontSize: '0.75rem' }}>
+                  <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                      🏁 Pointage matériel & chars sortis :
+                    </div>
+                    <div style={{ color: '#475569', lineHeight: 1.6 }}>
+                      <div>[ ] Total Chars sortis : ________ (Mono : ____  ·  Bi : ____)</div>
+                      <div>[ ] Participants : ________ (Adultes : ____  ·  Enfants : ____)</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                      💶 Bilan des Encaissements du jour :
+                    </div>
+                    <div style={{ color: '#475569', lineHeight: 1.6 }}>
+                      <div>CB : ________ €  ·  Chèques : ________ €  ·  Espèces : ________ €  ·  ANCV : ________ €</div>
+                      <div>Observations terrain : _______________________________________________</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* VIEW 1: BANDELETTES AGENDA (Colonnes étroites ~65-75mm à découper et coller dans les colonnes d'un semainier) */}
         {layoutMode === 'strips' && (
@@ -722,12 +1245,24 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
                 {/* En-tête du jour */}
                 <div style={{ borderBottom: '1px solid #111', paddingBottom: '4px', marginBottom: '6px' }}>
-                  <div style={{ textTransform: 'uppercase', fontWeight: 900, fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ textTransform: 'uppercase', fontWeight: 900, fontSize: '0.78rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>{day.weekdayStr.slice(0, 4)}. {day.dateObj.getUTCDate()}</span>
                     <span style={{ background: '#111', color: '#fff', padding: '0 4px', borderRadius: '3px', fontSize: '0.68rem' }}>
                       C.{day.coeff}
                     </span>
                   </div>
+                  {day.holiday.isHoliday ? (
+                    <div style={{ fontSize: '0.58rem', fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '1px 4px', borderRadius: '3px', marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>🎒 {day.holiday.periodName || 'Vacances'}</span>
+                      <span style={{ fontSize: '0.54rem', opacity: 0.9 }}>
+                        {day.holiday.zones.includes('B') ? 'Zone B (Bretagne)' : day.holiday.zones.join('/')}
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.55rem', color: '#64748b', marginTop: '1px' }}>
+                      Période scolaire · Semaine {day.holiday.weekNumber}
+                    </div>
+                  )}
                   <div style={{ fontSize: '0.66rem', color: '#333', display: 'flex', justifyContent: 'space-between', marginTop: '2px', flexWrap: 'wrap', gap: '2px' }}>
                     <span>BM : <strong>{day.bmTimeStr}</strong> · Eau : <strong>{day.bmHeight != null ? `${day.bmHeight.toFixed(2)} m` : '—'}</strong></span>
                     <span>☀️ {day.sunRise}–{day.sunSet}</span>
@@ -757,37 +1292,115 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 {/* Liste des séances */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
                   {day.slots.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '12px 0' }}>
-                      {filterMode === 'validated' ? 'Aucun créneau validé' : 'Pas de séance possible'}
-                    </div>
+                    day.rawSlots.some(s => s.isRejected) ? (
+                      <div
+                        style={{
+                          border: '2px solid #dc2626',
+                          borderRadius: '4px',
+                          padding: '6px',
+                          background: '#fef2f2',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: '#b91c1c',
+                            fontWeight: 900,
+                            fontSize: '0.74rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <span>⛔</span> <span>SÉANCE(S) REFUSÉE(S)</span>
+                        </div>
+                        <div style={{ fontSize: '0.64rem', color: '#991b1b', marginTop: '3px', fontWeight: 700, lineHeight: 1.3 }}>
+                          {day.rawSlots
+                            .filter(s => s.isRejected)
+                            .map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`)
+                            .join(' · ')}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '12px 0', fontSize: '0.68rem' }}>
+                        {filterMode === 'validated' || filterMode === 'validated_only' ? 'Aucun créneau validé' : 'Pas de séance possible'}
+                      </div>
+                    )
                   ) : (
-                    day.slots.map((s, idx) => (
+                    day.slots.map(s => (
                       <div
                         key={s.key}
                         style={{
-                          border: s.isRejected ? '1px dashed #fca5a5' : '1px solid #bbb',
+                          border: s.isRejected ? '2px solid #dc2626' : s.isValidated ? '2px solid #16a34a' : '1px solid #999',
                           borderRadius: '4px',
-                          padding: '4px 6px',
-                          background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : '#fff',
-                          opacity: s.isRejected ? 0.75 : 1,
+                          padding: '5px 6px',
+                          background: s.isRejected ? '#fef2f2' : s.isValidated ? '#f0fdf4' : '#fff',
+                          color: '#111',
+                          opacity: 1,
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 900, fontSize: '0.8rem', color: '#111', textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                          <span
+                            style={{
+                              fontWeight: 900,
+                              fontSize: '0.82rem',
+                              color: s.isRejected ? '#991b1b' : '#111',
+                              textDecoration: s.isRejected ? 'line-through' : 'none',
+                            }}
+                          >
                             {s.startStr} – {s.endStr}
                           </span>
-                          <span style={{ fontSize: '0.6rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#888' }}>
-                            {s.isValidated ? '✓ VALIDÉ' : s.isRejected ? '✕ REFUSÉ' : 'EN ATTENTE'}
+                          <span
+                            style={{
+                              fontSize: '0.62rem',
+                              fontWeight: 900,
+                              color: '#fff',
+                              background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#6b7280',
+                              padding: '2px 5px',
+                              borderRadius: '3px',
+                              letterSpacing: '0.02em',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ VALIDÉ' : 'EN ATTENTE'}
                           </span>
                         </div>
-                        {s.isRejected && s.rejectReason && (
-                          <div style={{ fontSize: '0.58rem', color: '#b91c1c', fontStyle: 'italic', marginTop: '1px' }}>
-                            {s.rejectReason}
+
+                        {/* Motif clair de refus si séance refusée */}
+                        {s.isRejected && (
+                          <div
+                            style={{
+                              marginTop: '3px',
+                              padding: '3px 5px',
+                              background: '#fee2e2',
+                              borderLeft: '3px solid #dc2626',
+                              borderRadius: '2px',
+                              fontSize: '0.63rem',
+                              fontWeight: 800,
+                              color: '#991b1b',
+                              lineHeight: 1.25,
+                            }}
+                          >
+                            ⚠️ Motif : {s.rejectReason || 'Vent hors plage / Conditions défavorables'}
                           </div>
                         )}
 
                         {/* Hauteur d'eau précise en début et fin */}
-                        <div style={{ margin: '3px 0', fontSize: '0.67rem', color: '#0369a1', fontWeight: 600, display: 'flex', justifyContent: 'space-between', background: '#e0f2fe', padding: '2px 4px', borderRadius: '3px' }}>
+                        <div
+                          style={{
+                            margin: '3px 0',
+                            fontSize: '0.66rem',
+                            color: '#0369a1',
+                            fontWeight: 700,
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            background: '#e0f2fe',
+                            padding: '2px 4px',
+                            borderRadius: '3px',
+                            border: '1px solid #bae6fd',
+                          }}
+                        >
                           <span>🌊 Début : <strong>{s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}</strong></span>
                           <span>{s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'}</span>
                           <span>Fin : <strong>{s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}</strong></span>
@@ -795,9 +1408,9 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
                         {/* Météo et houle spécifiques du créneau */}
                         {s.weather && (
-                          <div style={{ fontSize: '0.62rem', color: '#4b5563', display: 'flex', flexDirection: 'column', gap: '1px', marginTop: '2px' }}>
+                          <div style={{ fontSize: '0.62rem', color: '#374151', display: 'flex', flexDirection: 'column', gap: '1px', marginTop: '2px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>💨 {s.weather.windKts} nds {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''}</span>
+                              <span>💨 <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''}</span>
                               <span style={{ fontWeight: 700 }}>{s.weather.dir}</span>
                             </div>
                             {s.weather.waveH != null && (
@@ -809,13 +1422,63 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           </div>
                         )}
 
-                        {/* Zone d'émargement pour agenda papier */}
-                        {includeNotesBox && (
-                          <div style={{ marginTop: '3px', paddingTop: '3px', borderTop: '1px dotted #ccc', fontSize: '0.6rem', color: '#666' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>[ ] _____ pers.</span>
-                              <span>Paiement : _____</span>
+                        {/* Zone d'émargement pour agenda papier si non refusé */}
+                        {includeNotesBox && !s.isRejected && (
+                          <div style={{ marginTop: '4px', paddingTop: '3px', borderTop: '1px dotted #cbd5e1', fontSize: '0.6rem', color: '#475569', lineHeight: 1.35 }}>
+                            <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.62rem' }}>
+                              Nom : ___________________________
                             </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
+                              <span>Chars (M/Bi) : _______</span>
+                              <span>Âges : _____</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1px' }}>
+                              <span>Tél : _________________</span>
+                              <span>Règlt : _____</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Bouton interactif pour modifier la décision à la volée (masqué à l'impression) */}
+                        {onSetSlotDecision && (
+                          <div className="print-hide nop" style={{ marginTop: '4px', paddingTop: '3px', borderTop: '1px dashed #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '4px' }}>
+                            {s.isRejected ? (
+                              <button
+                                type="button"
+                                onClick={() => onSetSlotDecision(day.focusData, s.slot, 'valid')}
+                                style={{
+                                  fontSize: '0.6rem',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  background: '#dcfce7',
+                                  color: '#16a34a',
+                                  border: '1px solid #86efac',
+                                  cursor: 'pointer',
+                                  fontWeight: 800,
+                                }}
+                                title="Passer cette séance en validée"
+                              >
+                                ✓ Valider la séance
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onSetSlotDecision(day.focusData, s.slot, 'rejected', s.slot.ok === false ? 'Vent hors plage' : 'Séance refusée')}
+                                style={{
+                                  fontSize: '0.6rem',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  background: '#fee2e2',
+                                  color: '#dc2626',
+                                  border: '1px solid #fca5a5',
+                                  cursor: 'pointer',
+                                  fontWeight: 800,
+                                }}
+                                title="Refuser cette séance"
+                              >
+                                ⛔ Refuser
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -851,10 +1514,21 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #111', paddingBottom: '4px', marginBottom: '8px' }}>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '0.9rem', textTransform: 'capitalize' }}>
-                      {day.fullDateStr}
-                    </h3>
-                    <div style={{ fontSize: '0.7rem', color: '#555' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: 0, fontSize: '0.9rem', textTransform: 'capitalize' }}>
+                        {day.fullDateStr}
+                      </h3>
+                      {day.holiday.isHoliday ? (
+                        <span style={{ fontSize: '0.62rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px' }}>
+                          🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zones.includes('B') ? 'Zone B Bretagne' : day.holiday.zones.join('/')})
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.62rem', fontWeight: 600, background: '#f1f5f9', color: '#64748b', padding: '1px 6px', borderRadius: '4px' }}>
+                          Période scolaire · Semaine {day.holiday.weekNumber}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#555', marginTop: '2px' }}>
                       Basse Mer : <strong>{day.bmInfo}</strong> · Pleine Mer : {day.pmInfo}
                     </div>
                   </div>
@@ -890,9 +1564,15 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
                 {/* Tableau des séances du jour */}
                 {day.slots.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '10px 0', fontSize: '0.76rem' }}>
-                    {filterMode === 'validated' ? 'Aucune séance validée pour ce jour' : 'Aucune séance calculable'}
-                  </div>
+                  day.rawSlots.some(s => s.isRejected) ? (
+                    <div style={{ padding: '8px 10px', background: '#fef2f2', border: '1.5px dashed #dc2626', borderRadius: '4px', textAlign: 'center', fontSize: '0.74rem', color: '#991b1b', fontWeight: 700 }}>
+                      ⛔ Séance(s) refusée(s) : {day.rawSlots.filter(s => s.isRejected).map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`).join(', ')}
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '10px 0', fontSize: '0.76rem' }}>
+                      {filterMode === 'validated' || filterMode === 'validated_only' ? 'Aucune séance validée pour ce jour' : 'Aucune séance calculable'}
+                    </div>
+                  )
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', margin: 0 }}>
                     <thead>
@@ -911,16 +1591,24 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           key={s.key}
                           style={{
                             borderBottom: '1px solid #ddd',
-                            background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : 'transparent',
-                            opacity: s.isRejected ? 0.75 : 1,
+                            background: s.isRejected ? '#fef2f2' : s.isValidated ? '#f0fdf4' : 'transparent',
+                            borderLeft: s.isRejected ? '3px solid #dc2626' : s.isValidated ? '3px solid #16a34a' : undefined,
+                            opacity: 1,
                           }}
                         >
                           <td style={{ padding: '5px 4px', fontWeight: 800, fontSize: '0.78rem' }}>
-                            <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                            <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none', color: s.isRejected ? '#991b1b' : 'inherit' }}>
                               {s.startStr} – {s.endStr}
                             </div>
-                            <div style={{ fontSize: '0.62rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#6b7280' }}>
-                              {s.isValidated ? '✓ Validé' : s.isRejected ? `✕ Refusé ${s.rejectReason ? `(${s.rejectReason})` : ''}` : 'En attente'}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                              <span style={{ fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#6b7280', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase' }}>
+                                {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ Validé' : 'En attente'}
+                              </span>
+                              {s.isRejected && s.rejectReason && (
+                                <span style={{ fontSize: '0.63rem', color: '#991b1b', fontWeight: 700 }}>
+                                  ⚠️ {s.rejectReason}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td style={{ padding: '5px 4px', color: '#0369a1', fontWeight: 700 }}>
@@ -947,8 +1635,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                             </td>
                           )}
                           {includeNotesBox && (
-                            <td style={{ padding: '5px 4px', color: '#999', fontSize: '0.66rem' }}>
-                              [ ] _____ pers.
+                            <td style={{ padding: '5px 4px', color: '#64748b', fontSize: '0.64rem' }}>
+                              Nom : ____________ | Chars : ____ | Âges : ____ | Tél : ____________
                             </td>
                           )}
                         </tr>
@@ -981,15 +1669,39 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
               <tbody>
                 {daysData.map(day => {
                   if (day.slots.length === 0) {
+                    if (day.rawSlots.some(s => s.isRejected)) {
+                      return (
+                        <tr key={day.ds} style={{ borderBottom: '1px solid #fca5a5', background: '#fef2f2', color: '#991b1b' }}>
+                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>
+                            {day.weekdayStr.slice(0, 3)} {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}
+                            {day.holiday.isHoliday && (
+                              <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800 }}>
+                                🎒 {day.holiday.periodName || 'Vacances'}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '6px 8px' }}>{day.coeff}</td>
+                          <td style={{ padding: '6px 8px' }}>{day.bmInfo}</td>
+                          <td colSpan={includeNotesBox ? 6 : 5} style={{ padding: '6px 8px', fontWeight: 700, fontSize: '0.74rem' }}>
+                            ⛔ Séance(s) refusée(s) : {day.rawSlots.filter(s => s.isRejected).map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`).join(', ')}
+                          </td>
+                        </tr>
+                      );
+                    }
                     return (
                       <tr key={day.ds} style={{ borderBottom: '1px solid #e5e7eb', color: '#888' }}>
                         <td style={{ padding: '6px 8px', fontWeight: 700 }}>
                           {day.weekdayStr.slice(0, 3)} {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}
+                          {day.holiday.isHoliday && (
+                            <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800 }}>
+                              🎒 {day.holiday.periodName || 'Vacances'}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '6px 8px' }}>{day.coeff}</td>
                         <td style={{ padding: '6px 8px' }}>{day.bmInfo}</td>
                         <td colSpan={includeNotesBox ? 6 : 5} style={{ padding: '6px 8px', fontStyle: 'italic' }}>
-                          {filterMode === 'validated' ? 'Aucune séance validée' : 'Pas de roulage'}
+                          {filterMode === 'validated' || filterMode === 'validated_only' ? 'Aucune séance validée' : 'Pas de roulage'}
                         </td>
                       </tr>
                     );
@@ -1000,15 +1712,24 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       key={`${day.ds}-${s.key}`}
                       style={{
                         borderBottom: idx === day.slots.length - 1 ? '2px solid #bbb' : '1px solid #e5e7eb',
-                        background: s.isValidated ? '#f0fdf4' : s.isRejected ? '#fef2f2' : idx % 2 === 0 ? '#fff' : '#fafafa',
-                        opacity: s.isRejected ? 0.75 : 1,
+                        background: s.isRejected ? '#fef2f2' : s.isValidated ? '#f0fdf4' : idx % 2 === 0 ? '#fff' : '#fafafa',
+                        opacity: 1,
                       }}
                     >
                       {idx === 0 && (
                         <>
                           <td rowSpan={day.slots.length} style={{ padding: '6px 8px', fontWeight: 800, verticalAlign: 'top', borderRight: '1px solid #eee' }}>
                             <div>{day.weekdayStr.slice(0, 4)}. {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}</div>
-                            <div style={{ fontSize: '0.64rem', color: '#666', fontWeight: 400 }}>☀️ {day.sunRise}–{day.sunSet}</div>
+                            {day.holiday.isHoliday ? (
+                              <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800, marginTop: '2px' }}>
+                                🎒 {day.holiday.periodName || 'Vacances'}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: 500, marginTop: '1px' }}>
+                                Semaine {day.holiday.weekNumber}
+                              </div>
+                            )}
+                            <div style={{ fontSize: '0.64rem', color: '#666', fontWeight: 400, marginTop: '1px' }}>☀️ {day.sunRise}–{day.sunSet}</div>
                           </td>
                           <td rowSpan={day.slots.length} style={{ padding: '6px 8px', verticalAlign: 'top', borderRight: '1px solid #eee' }}>
                             <span style={{ fontWeight: 800, background: '#111', color: '#fff', padding: '1px 5px', borderRadius: '3px', fontSize: '0.68rem' }}>
@@ -1021,12 +1742,19 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                         </>
                       )}
 
-                      <td style={{ padding: '6px 8px', fontWeight: 900, fontSize: '0.8rem' }}>
-                        <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 900, fontSize: '0.8rem', borderLeft: s.isRejected ? '3px solid #dc2626' : s.isValidated ? '3px solid #16a34a' : undefined }}>
+                        <div style={{ textDecoration: s.isRejected ? 'line-through' : 'none', color: s.isRejected ? '#991b1b' : 'inherit' }}>
                           {s.startStr} – {s.endStr}
                         </div>
-                        <div style={{ fontSize: '0.62rem', fontWeight: 800, color: s.isValidated ? '#15803d' : s.isRejected ? '#b91c1c' : '#6b7280' }}>
-                          {s.isValidated ? '✓ Validé' : s.isRejected ? `✕ Refusé ${s.rejectReason ? `(${s.rejectReason})` : ''}` : 'En attente'}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                          <span style={{ fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#6b7280', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase' }}>
+                            {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ Validé' : 'En attente'}
+                          </span>
+                          {s.isRejected && s.rejectReason && (
+                            <span style={{ fontSize: '0.63rem', color: '#991b1b', fontWeight: 700 }}>
+                              ⚠️ {s.rejectReason}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ padding: '6px 8px', color: '#0369a1', fontWeight: 800 }}>
@@ -1064,8 +1792,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                         )}
                       </td>
                       {includeNotesBox && (
-                        <td style={{ padding: '6px 8px', color: '#888', fontSize: '0.68rem' }}>
-                          [ ] _____ pers. | Noms : ____________
+                        <td style={{ padding: '6px 8px', color: '#64748b', fontSize: '0.68rem' }}>
+                          Nom : ____________ | Chars (M/Bi) : ____ | Âges : ____ | Tél : ____________
                         </td>
                       )}
                     </tr>
