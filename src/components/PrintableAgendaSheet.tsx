@@ -474,9 +474,108 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     return daysData.reduce((acc, d) => acc + d.slots.filter(s => s.isRejected).length, 0);
   }, [daysData]);
 
+  const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+
   const handlePrint = () => {
-    window.print();
+    try {
+      window.focus();
+      // Try direct native print
+      window.print();
+    } catch (err) {
+      console.warn('Native window.print() blocked by iframe sandbox:', err);
+      setShowPrintModal(true);
+    }
   };
+
+  const handleDownloadHtml = () => {
+    const sheetEl = document.querySelector('.printable-agenda-sheet');
+    if (!sheetEl) return;
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agenda Papier Char a Voile - Lestrevet (${selectedDate})</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #fff;
+      color: #0f172a;
+      margin: 0;
+      padding: 16px;
+    }
+    .print-hide, .nop, .noprint { display: none !important; }
+    table { width: 100%; border-collapse: collapse; }
+    .agenda-daily-page {
+      border: 1.5px solid #0f172a;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 24px;
+      page-break-after: always;
+      break-after: page;
+      break-inside: avoid;
+      background: #fff;
+    }
+    .agenda-slot-section {
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .agenda-daily-input {
+      border: none !important;
+      background: transparent !important;
+      width: 100%;
+      font-family: inherit;
+    }
+    .agenda-strip {
+      width: 185px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 8px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .strips-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    @media print {
+      body { padding: 0 !important; }
+      .agenda-daily-page { padding: 10mm 8mm !important; margin-bottom: 0 !important; }
+      @page { size: auto; margin: 8mm 6mm; }
+    }
+  </style>
+</head>
+<body>
+  ${sheetEl.outerHTML}
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.focus();
+        window.print();
+      }, 350);
+    };
+  <\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Agenda-Char-a-Voile-${selectedDate}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const standalonePrintUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${window.location.pathname}?tab=3&autoprint=1`
+    : '';
 
   const handleValidateAllInView = (mode: 'all' | 'wind_only' = 'all') => {
     if (!onValidateDay) return;
@@ -517,12 +616,113 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 alignItems: 'center',
                 gap: '6px',
                 boxShadow: '0 2px 6px rgba(22, 163, 74, 0.3)',
+                fontWeight: 800,
+                cursor: 'pointer',
               }}
+              title="Lancer l'impression directe de la fiche"
             >
               <span>🖨️</span> Imprimer la fiche (A4 / Agenda)
             </button>
+
+            {standalonePrintUrl && (
+              <a
+                href={standalonePrintUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="fbtn"
+                style={{
+                  margin: 0,
+                  background: '#0284c7',
+                  color: '#fff',
+                  padding: '9px 14px',
+                  fontSize: '0.82rem',
+                  borderRadius: '8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  textDecoration: 'none',
+                  fontWeight: 700,
+                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
+                }}
+                title="Ouvrir dans un nouvel onglet plein écran (recommandé si l'impression est bloquée dans la prévisualisation)"
+              >
+                <span>🚀</span> Ouvrir en plein écran & Imprimer
+              </a>
+            )}
+
+            <button
+              type="button"
+              className="fbtn"
+              onClick={handleDownloadHtml}
+              style={{
+                margin: 0,
+                background: '#475569',
+                color: '#fff',
+                padding: '9px 14px',
+                fontSize: '0.82rem',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+              title="Télécharger la fiche au format HTML prêt à être ouvert et imprimé dans n'importe quel navigateur"
+            >
+              <span>💾</span> Télécharger (HTML / PDF)
+            </button>
           </div>
         </div>
+
+        {/* Info barre astuce raccourci */}
+        <div style={{ marginTop: '10px', padding: '6px 10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.73rem', color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            💡 <strong>Raccourci clavier :</strong> Vous pouvez aussi appuyer directement sur <strong>Ctrl + P</strong> (ou <strong>Cmd + P</strong> sur Mac) pour ouvrir la boîte d'impression.
+          </div>
+          <div style={{ fontSize: '0.7rem', color: '#0369a1', fontWeight: 600 }}>
+            Si la fenêtre d'impression ne s'ouvre pas dans cette prévisualisation, cliquez sur <em>« 🚀 Ouvrir en plein écran & Imprimer »</em> !
+          </div>
+        </div>
+
+        {/* Modal si print bloqué */}
+        {showPrintModal && (
+          <div style={{ marginTop: '10px', padding: '12px', background: '#fef2f2', border: '1.5px solid #ef4444', borderRadius: '8px', fontSize: '0.78rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <strong style={{ color: '#b91c1c', fontSize: '0.85rem' }}>⚠️ Fenêtre d'impression restreinte par votre navigateur</strong>
+                <p style={{ margin: '4px 0 8px', color: '#7f1d1d' }}>
+                  Le navigateur interdit aux applications intégrées dans une iframe de lancer la boîte d'impression directement. Voici les 2 solutions instantanées :
+                </p>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {standalonePrintUrl && (
+                    <a
+                      href={standalonePrintUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ background: '#0284c7', color: '#fff', padding: '6px 12px', borderRadius: '6px', textDecoration: 'none', fontWeight: 800, fontSize: '0.76rem' }}
+                    >
+                      🚀 Ouvrir dans un nouvel onglet & Imprimer
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDownloadHtml}
+                    style={{ background: '#16a34a', color: '#fff', padding: '6px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: '0.76rem' }}
+                  >
+                    💾 Télécharger le fichier (.html / PDF)
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrintModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1rem', cursor: 'pointer', color: '#7f1d1d', fontWeight: 800 }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filter & Layout Selectors */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--bd, #e5e7eb)' }}>

@@ -69,11 +69,17 @@ const defaultSettings: AppSettings = {
 };
 
 export const App: React.FC = () => {
-  // Navigation tabs: 1 = Calendrier, 2 = Focus
+  // Navigation tabs: 1 = Calendrier, 2 = Focus, 3 = Fiche Agenda Papier
   const [activeTab, setActiveTab] = useState<number>(() => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === '3' || params.has('autoprint')) return 3;
+      if (tabParam === '2') return 2;
+      if (tabParam === '1') return 1;
+
       const saved = localStorage.getItem('cvTab');
-      return saved === '2' ? 2 : 1;
+      return saved === '3' ? 3 : saved === '2' ? 2 : 1;
     } catch {
       return 1;
     }
@@ -133,6 +139,25 @@ export const App: React.FC = () => {
       const [yy, mm] = today.split('-').map(Number);
       setYear(yy);
       setMonth(mm - 1);
+    }
+
+    // Auto-print support when opened in a new standalone window (?autoprint=1)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('autoprint')) {
+        setActiveTab(3);
+        const timer = setTimeout(() => {
+          try {
+            window.focus();
+            window.print();
+          } catch (e) {
+            console.warn('Autoprint failed:', e);
+          }
+        }, 750);
+        return () => clearTimeout(timer);
+      }
+    } catch {
+      // ignore
     }
   }, []);
 

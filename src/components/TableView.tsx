@@ -44,7 +44,12 @@ export const TableView: React.FC<TableViewProps> = ({
   const handlePrint = () => {
     setIsOpen(true);
     setTimeout(() => {
-      window.print();
+      try {
+        window.focus();
+        window.print();
+      } catch (e) {
+        console.warn('Native window.print() error in TableView:', e);
+      }
     }, 100);
   };
 
