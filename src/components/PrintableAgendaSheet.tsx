@@ -898,18 +898,18 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 className={`cal-nav-btn ${layoutMode === 'agenda' ? 'on' : ''}`}
                 style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px', fontWeight: layoutMode === 'agenda' ? 900 : 500 }}
                 onClick={() => setLayoutMode('agenda')}
-                title="Page Agenda Quotidien type carnet de bord : Marées manuscrites, Coeff, Vacances scolaires, et tableau spacieux pour Noms, Chars, Tél et Âges"
+                title="Format compact 1 page par jour pour petit classeur ou carnet : Marées, Coeff, Vacances et lignes manuscrites sans texte d'exemple"
               >
-                📖 Page Agenda Quotidien (Carnet & Inscriptions)
+                📁 Fiche Journée (Petit Classeur / A5)
               </button>
               <button
                 type="button"
                 className={`cal-nav-btn ${layoutMode === 'strips' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
+                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px', fontWeight: layoutMode === 'strips' ? 900 : 500 }}
                 onClick={() => setLayoutMode('strips')}
-                title="Bandelettes verticales (~65mm) à coller dans les colonnes d'un semainier"
+                title="Bandelettes étroites (~68mm) prêtes à découper et coller directement dans les colonnes d'un agenda"
               >
-                ✂️ Bandelettes Semainier
+                ✂️ Étiquettes (À coller dans l'agenda)
               </button>
               <button
                 type="button"
@@ -925,7 +925,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 className={`cal-nav-btn ${layoutMode === 'table' ? 'on' : ''}`}
                 style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
                 onClick={() => setLayoutMode('table')}
-                title="Tableau de bord A4 complet"
+                title="Tableau récapitulatif A4 complet"
               >
                 📊 Tableau A4
               </button>
@@ -1344,54 +1344,49 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                                         <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '0.72rem', borderRight: '1px solid #f1f5f9' }}>
                                           {idx + 1}.
                                         </td>
-                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
                                           <input
                                             type="text"
                                             className="agenda-daily-input"
-                                            placeholder="ex: Famille RAOULT"
                                             value={b.name}
                                             onChange={e => updateBooking(slotStorageKey, idx, 'name', e.target.value)}
-                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
                                           />
                                         </td>
-                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
                                           <input
                                             type="text"
                                             className="agenda-daily-input"
-                                            placeholder="ex: 2 biplaces"
                                             value={b.chars}
                                             onChange={e => updateBooking(slotStorageKey, idx, 'chars', e.target.value)}
-                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
                                           />
                                         </td>
-                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
                                           <input
                                             type="text"
                                             className="agenda-daily-input"
-                                            placeholder="ex: 6/8 ans"
                                             value={b.ages}
                                             onChange={e => updateBooking(slotStorageKey, idx, 'ages', e.target.value)}
-                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
                                           />
                                         </td>
-                                        <td style={{ padding: '1px 6px', borderRight: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
                                           <input
                                             type="text"
                                             className="agenda-daily-input"
-                                            placeholder="ex: 07 65 70 43 89"
                                             value={b.phone}
                                             onChange={e => updateBooking(slotStorageKey, idx, 'phone', e.target.value)}
-                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
                                           />
                                         </td>
-                                        <td style={{ padding: '1px 6px' }}>
+                                        <td style={{ padding: '0 6px' }}>
                                           <input
                                             type="text"
                                             className="agenda-daily-input"
-                                            placeholder="ex: CB 70 €"
                                             value={b.payment}
                                             onChange={e => updateBooking(slotStorageKey, idx, 'payment', e.target.value)}
-                                            style={{ width: '100%', padding: '3px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
+                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
                                           />
                                         </td>
                                       </tr>

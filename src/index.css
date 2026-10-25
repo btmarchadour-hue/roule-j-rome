@@ -936,6 +936,14 @@ td.n {
     font-size: 8pt !important;
   }
 
+  /* Aucun texte fantôme ou d'exemple à l'impression : lignes 100% vierges pour écriture manuscrite */
+  ::placeholder,
+  input::placeholder {
+    color: transparent !important;
+    opacity: 0 !important;
+    display: none !important;
+  }
+
   @page {
     size: auto;
     margin: 6mm 6mm;
