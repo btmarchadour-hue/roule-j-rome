@@ -619,9 +619,22 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 fontWeight: 800,
                 cursor: 'pointer',
               }}
-              title="Lancer l'impression directe de la fiche"
+              title={
+                layoutMode === 'strips'
+                  ? 'Imprime uniquement les étiquettes / bandelettes à découper (tout le reste du site est masqué)'
+                  : layoutMode === 'agenda'
+                  ? 'Imprime uniquement les fiches agendas quotidiennes (tout le reste du site est masqué)'
+                  : 'Imprime uniquement la sélection'
+              }
             >
-              <span>🖨️</span> Imprimer la fiche (A4 / Agenda)
+              <span>🖨️</span>{' '}
+              {layoutMode === 'strips'
+                ? 'Imprimer uniquement les Étiquettes'
+                : layoutMode === 'agenda'
+                ? 'Imprimer uniquement les Fiches Agendas'
+                : layoutMode === 'cards'
+                ? 'Imprimer les Fiches Blocs'
+                : 'Imprimer le Tableau A4'}
             </button>
 
             {standalonePrintUrl && (
@@ -644,9 +657,9 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   fontWeight: 700,
                   boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
                 }}
-                title="Ouvrir dans un nouvel onglet plein écran (recommandé si l'impression est bloquée dans la prévisualisation)"
+                title="Ouvrir dans un nouvel onglet pour imprimer uniquement la fiche (recommandé si l'impression est bloquée dans la prévisualisation)"
               >
-                <span>🚀</span> Ouvrir en plein écran & Imprimer
+                <span>🚀</span> Nouvel onglet (Impression pure)
               </a>
             )}
 
@@ -667,7 +680,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 fontWeight: 700,
                 cursor: 'pointer',
               }}
-              title="Télécharger la fiche au format HTML prêt à être ouvert et imprimé dans n'importe quel navigateur"
+              title="Télécharger uniquement la fiche/étiquette en HTML autonome prêt pour impression ou PDF"
             >
               <span>💾</span> Télécharger (HTML / PDF)
             </button>
@@ -1045,8 +1058,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
       {/* PRINTABLE CONTENT CONTAINER */}
       <div className="printable-agenda-sheet">
-        {/* Print Header */}
-        <div className="print-header" style={{ marginBottom: '14px', borderBottom: '2px solid #111', paddingBottom: '8px' }}>
+        {/* Print Header (uniquement utile en mode tableau A4, masqué pour n'imprimer que les étiquettes ou fiches agendas) */}
+        <div
+          className={`print-header ${layoutMode === 'strips' || layoutMode === 'agenda' ? 'print-hide' : ''}`}
+          style={{ marginBottom: '14px', borderBottom: '2px solid #111', paddingBottom: '8px' }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -2055,7 +2071,10 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
         )}
 
         {/* Footer info for print */}
-        <div style={{ marginTop: '16px', paddingTop: '8px', borderTop: '1px solid #999', fontSize: '0.66rem', color: '#555', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          className={layoutMode === 'strips' || layoutMode === 'agenda' ? 'print-hide' : ''}
+          style={{ marginTop: '16px', paddingTop: '8px', borderTop: '1px solid #999', fontSize: '0.66rem', color: '#555', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
           <div>
             Char à Voile du Bout du Monde · Plage de Lestrevet · 06 81 63 83 74 · charavoileduboutdumonde.com
           </div>

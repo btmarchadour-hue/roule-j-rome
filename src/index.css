@@ -765,6 +765,8 @@ td.n {
   .brand .bt {
     font-size: .82rem;
   }
+}
+
 .slot-decision-group {
   display: inline-flex;
   gap: 4px;
@@ -830,36 +832,48 @@ td.n {
 }
 
 @media print {
-  body {
-    background: #fff !important;
-    color: #000 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
+  /* 1. MASQUER ABSOLUMENT TOUT LE SITE ET TOUS LES MENUS */
+  header,
+  footer,
+  nav,
+  .tabs,
+  .cal,
+  .top,
+  .tide-header-card,
+  .print-toolbar,
+  .print-hide,
   .nop,
   .noprint,
-  .print-hide,
-  .cal,
-  .tabs,
-  .print-toolbar,
-  header.brand,
-  .tide-header-card,
   .ft,
-  .hyp {
+  .hyp,
+  #tab1,
+  #tab2 {
     display: none !important;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   main {
     max-width: 100% !important;
     padding: 0 !important;
     margin: 0 !important;
+    width: 100% !important;
   }
 
   .printable-agenda-wrapper {
     display: block !important;
     margin: 0 !important;
     padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
   }
 
   .printable-agenda-sheet {
@@ -869,15 +883,28 @@ td.n {
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
+    background: #fff !important;
   }
 
+  /* 2. UNIQUEMENT LES BANDELETTES (ÉTIQUETTES) */
   .agenda-strip {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     box-shadow: none !important;
-    border-color: #333 !important;
+    border: 1.5px solid #000 !important;
+    background: #fff !important;
+    color: #000 !important;
+    margin-bottom: 8px !important;
   }
 
+  .strips-grid {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8mm !important;
+    padding: 0 !important;
+  }
+
+  /* 3. UNIQUEMENT LES PAGES AGENDAS QUOTIDIENNES */
   .agenda-daily-page {
     border: 1.5px solid #000 !important;
     box-shadow: none !important;
@@ -885,8 +912,13 @@ td.n {
     page-break-inside: avoid !important;
     break-after: page !important;
     page-break-after: always !important;
-    margin-bottom: 0 !important;
-    padding: 10mm 8mm !important;
+    margin: 0 !important;
+    padding: 8mm 6mm !important;
+    background: #fff !important;
+  }
+
+  .agenda-slot-section {
+    border-color: #333 !important;
   }
 
   .agenda-daily-input {
@@ -900,13 +932,13 @@ td.n {
   }
 
   table {
-    min-width: 0;
-    font-size: 8.5pt;
+    min-width: 0 !important;
+    font-size: 8pt !important;
   }
 
   @page {
     size: auto;
-    margin: 8mm 6mm;
+    margin: 6mm 6mm;
   }
 }
 
