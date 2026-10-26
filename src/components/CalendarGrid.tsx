@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppSettings, CustomSlotsMap, TidePoint, ValidationsMap, WindPoint } from '../types';
-import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, vstat } from '../utils/tides';
+import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, tdy, vstat } from '../utils/tides';
 
 interface CalendarGridProps {
   year: number;
@@ -54,6 +54,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     const ds = `${year}-${p2(month + 1)}-${p2(d)}`;
     const inRange = ds >= minDs && ds <= maxDs;
     const isSelected = ds === selectedDate;
+    const isPast = ds < tdy();
 
     let dotClass = '';
     let badgeText = '';
@@ -84,7 +85,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       if (validations && validations[ds]) {
         const fDay = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
         const vInfo = vstat(fDay, validations);
-        valStatus = vInfo.st;
+        valStatus = isPast && vInfo.st === 'chg' ? 'ok' : vInfo.st;
         valCount = vInfo.valCount;
         rejCount = vInfo.rejCount;
         totalCount = vInfo.totalCount;
@@ -102,8 +103,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       if (valStatus === 'ok') {
         dayTooltip += ` · ✓ ${valCount} validé${valCount > 1 ? 's' : ''}${
           rejCount ? `, ${rejCount} refusé${rejCount > 1 ? 's' : ''}` : ''
-        }`;
-      } else if (valStatus === 'chg') {
+        }${isPast ? ' (passé)' : ''}`;
+      } else if (!isPast && valStatus === 'chg') {
         dayTooltip += ' · ⚠️ À revalider (météo modifiée)';
       }
     }
@@ -144,7 +145,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             ✕
           </span>
         )}
-        {valStatus === 'chg' && (
+        {!isPast && valStatus === 'chg' && (
           <span className="cal-val-tag warn" title="Prévisions modifiées depuis validation">
             ⚠️
           </span>

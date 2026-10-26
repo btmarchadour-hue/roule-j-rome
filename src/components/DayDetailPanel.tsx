@@ -24,6 +24,7 @@ import {
   toU,
   VC,
   vstat,
+  tdy,
   wtxt,
 } from '../utils/tides';
 import { CurveChart } from './CurveChart';
@@ -163,6 +164,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
   const focusData = dayFocus(selectedDate, settings, tideW, first, last, windList, customSlotsMap);
   const valInfo = validations ? vstat(focusData, validations) : { st: 'none' as const };
+  const isPast = selectedDate < tdy();
 
   const holiday = getFrenchHolidayInfo(selectedDate);
 
@@ -289,13 +291,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           background:
             valInfo.st === 'ok'
               ? 'var(--okbg, #f0fdf4)'
-              : valInfo.st === 'chg'
+              : !isPast && valInfo.st === 'chg'
               ? '#fffbeb'
               : 'var(--card, #fff)',
           border:
             valInfo.st === 'ok'
               ? '2px solid var(--ok, #16a34a)'
-              : valInfo.st === 'chg'
+              : !isPast && valInfo.st === 'chg'
               ? '2px solid #f59e0b'
               : '1px solid var(--bd, #e5e7eb)',
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
@@ -312,7 +314,15 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '1.25rem' }}>
-              {valInfo.st === 'ok' ? '✅' : valInfo.st === 'chg' ? '⚠️' : '📋'}
+              {isPast
+                ? valInfo.st === 'ok'
+                  ? '📜'
+                  : '⏳'
+                : valInfo.st === 'ok'
+                ? '✅'
+                : valInfo.st === 'chg'
+                ? '⚠️'
+                : '📋'}
             </span>
             <div>
               <div
@@ -323,7 +333,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                   letterSpacing: '0.04em',
                 }}
               >
-                {valInfo.st === 'ok'
+                {isPast
+                  ? valInfo.st === 'ok'
+                    ? `Archive : ${valInfo.valCount} validé${valInfo.valCount > 1 ? 's' : ''}${
+                        valInfo.rejCount ? ` · ${valInfo.rejCount} refusé${valInfo.rejCount > 1 ? 's' : ''}` : ''
+                      } (sur ${valInfo.totalCount} créneau${valInfo.totalCount > 1 ? 'x' : ''})`
+                    : 'Journée passée'
+                  : valInfo.st === 'ok'
                   ? `${valInfo.valCount} validé${valInfo.valCount > 1 ? 's' : ''}${
                       valInfo.rejCount ? ` · ${valInfo.rejCount} refusé${valInfo.rejCount > 1 ? 's' : ''}` : ''
                     } (sur ${valInfo.totalCount} créneau${valInfo.totalCount > 1 ? 'x' : ''})`
@@ -334,7 +350,14 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                   : 'Validation & Décision des créneaux'}
               </div>
               <div style={{ fontSize: '0.74rem', color: 'var(--mu, #666)' }}>
-                {valInfo.st === 'ok'
+                {isPast
+                  ? valInfo.st === 'ok'
+                    ? `Journée passée · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}`
+                    : 'Séances terminées pour cette date'
+                  : valInfo.st === 'ok'
                   ? `Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                       dateStyle: 'short',
                       timeStyle: 'short',
@@ -465,8 +488,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           </div>
         </div>
 
-        {/* Changes alert if st === 'chg' */}
-        {valInfo.st === 'chg' && (
+        {/* Changes alert if st === 'chg' (interdit sur les jours passés) */}
+        {!isPast && valInfo.st === 'chg' && (
           <div
             style={{
               marginTop: '10px',

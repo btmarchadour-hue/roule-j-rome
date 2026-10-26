@@ -820,8 +820,11 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
   const missing = V.items.filter(x => !curMap.has(x.k));
   const kchg = V.k !== f.k;
   const isPartial = validItems.length < f.list.length;
+  const isPast = f.ds < tdy();
 
-  if (missing.length > 0 || kchg) {
+  // Pour les jours passés, les séances ont déjà eu lieu :
+  // On ne doit JAMAIS afficher d'alerte de modification météo ou d'avertissement de réévaluation.
+  if (!isPast && (missing.length > 0 || kchg)) {
     return {
       st: 'chg' as const,
       V,
