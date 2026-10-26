@@ -44,7 +44,7 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
 
   return (
     <div
-      className="card"
+      className="card tide-header-card print-hide nop noprint"
       style={{
         borderLeft: '5px solid var(--ac)',
         background: 'var(--card)',

@@ -527,8 +527,8 @@ export const App: React.FC = () => {
     <>
       <Header />
       <main>
-        {/* En-tête des marées en haut de page (Exigence 5) */}
-        <TideHeaderCard selectedDate={selectedDate} EX={EX} />
+        {/* En-tête des marées en haut de page (masqué en onglet 3 et à l'impression) */}
+        {activeTab !== 3 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
 
         {/* Navigation tabs */}
         <nav className="tabs noprint">

@@ -884,7 +884,9 @@ td.n {
     padding: 0 !important;
   }
 
-  /* 3. UNIQUEMENT LES PAGES AGENDAS QUOTIDIENNES */
+  /* 3. PAGES AGENDAS : DONNÉES DU JOUR & FICHES SÉANCES (1 PAGE PAR SÉANCE) */
+  .agenda-day-page,
+  .agenda-session-page,
   .agenda-daily-page {
     border: 1.5px solid #000 !important;
     box-shadow: none !important;
@@ -892,9 +894,16 @@ td.n {
     page-break-inside: avoid !important;
     break-after: page !important;
     page-break-after: always !important;
-    margin: 0 !important;
-    padding: 8mm 6mm !important;
+    margin: 0 0 0 0 !important;
+    padding: 6mm 6mm !important;
     background: #fff !important;
+    page-break-before: auto !important;
+  }
+
+  .agenda-day-page table,
+  .agenda-session-page table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .agenda-slot-section {

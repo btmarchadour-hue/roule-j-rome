@@ -246,6 +246,21 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   const [showRejected, setShowRejected] = useState<boolean>(true);
   const includeNotesBox = emargementMode !== 'none';
 
+  // Option d'impression de la première page (Données du jour) : activée par défaut ("données du jour et ensuite une page par séance avec 12 personnes")
+  const [printDayOverview, setPrintDayOverview] = useState<boolean>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const val = p.get('day_overview');
+      if (val === '1' || val === 'true') return true;
+      if (val === '0' || val === 'false') return false;
+      const s = localStorage.getItem('char_agenda_print_day_overview');
+      if (s != null) return s === 'true';
+    } catch {
+      // ignore
+    }
+    return true; // Par défaut : true (Page 1: Données du jour, suivie de 1 page par séance avec 12 inscrits)
+  });
+
   // Inscriptions & réservations clients via l'application (mémorisation locale persistante v3)
   const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>(() => {
     try {
@@ -687,6 +702,8 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     }
     .print-hide, .nop, .noprint { display: none !important; }
     table { width: 100%; border-collapse: collapse; }
+    .agenda-day-page,
+    .agenda-session-page,
     .agenda-daily-page {
       border: 1.5px solid #0f172a;
       border-radius: 8px;
@@ -723,8 +740,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     }
     @media print {
       body { padding: 0 !important; }
-      .agenda-daily-page { padding: 10mm 8mm !important; margin-bottom: 0 !important; }
-      @page { size: auto; margin: 8mm 6mm; }
+      .agenda-day-page,
+      .agenda-session-page,
+      .agenda-daily-page {
+        padding: 6mm 6mm !important;
+        margin-bottom: 0 !important;
+        border: 1.5px solid #000 !important;
+        page-break-after: always !important;
+        break-after: page !important;
+      }
+      @page { size: auto; margin: 6mm 6mm; }
     }
   </style>
 </head>
@@ -762,12 +787,13 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     params.set('filter', filterMode);
     params.set('emargement', emargementMode);
     params.set('sel', selectedDate);
+    params.set('day_overview', printDayOverview ? '1' : '0');
     if (rangeMode === 'custom') {
       params.set('start', customStartDate);
       params.set('end', customEndDate);
     }
     return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
-  }, [rangeMode, layoutMode, filterMode, emargementMode, selectedDate, customStartDate, customEndDate]);
+  }, [rangeMode, layoutMode, filterMode, emargementMode, selectedDate, customStartDate, customEndDate, printDayOverview]);
 
   const handleValidateAllInView = (mode: 'all' | 'wind_only' = 'all') => {
     if (!onValidateDay) return;
@@ -968,7 +994,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 cursor: 'pointer',
               }}
             >
-              <option value="agenda">📁 Fiche Agenda Quotidienne (A4/A5 classeur, planning & clients)</option>
+              <option value="agenda">📁 Fiches Terrain : Données du jour + 1 page par séance (12 inscrits)</option>
               <option value="strips">✂️ Bandelettes / Étiquettes compactes (agenda de poche)</option>
               <option value="cards">📑 Fiches Blocs synthétiques</option>
               <option value="table">📊 Grand Tableau récapitulatif (A4 paysage)</option>
@@ -1058,9 +1084,27 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
         {/* Bandeau indicateur d'état */}
         <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--bd, #e2e8f0)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '0.76rem', color: 'var(--mu, #64748b)' }}>
-          <div>
-            <strong style={{ color: 'var(--tx, #111)' }}>{daysData.length} jour{daysData.length > 1 ? 's' : ''}</strong> sélectionnés · <strong style={{ color: 'var(--tx, #111)' }}>{totalSlotsCount} séance{totalSlotsCount > 1 ? 's' : ''} validée{totalSlotsCount > 1 ? 's' : ''}</strong>
-            {totalRejectedSlotsCount > 0 && <span style={{ color: '#dc2626', fontWeight: 700 }}> · {totalRejectedSlotsCount} refusée{totalRejectedSlotsCount > 1 ? 's' : ''}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ color: 'var(--tx, #111)' }}>{daysData.length} jour{daysData.length > 1 ? 's' : ''}</strong> sélectionnés · <strong style={{ color: 'var(--tx, #111)' }}>{totalSlotsCount} séance{totalSlotsCount > 1 ? 's' : ''} validée{totalSlotsCount > 1 ? 's' : ''}</strong>
+              {totalRejectedSlotsCount > 0 && <span style={{ color: '#dc2626', fontWeight: 700 }}> · {totalRejectedSlotsCount} refusée{totalRejectedSlotsCount > 1 ? 's' : ''}</span>}
+            </div>
+
+            {/* Option pour activer ou masquer la 1ère page "Données du jour" à l'impression */}
+            {layoutMode === 'agenda' && (
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 800, color: printDayOverview ? '#0369a1' : 'var(--tx, #334155)', cursor: 'pointer', background: printDayOverview ? '#e0f2fe' : 'var(--cell, #f1f5f9)', padding: '3px 8px', borderRadius: '6px', border: `1px solid ${printDayOverview ? '#7dd3fc' : 'var(--bd, #cbd5e1)'}` }}>
+                <input
+                  type="checkbox"
+                  checked={printDayOverview}
+                  onChange={e => {
+                    setPrintDayOverview(e.target.checked);
+                    try { localStorage.setItem('char_agenda_print_day_overview', String(e.target.checked)); } catch {}
+                  }}
+                />
+                <span>Imprimer aussi la page récapitulative « Données du jour »</span>
+                <span style={{ fontSize: '0.67rem', color: printDayOverview ? '#0284c7' : 'var(--mu, #64748b)', fontWeight: 600 }}>({printDayOverview ? 'activée' : 'masquée : fiches séances 12 inscrits seules'})</span>
+              </label>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1131,194 +1175,393 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
           </div>
         </div>
 
-        {/* VIEW 0: PAGE AGENDA QUOTIDIEN (Réplique & Optimisation Carnet de Bord / Inscriptions Terrain) */}
+        {/* VIEW 0: FICHES TERRAIN : DONNÉES DU JOUR + 1 PAGE PAR SÉANCE (12 INSCRITS) */}
         {layoutMode === 'agenda' && (
-          <div className="agenda-daily-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {daysData.map(day => (
-              <div
-                key={day.ds}
-                className="agenda-daily-page"
-                style={{
-                  background: '#fff',
-                  border: '2px solid #0f172a',
-                  borderRadius: '10px',
-                  padding: '16px 20px',
-                  color: '#0f172a',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
-                  breakInside: 'avoid',
-                  pageBreakInside: 'avoid',
-                  pageBreakAfter: 'always',
-                  breakAfter: 'page',
-                }}
-              >
-                {/* 1. EN-TÊTE : DATE, SEMAINE ET VACANCES SCOLAIRES */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #0f172a', paddingBottom: '10px', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-                  <div>
-                    <div style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>
-                      Char à Voile du Bout du Monde · Plage de Lestrevet · Agenda de Bord
+          <div className="agenda-daily-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {daysData.map(day => {
+              const daySlots = day.slots;
+              return (
+                <React.Fragment key={day.ds}>
+                  {/* ========================================================================= */}
+                  {/* PAGE 1 DU JOUR : DONNÉES DU JOUR & CARNET DE BORD                        */}
+                  {/* ========================================================================= */}
+                  <div
+                    className={`agenda-day-page ${!printDayOverview ? 'print-hide nop noprint' : ''}`}
+                    style={{
+                      background: '#fff',
+                      border: '2px solid #0f172a',
+                      borderRadius: '10px',
+                      padding: '16px 20px',
+                      color: '#0f172a',
+                      boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
+                      breakInside: 'avoid',
+                      pageBreakInside: 'avoid',
+                      pageBreakAfter: 'always',
+                      breakAfter: 'page',
+                    }}
+                  >
+                    {/* BANDEAU INDICATEUR ÉCRAN (MASQUÉ À L'IMPRESSION) */}
+                    <div
+                      className="print-hide nop noprint"
+                      style={{
+                        background: '#0f172a',
+                        color: '#38bdf8',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        marginBottom: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '6px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📊 DONNÉES DU JOUR · {day.fullDateStr.toUpperCase()}</span>
+                        <span style={{ background: printDayOverview ? '#166534' : '#334155', color: '#fff', padding: '1px 6px', borderRadius: '3px', fontSize: '0.66rem', fontWeight: 900 }}>
+                          {printDayOverview ? '🖨️ IMPRIMÉE' : '🚫 MASQUÉE À L’IMPRESSION'}
+                        </span>
+                      </div>
+                      <span style={{ color: '#94a3b8' }}>
+                        {printDayOverview
+                          ? `Suivie de ${daySlots.length} page(s) de séance (12 inscrits)`
+                          : `Seules les ${daySlots.length} fiches séances ci-dessous seront imprimées (1 page / séance)`}
+                      </span>
                     </div>
-                    <h1 style={{ margin: '2px 0 0', fontSize: '1.5rem', fontWeight: 900, textTransform: 'capitalize', color: '#0f172a', letterSpacing: '-0.01em' }}>
-                      {day.fullDateStr}
-                    </h1>
-                    <div style={{ fontSize: '0.76rem', color: '#475569', fontWeight: 600, marginTop: '2px' }}>
-                      Semaine n° {day.holiday.weekNumber} · Édition du {new Date().toLocaleDateString('fr-FR')}
-                    </div>
-                  </div>
 
-                  {/* INDICATEUR VACANCES SCOLAIRES (Inspiré des 3 pastilles de couleur de l'agenda papier !) */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                    {day.holiday.isHoliday ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fef2f2', border: '1.5px solid #dc2626', padding: '6px 12px', borderRadius: '8px' }}>
-                        <span style={{ fontSize: '1.25rem' }}>🎒</span>
-                        <div style={{ textAlign: 'left' }}>
-                          <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#b91c1c', textTransform: 'uppercase' }}>
-                            {day.holiday.holidayName}
+                    {/* 1. EN-TÊTE : CLUB, DATE, SEMAINE ET VACANCES SCOLAIRES */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #0f172a', paddingBottom: '10px', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div>
+                        <div style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>
+                          Char à Voile du Bout du Monde · Plage de Lestrevet · 06 81 63 83 74 · Carnet de Bord Terrain
+                        </div>
+                        <h1 style={{ margin: '2px 0 0', fontSize: '1.45rem', fontWeight: 900, textTransform: 'capitalize', color: '#0f172a', letterSpacing: '-0.01em' }}>
+                          {day.fullDateStr}
+                        </h1>
+                        <div style={{ fontSize: '0.76rem', color: '#475569', fontWeight: 600, marginTop: '2px' }}>
+                          Semaine n° {day.holiday.weekNumber} · Édition du {new Date().toLocaleDateString('fr-FR')}
+                        </div>
+                      </div>
+
+                      {/* INDICATEUR VACANCES SCOLAIRES (Multi-zones A, B, C) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                        {day.holiday.isHoliday ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fef2f2', border: '1.5px solid #dc2626', padding: '6px 12px', borderRadius: '8px' }}>
+                            <span style={{ fontSize: '1.25rem' }}>🎒</span>
+                            <div style={{ textAlign: 'left' }}>
+                              <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#b91c1c', textTransform: 'uppercase' }}>
+                                {day.holiday.holidayName}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: '#7f1d1d', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>{day.holiday.zonesLabel}</span>
+                                <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#cbd5e1', opacity: day.holiday.isZoneA ? 1 : 0.45 }}>Zone A</span>
+                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#cbd5e1', opacity: day.holiday.isZoneB ? 1 : 0.45 }}>Zone B</span>
+                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#cbd5e1', opacity: day.holiday.isZoneC ? 1 : 0.45 }}>Zone C</span>
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div style={{ fontSize: '0.72rem', color: '#7f1d1d', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span>{day.holiday.zonesLabel}</span>
-                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
-                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#cbd5e1', opacity: day.holiday.isZoneA ? 1 : 0.45 }}>Zone A</span>
-                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#cbd5e1', opacity: day.holiday.isZoneB ? 1 : 0.45 }}>Zone B</span>
-                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#cbd5e1', opacity: day.holiday.isZoneC ? 1 : 0.45 }}>Zone C</span>
-                            </span>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1.5px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', color: '#475569' }}>
+                            <span>🏫</span>
+                            <span style={{ fontWeight: 800 }}>Période scolaire (Hors vacances)</span>
                           </div>
+                        )}
+
+                        {day.holiday.publicHolidayName && (
+                          <div style={{ background: '#fef3c7', color: '#92400e', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', border: '1px solid #fcd34d' }}>
+                            ⭐ Férié : {day.holiday.publicHolidayName}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 2. BLOC MARÉES & PLAN D'EAU */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '8px 12px', marginBottom: '12px' }}>
+                      {/* Basse Mer */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0284c7', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
+                          BM
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Basse Mer</div>
+                          <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
+                            {day.bmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.bmHeight != null ? `${day.bmHeight.toFixed(2)} m` : '—'})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pleine Mer */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0369a1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
+                          PM
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Pleine Mer</div>
+                          <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
+                            {day.pmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.pmHeight != null ? `${day.pmHeight.toFixed(2)} m` : '—'})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Coefficient de marée */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ border: '2.5px solid #0f172a', width: '38px', height: '38px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '1.05rem', background: '#fff', color: '#0f172a', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)' }}>
+                          {day.coeff}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Coefficient</div>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a' }}>
+                            {day.coeff >= 90 ? 'Grande Marée' : day.coeff >= 70 ? 'Marée Moyenne +' : 'Morte Eau'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Soleil & Seuil roulage */}
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', fontSize: '0.72rem', color: '#334155' }}>
+                        <div>☀️ Soleil : <strong>{day.sunRise} – {day.sunSet}</strong></div>
+                        <div>🏖️ Seuil roulage : <strong>{settings.L.toFixed(2)} m</strong></div>
+                      </div>
+                    </div>
+
+                    {/* 3. MÉTÉO, VENT & HOULE */}
+                    {day.isNear5Days && day.dayWeather ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '6px 12px', marginBottom: '14px', fontSize: '0.74rem' }}>
+                        <div style={{ fontWeight: 800, color: '#166534' }}>
+                          💨 Vent : <strong>{day.dayWeather.windRange}</strong> {day.dayWeather.gustMax ? `(rafales max ${day.dayWeather.gustMax} nds)` : ''} · Secteur <strong>{day.dayWeather.dirComp}</strong> ({day.dayWeather.dirDeg}°)
+                        </div>
+                        {day.dayWeather.waveH != null && (
+                          <div style={{ color: '#0284c7', fontWeight: 700 }}>
+                            🌊 Houle : <strong>{day.dayWeather.waveH} m</strong> (période {day.dayWeather.wavePeriod}s {day.dayWeather.waveDirComp || ''})
+                          </div>
+                        )}
+                        <div style={{ color: '#475569' }}>
+                          🌡️ {day.dayWeather.temp != null ? `${day.dayWeather.temp}°C` : ''} · {day.dayWeather.cloudText}
                         </div>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1.5px solid #cbd5e1', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', color: '#475569' }}>
-                        <span>🏫</span>
-                        <span style={{ fontWeight: 800 }}>Période scolaire (Hors vacances)</span>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '6px 12px', marginBottom: '14px', fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic' }}>
+                        Prévisions de marées calculées. Prévisions vent AROME disponibles à l'approche de la date (J-5).
                       </div>
                     )}
 
-                    {day.holiday.publicHolidayName && (
-                      <div style={{ background: '#fef3c7', color: '#92400e', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', border: '1px solid #fcd34d' }}>
-                        ⭐ Férié : {day.holiday.publicHolidayName}
+                    {/* 4. TABLEAU SYNTHÉTIQUE DES SÉANCES DU JOUR */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 900, textTransform: 'uppercase', color: '#0f172a', marginBottom: '6px', letterSpacing: '0.04em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>📋 Tableau récapitulatif des séances de la journée</span>
+                        <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, textTransform: 'none' }}>
+                          {daySlots.length} séance{daySlots.length > 1 ? 's' : ''} au planning
+                        </span>
                       </div>
-                    )}
-                  </div>
-                </div>
 
-                {/* 2. BLOC MARÉES MANUSCRIT DU JOUR (Inspiré de 'Bn 11h15 · Pn 17h25 · (100)' manuscrit) */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '8px 12px', marginBottom: '14px' }}>
-                  {/* Basse Mer */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0284c7', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
-                      BM
+                      {daySlots.length === 0 ? (
+                        day.rawSlots.some(s => s.isRejected) ? (
+                          <div style={{ padding: '14px', background: '#fef2f2', border: '1.5px dashed #dc2626', borderRadius: '8px', textAlign: 'center' }}>
+                            <div style={{ color: '#b91c1c', fontWeight: 900, fontSize: '0.85rem', marginBottom: '2px' }}>
+                              ⛔ AUCUNE SÉANCE NAVIGABLE AUJOURD'HUI — CRÉNEAUX REFUSÉS
+                            </div>
+                            <div style={{ color: '#7f1d1d', fontSize: '0.74rem', fontWeight: 700 }}>
+                              {day.rawSlots.filter(s => s.isRejected).map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`).join(' · ')}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ textAlign: 'center', color: '#64748b', fontStyle: 'italic', padding: '18px 0', fontSize: '0.82rem', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                            Pas de séance calculable pour ce jour (contraintes de marée ou nuit).
+                          </div>
+                        )
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', background: '#fff', border: '1.5px solid #cbd5e1', borderRadius: '6px', overflow: 'hidden' }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: '90px' }}>Séance</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: '110px' }}>Horaires</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: '130px' }}>Décision</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Hauteurs d'eau</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Météo & Vent prévu</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left', width: '110px' }}>Inscriptions</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'right', width: '130px' }}>Fiche dédiée</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {daySlots.map((s, sIdx) => {
+                              const slotStorageKey = `${day.ds}-${s.key}`;
+                              const bookings = getSlotBookings(slotStorageKey);
+                              return (
+                                <tr
+                                  key={s.key}
+                                  style={{
+                                    borderBottom: sIdx === daySlots.length - 1 ? 'none' : '1px solid #e2e8f0',
+                                    background: s.isRejected ? '#fef2f2' : s.isValidated ? '#f0fdf4' : sIdx % 2 === 0 ? '#fff' : '#fcfcfc',
+                                  }}
+                                >
+                                  <td style={{ padding: '6px 8px', fontWeight: 900, color: '#0f172a' }}>
+                                    Séance {sIdx + 1}
+                                  </td>
+                                  <td style={{ padding: '6px 8px', fontWeight: 900, color: s.isRejected ? '#b91c1c' : '#0369a1', textDecoration: s.isRejected ? 'line-through' : 'none' }}>
+                                    {s.startStr} – {s.endStr}
+                                  </td>
+                                  <td style={{ padding: '6px 8px' }}>
+                                    <span
+                                      style={{
+                                        fontSize: '0.64rem',
+                                        fontWeight: 900,
+                                        color: '#fff',
+                                        background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#64748b',
+                                        padding: '2px 6px',
+                                        borderRadius: '3px',
+                                        textTransform: 'uppercase',
+                                      }}
+                                    >
+                                      {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ VALIDÉE' : 'EN ATTENTE'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '6px 8px', color: '#0369a1', fontWeight: 700 }}>
+                                    {s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'} {s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'} {s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}
+                                  </td>
+                                  <td style={{ padding: '6px 8px', color: '#334155' }}>
+                                    {s.weather ? (
+                                      <span>
+                                        <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '6px 8px', fontWeight: 700, color: '#0f172a' }}>
+                                    {bookings.length > 0 ? (
+                                      <span style={{ color: '#166534' }}>{bookings.length} client{bookings.length > 1 ? 's' : ''}</span>
+                                    ) : (
+                                      <span style={{ color: '#64748b' }}>0 inscrit</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, color: '#0369a1' }}>
+                                    ➔ Page {sIdx + 2} (12 places)
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Basse Mer</div>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
-                        {day.bmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.bmHeight != null ? `${day.bmHeight.toFixed(2)} m` : '—'})</span>
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Pleine Mer */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#0369a1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '0.75rem' }}>
-                      PM
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Pleine Mer</div>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#0369a1' }}>
-                        {day.pmTimeStr} <span style={{ fontSize: '0.78rem', fontWeight: 700 }}>({day.pmHeight != null ? `${day.pmHeight.toFixed(2)} m` : '—'})</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Coefficient de marée dans son macaron rond entouré comme sur la photo ! */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ border: '2.5px solid #0f172a', width: '38px', height: '38px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '1.05rem', background: '#fff', color: '#0f172a', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)' }}>
-                      {day.coeff}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Coefficient</div>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a' }}>
-                        {day.coeff >= 90 ? 'Grande Marée' : day.coeff >= 70 ? 'Marée Moyenne +' : 'Morte Eau'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Soleil & Seuil */}
-                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', fontSize: '0.72rem', color: '#334155' }}>
-                    <div>☀️ Soleil : <strong>{day.sunRise} – {day.sunSet}</strong></div>
-                    <div>🏖️ Seuil roulage : <strong>{settings.L.toFixed(2)} m</strong></div>
-                  </div>
-                </div>
-
-                {/* 3. MÉTÉO & HOULE SI PROCHE 5 JOURS */}
-                {day.isNear5Days && day.dayWeather && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '6px 12px', marginBottom: '14px', fontSize: '0.74rem' }}>
-                    <div style={{ fontWeight: 800, color: '#166534' }}>
-                      💨 Vent : <strong>{day.dayWeather.windRange}</strong> {day.dayWeather.gustMax ? `(rafales max ${day.dayWeather.gustMax} nds)` : ''} · Secteur <strong>{day.dayWeather.dirComp}</strong> ({day.dayWeather.dirDeg}°)
-                    </div>
-                    {day.dayWeather.waveH != null && (
-                      <div style={{ color: '#0284c7', fontWeight: 700 }}>
-                        🌊 Houle : <strong>{day.dayWeather.waveH} m</strong> (période {day.dayWeather.wavePeriod}s {day.dayWeather.waveDirComp || ''})
-                      </div>
-                    )}
-                    <div style={{ color: '#475569' }}>
-                      🌡️ {day.dayWeather.temp != null ? `${day.dayWeather.temp}°C` : ''} · {day.dayWeather.cloudText}
-                    </div>
-                  </div>
-                )}
-
-                {/* 4. LISTE DES CRÉNEAUX DE LA JOURNÉE AVEC GRILLE D'INSCRIPTION */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {day.slots.length === 0 ? (
-                    day.rawSlots.some(s => s.isRejected) ? (
-                      <div style={{ padding: '16px', background: '#fef2f2', border: '2px dashed #dc2626', borderRadius: '8px', textAlign: 'center' }}>
-                        <div style={{ color: '#b91c1c', fontWeight: 900, fontSize: '0.9rem', marginBottom: '4px' }}>
-                          ⛔ AUCUNE SÉANCE DISPONIBLE AUJOURD'HUI — CRÉNEAUX REFUSÉS
+                    {/* 5. GESTION DU MATÉRIEL, CONSIGNES SÉCURITÉ & BILAN ENCAISSEMENTS */}
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '2px solid #0f172a', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px', fontSize: '0.73rem' }}>
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                          🏁 Pointage matériel & chars sortis :
                         </div>
-                        <div style={{ color: '#7f1d1d', fontSize: '0.78rem', fontWeight: 700 }}>
-                          {day.rawSlots.filter(s => s.isRejected).map(s => `${s.startStr}–${s.endStr} (${s.rejectReason || 'Vent hors plage'})`).join(' · ')}
+                        <div style={{ color: '#475569', lineHeight: 1.5 }}>
+                          <div>• Monoplaces : ________  ·  Biplaces : ________</div>
+                          <div>• Voiles gréées : [ ] 2.5m²  [ ] 3.5m²  [ ] 4.5m²  [ ] 5.5m²</div>
+                          <div>• Total participants journée : ________</div>
                         </div>
                       </div>
-                    ) : (
-                      <div style={{ textAlign: 'center', color: '#64748b', fontStyle: 'italic', padding: '24px 0', fontSize: '0.85rem' }}>
-                        Pas de séance calculable pour ce jour (contraintes marée / nuit).
+
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                          ⚠️ Consignes sécurité & état de la plage :
+                        </div>
+                        <div style={{ color: '#475569', lineHeight: 1.5 }}>
+                          <div>• Sable : [ ] Dur  [ ] Mou  ·  Bâches d'eau : [ ] Faibles  [ ] Fortes</div>
+                          <div>• Zone baigneurs balisée : [ ] Oui  [ ] Non</div>
+                          <div>• Notes : _______________________________________________</div>
+                        </div>
                       </div>
-                    )
-                  ) : (
-                    day.slots.map(s => {
-                      const slotStorageKey = `${day.ds}-${s.key}`;
-                      return (
+
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                          💶 Bilan des Encaissements du jour :
+                        </div>
+                        <div style={{ color: '#475569', lineHeight: 1.5 }}>
+                          <div>CB : ________ €  ·  Chèques : ________ €  ·  Espèces : ________ €</div>
+                          <div>ANCV : ________ €  ·  Total Journée : __________________ €</div>
+                          <div>Signature responsable : _______________________________</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ========================================================================= */}
+                  {/* PAGES 2+ DU JOUR : UNE PAGE PAR SÉANCE AVEC GRILLE DE 12 PLACES          */}
+                  {/* ========================================================================= */}
+                  {daySlots.map((s, slotIdx) => {
+                    const slotStorageKey = `${day.ds}-${s.key}`;
+                    const slotBookings = getSlotBookings(slotStorageKey);
+                    const bookedCount = emargementMode === 'with_bookings' ? slotBookings.length : 0;
+                    // Exactement 12 lignes d'inscription comme exigé par l'utilisateur
+                    const totalTableRows = Math.max(12, bookedCount);
+                    const rowIndices = Array.from({ length: totalTableRows }, (_, i) => i);
+
+                    return (
+                      <div
+                        key={s.key}
+                        className="agenda-session-page"
+                        style={{
+                          background: '#fff',
+                          border: '2px solid #0f172a',
+                          borderRadius: '10px',
+                          padding: '16px 20px',
+                          color: '#0f172a',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
+                          breakInside: 'avoid',
+                          pageBreakInside: 'avoid',
+                          pageBreakAfter: 'always',
+                          breakAfter: 'page',
+                        }}
+                      >
+                        {/* BANDEAU INDICATEUR ÉCRAN (MASQUÉ À L'IMPRESSION) */}
                         <div
-                          key={s.key}
-                          className="agenda-slot-section"
+                          className="print-hide nop noprint"
                           style={{
-                            border: s.isRejected ? '2px solid #dc2626' : s.isValidated ? '2px solid #16a34a' : '1.5px solid #64748b',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            background: s.isRejected ? '#fff5f5' : '#fff',
+                            background: '#1e293b',
+                            color: '#a7f3d0',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            marginBottom: '12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
                           }}
                         >
-                          {/* BANDEAU DU CRÉNEAU */}
-                          <div
-                            style={{
-                              background: s.isRejected ? '#fee2e2' : s.isValidated ? '#dcfce7' : '#f1f5f9',
-                              borderBottom: '1.5px solid',
-                              borderColor: s.isRejected ? '#fca5a5' : s.isValidated ? '#86efac' : '#cbd5e1',
-                              padding: '6px 12px',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              gap: '6px',
-                            }}
-                          >
-                            {/* Heure encadrée comme sur la photo */}
+                          <span>
+                            📄 {printDayOverview ? `PAGE ${slotIdx + 2} / ${daySlots.length + 1}` : `FICHE SÉANCE ${slotIdx + 1} / ${daySlots.length}`} · ({s.startStr} – {s.endStr}) · GRILLE DE 12 INSCRITS
+                          </span>
+                          <span style={{ color: '#94a3b8' }}>
+                            {day.fullDateStr} · {slotBookings.length} client{slotBookings.length > 1 ? 's' : ''} saisi{slotBookings.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+
+                        {/* EN-TÊTE DE LA SÉANCE */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #0f172a', paddingBottom: '10px', marginBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                          <div>
+                            <div style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>
+                              Char à Voile du Bout du Monde · Plage de Lestrevet · Fiche de Séance & Émargement
+                            </div>
+                            <h2 style={{ margin: '2px 0 0', fontSize: '1.25rem', fontWeight: 900, textTransform: 'capitalize', color: '#0f172a' }}>
+                              {day.fullDateStr}
+                            </h2>
+                            <div style={{ fontSize: '0.74rem', color: '#475569', fontWeight: 600, marginTop: '2px' }}>
+                              Semaine n° {day.holiday.weekNumber} · {day.holiday.isHoliday ? `🎒 ${day.holiday.holidayName} (${day.holiday.zonesLabel})` : 'Période scolaire'}
+                            </div>
+                          </div>
+
+                          {/* GRAND HORAIRE & STATUT DU CRÉNEAU */}
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <div
                                 style={{
                                   background: s.isRejected ? '#dc2626' : s.isValidated ? '#15803d' : '#0f172a',
                                   color: '#fff',
-                                  padding: '3px 10px',
-                                  borderRadius: '16px',
+                                  padding: '4px 14px',
+                                  borderRadius: '20px',
                                   fontWeight: 900,
-                                  fontSize: '0.95rem',
+                                  fontSize: '1.15rem',
                                   letterSpacing: '0.02em',
                                   textDecoration: s.isRejected ? 'line-through' : 'none',
                                 }}
@@ -1327,393 +1570,417 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                               </div>
                               <span
                                 style={{
-                                  fontSize: '0.68rem',
+                                  fontSize: '0.72rem',
                                   fontWeight: 900,
                                   color: '#fff',
                                   background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : '#64748b',
-                                  padding: '2px 7px',
+                                  padding: '3px 8px',
                                   borderRadius: '4px',
                                   textTransform: 'uppercase',
                                 }}
                               >
                                 {s.isRejected ? '⛔ REFUSÉ' : s.isValidated ? '✓ SÉANCE VALIDÉE' : 'EN ATTENTE'}
                               </span>
-                              {s.isRejected && (
-                                <span style={{ fontSize: '0.72rem', color: '#b91c1c', fontWeight: 800 }}>
-                                  ⚠️ Motif : {s.rejectReason || 'Vent hors plage'}
-                                </span>
-                              )}
                             </div>
+                            {s.isRejected && (
+                              <div style={{ fontSize: '0.74rem', color: '#b91c1c', fontWeight: 800 }}>
+                                ⚠️ Motif : {s.rejectReason || 'Vent hors plage'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
-                            {/* Hauteur d'eau début/fin et météo du créneau */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.75rem', fontWeight: 700 }}>
-                              <span style={{ color: '#0369a1', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px', border: '1px solid #bae6fd' }}>
-                                🌊 Début : <strong>{s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}</strong> {s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'} Fin : <strong>{s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}</strong>
-                              </span>
-                              {s.weather && (
-                                <span style={{ color: '#334155' }}>
-                                  💨 <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
-                                  {s.weather.waveH != null && ` · 🌊 ${s.weather.waveH} m`}
-                                </span>
-                              )}
-                            </div>
+                        {/* BANDEAU CONDITIONS CRÉNEAU (MARÉE, HAUTEUR D'EAU, VENT & HOULE) */}
+                        <div
+                          style={{
+                            background: '#f8fafc',
+                            border: '1.5px solid #cbd5e1',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '8px',
+                            marginBottom: '10px',
+                            fontSize: '0.76rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                            <span style={{ color: '#0369a1', fontWeight: 800 }}>
+                              🌊 Hauteur d'eau : <strong>{s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'}</strong> {s.trend === 'down' ? '↘ descente' : s.trend === 'up' ? '↗ montée' : '→ étale'} <strong>{s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}</strong>
+                            </span>
+                            <span style={{ color: '#475569' }}>
+                              BM : <strong>{day.bmTimeStr}</strong> · Coeff : <strong>{day.coeff}</strong>
+                            </span>
                           </div>
 
-                          {/* GESTION & SAISIE DES INSCRIPTIONS VIA L'APPLICATION + TABLEAU D'ÉMARGEMENT IMPRIMABLE */}
-                          {s.isRejected ? (
-                            <div style={{ padding: '14px', textAlign: 'center', color: '#991b1b', background: '#fef2f2', fontStyle: 'italic', fontSize: '0.8rem', fontWeight: 700 }}>
-                              ⛔ Ce créneau est refusé / annulé pour conditions météo défavorables (aucune inscription client).
-                            </div>
-                          ) : emargementMode === 'none' ? (
-                            <div className="print-hide" style={{ padding: '8px 12px', color: '#64748b', fontSize: '0.74rem', fontStyle: 'italic', background: '#f8fafc' }}>
-                              Tableau d'émargement masqué (sélectionné dans le menu déroulant « 4. Option émargement »).
-                            </div>
-                          ) : (
-                            <div style={{ padding: '4px 6px' }}>
-                              {/* 1. INTERFACE DE SAISIE INTERACTIVE DANS L'APPLICATION (Masquée à l'impression) */}
-                              {(() => {
-                                const slotBookings = getSlotBookings(slotStorageKey);
-                                return (
-                                  <>
-                                    <div className="print-hide" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px', marginBottom: '8px' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: slotBookings.length > 0 ? '8px' : 0 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                          <span style={{ fontSize: '0.9rem' }}>👥</span>
-                                          <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>
-                                            Inscriptions clients ({slotBookings.length} réservé{slotBookings.length > 1 ? 's' : ''})
-                                          </strong>
-                                          <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                            · Saisissez via l'appli ou laissez des lignes vierges pour écrire au stylo
-                                          </span>
-                                        </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontWeight: 700 }}>
+                            {s.weather ? (
+                              <span style={{ color: '#166534' }}>
+                                💨 Vent créneau : <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(rafales ${s.weather.gustKts} nds)` : ''} · {s.weather.dir}
+                                {s.weather.waveH != null && ` · 🌊 Houle ${s.weather.waveH} m`}
+                              </span>
+                            ) : day.dayWeather ? (
+                              <span style={{ color: '#166534' }}>
+                                💨 {day.dayWeather.windRange} · {day.dayWeather.dirComp}
+                              </span>
+                            ) : null}
+                            <span style={{ color: '#64748b' }}>
+                              📍 RDV : Poste de secours Lestrevet
+                            </span>
+                          </div>
+                        </div>
 
-                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleAddBooking(slotStorageKey)}
-                                            style={{
-                                              background: '#0284c7',
-                                              color: '#fff',
-                                              border: 'none',
-                                              borderRadius: '6px',
-                                              padding: '5px 10px',
-                                              fontSize: '0.74rem',
-                                              fontWeight: 800,
-                                              cursor: 'pointer',
-                                              display: 'inline-flex',
-                                              alignItems: 'center',
-                                              gap: '4px',
-                                            }}
-                                          >
-                                            <span>+</span> Ajouter un client
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handlePrefillExample(slotStorageKey)}
-                                            style={{
-                                              background: '#fff',
-                                              color: '#475569',
-                                              border: '1px solid #cbd5e1',
-                                              borderRadius: '6px',
-                                              padding: '4px 8px',
-                                              fontSize: '0.72rem',
-                                              cursor: 'pointer',
-                                            }}
-                                            title="Pré-remplir un exemple réaliste (Famille + Duo)"
-                                          >
-                                            ✨ Exemple test
-                                          </button>
-                                          {slotBookings.length > 0 && (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleClearSlotBookings(slotStorageKey)}
-                                              style={{
-                                                background: '#fee2e2',
-                                                color: '#b91c1c',
-                                                border: '1px solid #fca5a5',
-                                                borderRadius: '6px',
-                                                padding: '4px 8px',
-                                                fontSize: '0.72rem',
-                                                cursor: 'pointer',
-                                              }}
-                                              title="Vider les clients de ce créneau"
-                                            >
-                                              🗑️ Vider
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Formulaire de saisie dynamique à l'écran */}
-                                      {slotBookings.length === 0 ? (
-                                        <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '4px 0' }}>
-                                          Aucun client pré-saisi pour ce créneau. Cliquez sur <strong>« + Ajouter un client »</strong> pour noter des réservations à l'avance, ou imprimez directement pour écrire au stylo sur la plage.
-                                        </div>
-                                      ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                          {slotBookings.map((b, bIdx) => (
-                                            <div
-                                              key={b.id || bIdx}
-                                              style={{
-                                                background: '#fff',
-                                                border: '1px solid #cbd5e1',
-                                                borderRadius: '6px',
-                                                padding: '6px 8px',
-                                                display: 'grid',
-                                                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr)) 36px',
-                                                gap: '6px',
-                                                alignItems: 'center',
-                                              }}
-                                            >
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Client / Nom</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.name}
-                                                  placeholder="ex: Famille Dupont"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'name', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Téléphone</label>
-                                                <div style={{ display: 'flex', gap: '3px' }}>
-                                                  <input
-                                                    type="tel"
-                                                    value={b.phone}
-                                                    placeholder="06 00 00 00 00"
-                                                    onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'phone', e.target.value)}
-                                                    style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                  />
-                                                  {b.phone && (
-                                                    <a
-                                                      href={`tel:${b.phone}`}
-                                                      style={{ padding: '4px 6px', background: '#e0f2fe', borderRadius: '4px', textDecoration: 'none', fontSize: '0.75rem' }}
-                                                      title="Appeler le client"
-                                                    >
-                                                      📞
-                                                    </a>
-                                                  )}
-                                                </div>
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Participants</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.pax}
-                                                  placeholder="ex: 3 (2 ad + 1 enf)"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'pax', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Chars (Mono/Bi)</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.chars}
-                                                  placeholder="ex: 1 bi + 1 mono"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'chars', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Formule</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.formula}
-                                                  placeholder="Initiation / Balade"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'formula', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Règlement</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.payment}
-                                                  placeholder="ex: 135€ CB réglé"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'payment', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div>
-                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Combis / Notes</label>
-                                                <input
-                                                  type="text"
-                                                  value={b.notes}
-                                                  placeholder="ex: 2 combis M, 1 S"
-                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'notes', e.target.value)}
-                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                                />
-                                              </div>
-                                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '2px' }}>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleRemoveBooking(slotStorageKey, b.id)}
-                                                  style={{
-                                                    background: '#fee2e2',
-                                                    color: '#dc2626',
-                                                    border: 'none',
-                                                    borderRadius: '4px',
-                                                    width: '28px',
-                                                    height: '28px',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 900,
-                                                    fontSize: '0.75rem',
-                                                  }}
-                                                  title="Supprimer cette inscription"
-                                                >
-                                                  ✕
-                                                </button>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* 2. TABLEAU PROPRE IMPRIMABLE (ET PRÉVISUALISATION DIRECTE) */}
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', background: '#fff' }}>
-                                      <thead>
-                                        <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                          <th style={{ width: '26px', padding: '6px 4px', textAlign: 'center', borderRight: '1px solid #cbd5e1' }}>N°</th>
-                                          <th style={{ width: '28%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>1. Client / Responsable</th>
-                                          <th style={{ width: '16%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>2. Téléphone portable</th>
-                                          <th style={{ width: '12%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>3. Participants</th>
-                                          <th style={{ width: '14%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>4. Chars (M/B)</th>
-                                          <th style={{ width: '14%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>5. Formule & Notes</th>
-                                          <th style={{ width: '16%', padding: '6px 8px', textAlign: 'left' }}>6. Règlement & Émargement</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {/* A) Clients saisis via l'application (imprimés en texte clair net) */}
-                                        {emargementMode === 'with_bookings' &&
-                                          slotBookings.map((b, bIdx) => (
-                                            <tr
-                                              key={b.id || bIdx}
-                                              style={{
-                                                height: '32px',
-                                                borderBottom: '1px solid #94a3b8',
-                                                background: bIdx % 2 === 0 ? '#fff' : '#fcfcfc',
-                                              }}
-                                            >
-                                              <td style={{ textAlign: 'center', fontWeight: 900, color: '#475569', borderRight: '1px solid #e2e8f0', fontSize: '0.72rem' }}>
-                                                {bIdx + 1}.
-                                              </td>
-                                              <td style={{ padding: '4px 8px', fontWeight: 800, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
-                                                {b.name || '—'}
-                                              </td>
-                                              <td style={{ padding: '4px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: '0.76rem' }}>
-                                                {b.phone || '—'}
-                                              </td>
-                                              <td style={{ padding: '4px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0' }}>
-                                                {b.pax || '—'}
-                                              </td>
-                                              <td style={{ padding: '4px 8px', fontWeight: 700, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
-                                                {b.chars || '—'}
-                                              </td>
-                                              <td style={{ padding: '4px 8px', color: '#334155', borderRight: '1px solid #e2e8f0', fontSize: '0.72rem' }}>
-                                                <strong>{b.formula || 'Initiation'}</strong>{b.notes ? ` · ${b.notes}` : ''}
-                                              </td>
-                                              <td style={{ padding: '4px 8px', color: '#0f172a', fontWeight: 700 }}>
-                                                {b.payment || '—'}
-                                              </td>
-                                            </tr>
-                                          ))}
-
-                                        {/* B) Lignes vierges lignées avec hauteur confortable pour écriture manuscrite au stylo sur la plage */}
-                                        {(() => {
-                                          const bookedCount = emargementMode === 'with_bookings' ? slotBookings.length : 0;
-                                          const blankRowsCount = bookedCount > 0 ? 3 : 6;
-                                          const blankIndices = Array.from({ length: blankRowsCount }, (_, i) => bookedCount + i);
-
-                                          return blankIndices.map(rowIdx => (
-                                            <tr
-                                              key={`blank-${rowIdx}`}
-                                              style={{
-                                                height: '34px',
-                                                borderBottom: '1px solid #94a3b8',
-                                                background: '#fff',
-                                              }}
-                                            >
-                                              <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '0.72rem', borderRight: '1px solid #cbd5e1' }}>
-                                                {rowIdx + 1}.
-                                              </td>
-                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                              <td style={{ padding: '0 8px' }}>&nbsp;</td>
-                                            </tr>
-                                          ));
-                                        })()}
-                                      </tbody>
-                                    </table>
-                                  </>
-                                );
-                              })()}
-
-                              {/* POINTAGE & NOTES DE LA SÉANCE */}
-                              <div
-                                style={{
-                                  borderTop: '1px solid #cbd5e1',
-                                  background: '#f8fafc',
-                                  padding: '6px 10px',
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  flexWrap: 'wrap',
-                                  gap: '8px',
-                                  fontSize: '0.72rem',
-                                  color: '#334155',
-                                }}
-                              >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                                  <span style={{ fontWeight: 800, color: '#0f172a' }}>
-                                    🏁 Pointage séance ({s.startStr}–{s.endStr}) :
+                        {/* GESTION & SAISIE DES INSCRIPTIONS VIA L'APPLICATION (ÉCRAN SEUL) */}
+                        {s.isRejected ? (
+                          <div style={{ padding: '16px', textAlign: 'center', color: '#991b1b', background: '#fef2f2', border: '1.5px dashed #fca5a5', borderRadius: '8px', fontStyle: 'italic', fontSize: '0.82rem', fontWeight: 700, margin: '14px 0' }}>
+                            ⛔ Ce créneau est refusé / annulé pour conditions météo défavorables.
+                          </div>
+                        ) : emargementMode === 'none' ? (
+                          <div className="print-hide nop noprint" style={{ padding: '8px 12px', color: '#64748b', fontSize: '0.74rem', fontStyle: 'italic', background: '#f8fafc', borderRadius: '6px', marginBottom: '8px' }}>
+                            Tableau d'émargement masqué (sélectionné dans le menu déroulant « 4. Option émargement »).
+                          </div>
+                        ) : (
+                          <>
+                            {/* Formulaire de saisie dynamique à l'écran (Masqué à l'impression) */}
+                            <div className="print-hide nop noprint" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: slotBookings.length > 0 ? '8px' : 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '0.9rem' }}>👥</span>
+                                  <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>
+                                    Gestion des réservations ({slotBookings.length} client{slotBookings.length > 1 ? 's' : ''} saisi{slotBookings.length > 1 ? 's' : ''})
+                                  </strong>
+                                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                    · Remplissez les inscriptions ou laissez les lignes vierges pour écrire au stylo
                                   </span>
-                                  <span>Chars : <strong>____</strong> (Mono : ___ · Bi : ___)</span>
-                                  <span>· Participants : <strong>____</strong></span>
-                                  <span>· Encaissé séance : <strong>______ €</strong></span>
                                 </div>
-                                <div style={{ flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontWeight: 700, color: '#475569' }}>Voiles & Notes :</span>
-                                  <span style={{ flex: 1, borderBottom: '1px dotted #94a3b8', minWidth: '100px', display: 'inline-block' }}>&nbsp;</span>
+
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddBooking(slotStorageKey)}
+                                    style={{
+                                      background: '#0284c7',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      padding: '5px 10px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 800,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}
+                                  >
+                                    <span>+</span> Ajouter un client
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePrefillExample(slotStorageKey)}
+                                    style={{
+                                      background: '#fff',
+                                      color: '#475569',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '6px',
+                                      padding: '4px 8px',
+                                      fontSize: '0.72rem',
+                                      cursor: 'pointer',
+                                    }}
+                                    title="Pré-remplir un exemple réaliste (Famille + Duo)"
+                                  >
+                                    ✨ Exemple test
+                                  </button>
+                                  {slotBookings.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleClearSlotBookings(slotStorageKey)}
+                                      style={{
+                                        background: '#fee2e2',
+                                        color: '#b91c1c',
+                                        border: '1px solid #fca5a5',
+                                        borderRadius: '6px',
+                                        padding: '4px 8px',
+                                        fontSize: '0.72rem',
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Vider les clients de ce créneau"
+                                    >
+                                      🗑️ Vider
+                                    </button>
+                                  )}
                                 </div>
                               </div>
+
+                              {slotBookings.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  {slotBookings.map((b, bIdx) => (
+                                    <div
+                                      key={b.id || bIdx}
+                                      style={{
+                                        background: '#fff',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '6px',
+                                        padding: '6px 8px',
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr)) 36px',
+                                        gap: '6px',
+                                        alignItems: 'center',
+                                      }}
+                                    >
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Client / Nom</label>
+                                        <input
+                                          type="text"
+                                          value={b.name}
+                                          placeholder="ex: Famille Dupont"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'name', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Téléphone</label>
+                                        <input
+                                          type="tel"
+                                          value={b.phone}
+                                          placeholder="06 00 00 00 00"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'phone', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Participants</label>
+                                        <input
+                                          type="text"
+                                          value={b.pax}
+                                          placeholder="ex: 3 (2 ad + 1 enf)"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'pax', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Chars (Mono/Bi)</label>
+                                        <input
+                                          type="text"
+                                          value={b.chars}
+                                          placeholder="ex: 1 bi + 1 mono"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'chars', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Formule</label>
+                                        <input
+                                          type="text"
+                                          value={b.formula}
+                                          placeholder="Initiation / Balade"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'formula', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Règlement</label>
+                                        <input
+                                          type="text"
+                                          value={b.payment}
+                                          placeholder="ex: 135€ CB réglé"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'payment', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Combis / Notes</label>
+                                        <input
+                                          type="text"
+                                          value={b.notes}
+                                          placeholder="ex: 2 combis M, 1 S"
+                                          onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'notes', e.target.value)}
+                                          style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                        />
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '2px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveBooking(slotStorageKey, b.id)}
+                                          style={{
+                                            background: '#fee2e2',
+                                            color: '#dc2626',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            width: '28px',
+                                            height: '28px',
+                                            cursor: 'pointer',
+                                            fontWeight: 900,
+                                            fontSize: '0.75rem',
+                                          }}
+                                          title="Supprimer cette inscription"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          )}
+
+                            {/* GRAND TABLEAU D'ÉMARGEMENT DE 12 PERSONNES ("possibilité d'inscrire 12 personnes") */}
+                            <div style={{ border: '1.5px solid #0f172a', borderRadius: '6px', overflow: 'hidden', marginBottom: '8px' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', background: '#fff' }}>
+                                <thead>
+                                  <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    <th style={{ width: '28px', padding: '6px 4px', textAlign: 'center', borderRight: '1px solid #cbd5e1' }}>N°</th>
+                                    <th style={{ width: '25%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>1. Client / Nom & Prénom</th>
+                                    <th style={{ width: '15%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>2. Téléphone</th>
+                                    <th style={{ width: '10%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>3. Pax (Ad/Enf)</th>
+                                    <th style={{ width: '12%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>4. Chars (M/Bi/N°)</th>
+                                    <th style={{ width: '14%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>5. Formule & Matériel</th>
+                                    <th style={{ width: '12%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>6. Règlement</th>
+                                    <th style={{ width: '12%', padding: '6px 8px', textAlign: 'left' }}>7. Signature client</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rowIndices.map(rowIdx => {
+                                    const booking = emargementMode === 'with_bookings' && rowIdx < slotBookings.length ? slotBookings[rowIdx] : null;
+
+                                    if (booking) {
+                                      return (
+                                        <tr
+                                          key={booking.id || rowIdx}
+                                          style={{
+                                            height: '33px',
+                                            borderBottom: rowIdx === totalTableRows - 1 ? 'none' : '1px solid #94a3b8',
+                                            background: rowIdx % 2 === 0 ? '#fff' : '#fcfcfc',
+                                          }}
+                                        >
+                                          <td style={{ textAlign: 'center', fontWeight: 900, color: '#0f172a', borderRight: '1px solid #e2e8f0', fontSize: '0.74rem' }}>
+                                            {rowIdx + 1}.
+                                          </td>
+                                          <td style={{ padding: '3px 8px', fontWeight: 800, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
+                                            {booking.name || '—'}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: '0.74rem' }}>
+                                            {booking.phone || '—'}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0' }}>
+                                            {booking.pax || '—'}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', fontWeight: 700, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
+                                            {booking.chars || '—'}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', color: '#334155', borderRight: '1px solid #e2e8f0', fontSize: '0.72rem' }}>
+                                            <strong>{booking.formula || 'Initiation'}</strong>{booking.notes ? ` · ${booking.notes}` : ''}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', color: '#0f172a', fontWeight: 700, borderRight: '1px solid #e2e8f0' }}>
+                                            {booking.payment || '—'}
+                                          </td>
+                                          <td style={{ padding: '3px 8px', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.7rem' }}>
+                                            &nbsp;
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+
+                                    // Ligne manuscrite vierge (1 à 12) avec hauteur confortable pour écriture au stylo
+                                    return (
+                                      <tr
+                                        key={`blank-${rowIdx}`}
+                                        style={{
+                                          height: '33px',
+                                          borderBottom: rowIdx === totalTableRows - 1 ? 'none' : '1px solid #94a3b8',
+                                          background: '#fff',
+                                        }}
+                                      >
+                                        <td style={{ textAlign: 'center', color: '#64748b', fontWeight: 900, fontSize: '0.74rem', borderRight: '1px solid #cbd5e1' }}>
+                                          {rowIdx + 1}.
+                                        </td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 8px' }}>&nbsp;</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        )}
+
+                        {/* POINTAGE SÉANCE (CHARS SORTIS, PARTICIPANTS, ENCAISSÉ) */}
+                        <div
+                          style={{
+                            border: '1.5px solid #cbd5e1',
+                            borderRadius: '6px',
+                            background: '#f8fafc',
+                            padding: '6px 12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '8px',
+                            fontSize: '0.73rem',
+                            color: '#334155',
+                            marginBottom: '10px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                              🏁 Bilan Séance ({s.startStr}–{s.endStr}) :
+                            </span>
+                            <span>Chars : <strong>____</strong> (Mono : ___ · Bi : ___)</span>
+                            <span>· Participants : <strong>____</strong></span>
+                            <span>· Encaissé séance : <strong>______ €</strong></span>
+                          </div>
+                          <div>
+                            <span>Reste à percevoir : <strong>______ €</strong></span>
+                          </div>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
 
-                {/* 5. BAS DE PAGE JOURNALIER : POINTAGE & ENCAISSEMENTS */}
-                <div style={{ marginTop: '16px', paddingTop: '10px', borderTop: '2px solid #0f172a', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', fontSize: '0.75rem' }}>
-                  <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
-                      🏁 Pointage matériel & chars sortis :
-                    </div>
-                    <div style={{ color: '#475569', lineHeight: 1.6 }}>
-                      <div>[ ] Total Chars sortis : ________ (Mono : ____  ·  Bi : ____)</div>
-                      <div>[ ] Participants : ________ (Adultes : ____  ·  Enfants : ____)</div>
-                    </div>
-                  </div>
-
-                  <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
-                      💶 Bilan des Encaissements du jour :
-                    </div>
-                    <div style={{ color: '#475569', lineHeight: 1.6 }}>
-                      <div>CB : ________ €  ·  Chèques : ________ €  ·  Espèces : ________ €  ·  ANCV : ________ €</div>
-                      <div>Observations terrain : _______________________________________________</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
+                        {/* DÉBRIEFING & REMARQUES MONITEUR */}
+                        <div
+                          style={{
+                            border: '1.5px solid #0f172a',
+                            borderRadius: '6px',
+                            padding: '8px 12px',
+                            background: '#fff',
+                            fontSize: '0.73rem',
+                            color: '#334155',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>
+                            <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                              ✍️ Débriefing pédagogique & observations moniteur :
+                            </span>
+                            <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+                              <span>Moniteur(s) : ___________________________</span>
+                              <span>Voiles : ___________________</span>
+                              <span>Vent réel : _______ nds</span>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 700 }}>Observations terrain & sécurité :</span>
+                              <span style={{ flex: 1, borderBottom: '1px dotted #94a3b8', height: '14px', display: 'inline-block' }}>&nbsp;</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 700 }}>Niveau du groupe & progression :</span>
+                              <span style={{ flex: 1, borderBottom: '1px dotted #94a3b8', height: '14px', display: 'inline-block' }}>&nbsp;</span>
+                              <span style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 700 }}>Visa moniteur :</span>
+                              <span style={{ width: '120px', borderBottom: '1px solid #0f172a', height: '14px', display: 'inline-block' }}>&nbsp;</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
           </div>
         )}
 
