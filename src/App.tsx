@@ -70,19 +70,17 @@ const defaultSettings: AppSettings = {
 
 export const App: React.FC = () => {
   // Navigation tabs: 1 = Calendrier, 2 = Focus, 3 = Fiche Agenda Papier
+  // L'application s'ouvre TOUJOURS sur le Calendrier (Tab 1) par défaut
   const [activeTab, setActiveTab] = useState<number>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam === '3' || params.has('autoprint')) return 3;
       if (tabParam === '2') return 2;
-      if (tabParam === '1') return 1;
-
-      const saved = localStorage.getItem('cvTab');
-      return saved === '3' ? 3 : saved === '2' ? 2 : 1;
     } catch {
-      return 1;
+      // ignore
     }
+    return 1; // Toujours le calendrier au démarrage
   });
 
   // Current year & month for calendar grid, and selected date
@@ -133,6 +131,12 @@ export const App: React.FC = () => {
 
   // Initialize selected date based on today if in valid range
   useEffect(() => {
+    try {
+      localStorage.removeItem('cvTab');
+    } catch {
+      // ignore
+    }
+
     const today = tdy();
     if (today >= minDs && today <= maxDs) {
       setSelectedDate(today);
@@ -193,11 +197,6 @@ export const App: React.FC = () => {
 
   const handleTabChange = (tab: number) => {
     setActiveTab(tab);
-    try {
-      localStorage.setItem('cvTab', String(tab));
-    } catch {
-      // ignore
-    }
   };
 
   const handlePrevMonth = () => {

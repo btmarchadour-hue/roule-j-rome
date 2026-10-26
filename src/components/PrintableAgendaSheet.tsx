@@ -46,9 +46,10 @@ interface PrintableAgendaSheetProps {
   ) => void;
 }
 
-type RangeOption = '5days' | 'week' | 'month' | 'selected' | 'custom' | 'all';
+type RangeOption = 'selected' | '5days' | 'week' | 'month' | 'custom' | 'all';
 export type LayoutOption = 'agenda' | 'strips' | 'cards' | 'table';
-export type FilterOption = 'validated' | 'validated_only' | 'all' | 'rejected_only';
+export type FilterOption = 'validated' | 'validated_only' | 'navigable' | 'all';
+export type EmargementOption = 'with_bookings' | 'handwritten' | 'none';
 
 interface DayPrintData {
   ds: string;
@@ -131,11 +132,15 @@ interface DayPrintData {
 }
 
 export interface AgendaBookingItem {
-  name: string;
-  chars: string;
-  ages: string;
-  phone: string;
-  payment: string;
+  id: string;
+  name: string;        // Nom / Responsable
+  phone: string;       // Téléphone portable
+  pax: string;         // Participants (ex: 3 pers.)
+  chars: string;       // Matériel / Chars (Mono / Bi)
+  formula: string;     // Formule (Initiation, Perf, Balade, Famille...)
+  payment: string;     // Règlement (CB, Chèque, Espèces, ANCV, Acompte)
+  status: 'valid' | 'pending' | 'signed'; // Pointage
+  notes: string;       // Remarques, pointures, casques
 }
 
 export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
@@ -153,54 +158,218 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   onToggleSlotValidation,
   onSetSlotDecision,
 }) => {
-  const [rangeMode, setRangeMode] = useState<RangeOption>('5days');
-  const [layoutMode, setLayoutMode] = useState<LayoutOption>('agenda');
-  const [filterMode, setFilterMode] = useState<FilterOption>('validated');
-  const [showRejected, setShowRejected] = useState<boolean>(true);
-  const [includeNotesBox, setIncludeNotesBox] = useState<boolean>(true);
-
-  // Inscriptions & réservations terrain (mémorisation locale)
-  const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>(() => {
-    try {
-      const saved = localStorage.getItem('char_agenda_bookings_v2');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const getBooking = (slotKey: string, lineIndex: number): AgendaBookingItem => {
-    const list = bookingsMap[slotKey] || [];
-    return list[lineIndex] || { name: '', chars: '', ages: '', phone: '', payment: '' };
-  };
-
-  const updateBooking = (
-    slotKey: string,
-    lineIndex: number,
-    field: keyof AgendaBookingItem,
-    value: string
-  ) => {
-    setBookingsMap(prev => {
-      const list = [...(prev[slotKey] || [])];
-      while (list.length <= lineIndex) {
-        list.push({ name: '', chars: '', ages: '', phone: '', payment: '' });
-      }
-      list[lineIndex] = { ...list[lineIndex], [field]: value };
-      const next = { ...prev, [slotKey]: list };
-      try {
-        localStorage.setItem('char_agenda_bookings_v2', JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  };
-
   const todayStr = useMemo(() => tdy(), []);
   const allAvailableDates = useMemo(() => DATA.map(d => d[0]), []);
 
-  const [customStartDate, setCustomStartDate] = useState<string>(todayStr);
-  const [customEndDate, setCustomEndDate] = useState<string>(shf(todayStr, 7));
+  // 1. Période à imprimer
+  const [rangeMode, setRangeMode] = useState<RangeOption>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const r = p.get('range') as RangeOption;
+      if (r && ['selected', '5days', 'week', 'month', 'custom', 'all'].includes(r)) return r;
+      const s = localStorage.getItem('char_agenda_range') as RangeOption;
+      if (s && ['selected', '5days', 'week', 'month', 'custom', 'all'].includes(s)) return s;
+    } catch {
+      // ignore
+    }
+    return 'selected';
+  });
+
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const s = p.get('start');
+      if (s) return s;
+      const saved = localStorage.getItem('char_agenda_start');
+      if (saved) return saved;
+    } catch {
+      // ignore
+    }
+    return selectedDate || todayStr;
+  });
+
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const e = p.get('end');
+      if (e) return e;
+      const saved = localStorage.getItem('char_agenda_end');
+      if (saved) return saved;
+    } catch {
+      // ignore
+    }
+    return shf(selectedDate || todayStr, 7);
+  });
+
+  // 2. Séances affichées
+  const [filterMode, setFilterMode] = useState<FilterOption>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const f = p.get('filter') as FilterOption;
+      if (f && ['validated', 'validated_only', 'navigable', 'all'].includes(f)) return f;
+      const saved = localStorage.getItem('char_agenda_filter') as FilterOption;
+      if (saved && ['validated', 'validated_only', 'navigable', 'all'].includes(saved)) return saved;
+    } catch {
+      // ignore
+    }
+    return 'validated';
+  });
+
+  // 3. Format d'impression
+  const [layoutMode, setLayoutMode] = useState<LayoutOption>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const l = p.get('layout') as LayoutOption;
+      if (l && ['agenda', 'strips', 'cards', 'table'].includes(l)) return l;
+      const saved = localStorage.getItem('char_agenda_layout') as LayoutOption;
+      if (saved && ['agenda', 'strips', 'cards', 'table'].includes(saved)) return saved;
+    } catch {
+      // ignore
+    }
+    return 'agenda';
+  });
+
+  // 4. Option émargement
+  const [emargementMode, setEmargementMode] = useState<EmargementOption>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const e = p.get('emargement') as EmargementOption;
+      if (e && ['with_bookings', 'handwritten', 'none'].includes(e)) return e;
+      const saved = localStorage.getItem('char_agenda_emargement') as EmargementOption;
+      if (saved && ['with_bookings', 'handwritten', 'none'].includes(saved)) return saved;
+    } catch {
+      // ignore
+    }
+    return 'with_bookings';
+  });
+
+  const [showRejected, setShowRejected] = useState<boolean>(true);
+  const includeNotesBox = emargementMode !== 'none';
+
+  // Inscriptions & réservations clients via l'application (mémorisation locale persistante v3)
+  const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>(() => {
+    try {
+      const saved = localStorage.getItem('char_agenda_bookings_v3');
+      if (saved) return JSON.parse(saved);
+      // Migration automatique v2 -> v3 si disponible
+      const old = localStorage.getItem('char_agenda_bookings_v2');
+      if (old) {
+        const parsed = JSON.parse(old);
+        const migrated: Record<string, AgendaBookingItem[]> = {};
+        for (const [key, items] of Object.entries(parsed)) {
+          if (Array.isArray(items)) {
+            migrated[key] = items
+              .filter((it: any) => it && (it.name || it.phone || it.chars || it.payment))
+              .map((it: any, i: number) => ({
+                id: `b_${Date.now()}_${i}`,
+                name: it.name || '',
+                phone: it.phone || '',
+                pax: it.ages ? `${it.ages}` : '',
+                chars: it.chars || '',
+                formula: 'Initiation',
+                payment: it.payment || '',
+                status: 'valid',
+                notes: '',
+              }));
+          }
+        }
+        return migrated;
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+
+  const saveBookingsMap = (next: Record<string, AgendaBookingItem[]>) => {
+    setBookingsMap(next);
+    try {
+      localStorage.setItem('char_agenda_bookings_v3', JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  const getSlotBookings = (slotKey: string): AgendaBookingItem[] => {
+    return bookingsMap[slotKey] || [];
+  };
+
+  const handleAddBooking = (slotKey: string) => {
+    const list = getSlotBookings(slotKey);
+    const newBooking: AgendaBookingItem = {
+      id: `bk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: '',
+      phone: '',
+      pax: '',
+      chars: '',
+      formula: 'Initiation',
+      payment: '',
+      status: 'pending',
+      notes: '',
+    };
+    saveBookingsMap({
+      ...bookingsMap,
+      [slotKey]: [...list, newBooking],
+    });
+  };
+
+  const handleUpdateBooking = (
+    slotKey: string,
+    id: string,
+    field: keyof AgendaBookingItem,
+    value: any
+  ) => {
+    const list = getSlotBookings(slotKey).map(b => (b.id === id ? { ...b, [field]: value } : b));
+    saveBookingsMap({
+      ...bookingsMap,
+      [slotKey]: list,
+    });
+  };
+
+  const handleRemoveBooking = (slotKey: string, id: string) => {
+    const list = getSlotBookings(slotKey).filter(b => b.id !== id);
+    saveBookingsMap({
+      ...bookingsMap,
+      [slotKey]: list,
+    });
+  };
+
+  const handlePrefillExample = (slotKey: string) => {
+    const examples: AgendaBookingItem[] = [
+      {
+        id: `bk_ex1_${Date.now()}`,
+        name: 'Famille Dupont (Marc)',
+        phone: '06 12 34 56 78',
+        pax: '3 pers. (2 ad + 1 enf 12a)',
+        chars: '1 biplace + 1 mono',
+        formula: 'Initiation 2h',
+        payment: '135 € réglé CB',
+        status: 'valid',
+        notes: 'Combinaisons : 2 M, 1 S · Casques M/S',
+      },
+      {
+        id: `bk_ex2_${Date.now()}`,
+        name: 'Thomas & Julie',
+        phone: '06 98 76 54 32',
+        pax: '2 adultes',
+        chars: '2 monoplaces',
+        formula: 'Perfectionnement',
+        payment: 'Acompte 40 € versé (Solde 60 €)',
+        status: 'pending',
+        notes: 'Ont déjà pratiqué l’été dernier',
+      },
+    ];
+    saveBookingsMap({
+      ...bookingsMap,
+      [slotKey]: examples,
+    });
+  };
+
+  const handleClearSlotBookings = (slotKey: string) => {
+    const next = { ...bookingsMap };
+    delete next[slotKey];
+    saveBookingsMap(next);
+  };
 
   // Compute active date list according to rangeMode
   const targetDates = useMemo(() => {
@@ -229,11 +398,21 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       return allAvailableDates.filter(d => d.startsWith(prefix));
     }
     if (rangeMode === 'custom') {
-      const start = customStartDate || todayStr;
+      const start = customStartDate || selectedDate || todayStr;
       const end = customEndDate || shf(start, 7);
       const minD = start <= end ? start : end;
       const maxD = start <= end ? end : start;
-      return allAvailableDates.filter(d => d >= minD && d <= maxD);
+      const dates: string[] = [];
+      let cur = minD;
+      let count = 0;
+      while (cur <= maxD && count < 500) {
+        if (allAvailableDates.includes(cur)) {
+          dates.push(cur);
+        }
+        cur = shf(cur, 1);
+        count++;
+      }
+      return dates.length > 0 ? dates : [selectedDate];
     }
     // 'all'
     return allAvailableDates;
@@ -413,14 +592,14 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       const filteredSlots = rawSlots.filter(s => {
         if (s.isRejected) {
           if (!showRejected) return false;
-          if (filterMode === 'validated_only') return false;
-          return true; // Included in 'validated' (decisions), 'all', and 'rejected_only'
-        }
-        if (filterMode === 'rejected_only') {
-          return false;
+          if (filterMode === 'validated_only' || filterMode === 'navigable') return false;
+          return true; // Included in 'validated' (decisions) and 'all'
         }
         if (filterMode === 'validated' || filterMode === 'validated_only') {
           return s.isValidated;
+        }
+        if (filterMode === 'navigable') {
+          return !s.isRejected;
         }
         // 'all' includes pending as well
         return true;
@@ -573,9 +752,22 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const standalonePrintUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?tab=3&autoprint=1`
-    : '';
+  const standalonePrintUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const params = new URLSearchParams();
+    params.set('tab', '3');
+    params.set('autoprint', '1');
+    params.set('range', rangeMode);
+    params.set('layout', layoutMode);
+    params.set('filter', filterMode);
+    params.set('emargement', emargementMode);
+    params.set('sel', selectedDate);
+    if (rangeMode === 'custom') {
+      params.set('start', customStartDate);
+      params.set('end', customEndDate);
+    }
+    return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+  }, [rangeMode, layoutMode, filterMode, emargementMode, selectedDate, customStartDate, customEndDate]);
 
   const handleValidateAllInView = (mode: 'all' | 'wind_only' = 'all') => {
     if (!onValidateDay) return;
@@ -586,20 +778,30 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     }
   };
 
+  const selectedMonthLabel = useMemo(() => {
+    const [sy, sm] = selectedDate.split('-').map(Number);
+    return new Date(Date.UTC(sy, sm - 1, 1)).toLocaleDateString('fr-FR', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  }, [selectedDate]);
+
   return (
     <div className="printable-agenda-wrapper">
-      {/* Configuration & Controls Toolbar (Hidden on print) */}
-      <div className="card nop print-toolbar" style={{ marginBottom: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+      {/* Barre de configuration épurée avec menus déroulants (Masquée à l'impression) */}
+      <div className="card nop print-toolbar" style={{ marginBottom: '16px', background: 'var(--card, #fff)', border: '1.5px solid var(--bd, #cbd5e1)', borderRadius: '12px', padding: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--bd, #e2e8f0)', paddingBottom: '12px', marginBottom: '14px' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>📋</span> Fiche Agenda Papier à imprimer
+            <h2 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--tx, #111)' }}>
+              <span>📋</span> Fiche Agenda Papier & Inscriptions Terrain
             </h2>
-            <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--mu, #666)' }}>
-              Horaires des séances, hauteurs d'eau au début et en fin de séance, météo détaillée pour les 5 prochains jours. Format optimisé pour collage dans votre agenda ou carnet de bord.
+            <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--mu, #64748b)' }}>
+              Horaires de roulage, marées, météo et gestion des inscriptions clients. Format optimisé pour collage ou classeur.
             </p>
           </div>
 
+          {/* Boutons d'action rapides */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               type="button"
@@ -609,32 +811,20 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 margin: 0,
                 background: '#16a34a',
                 color: '#fff',
-                padding: '9px 16px',
-                fontSize: '0.82rem',
+                padding: '10px 18px',
+                fontSize: '0.84rem',
                 borderRadius: '8px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '8px',
                 boxShadow: '0 2px 6px rgba(22, 163, 74, 0.3)',
-                fontWeight: 800,
+                fontWeight: 900,
                 cursor: 'pointer',
+                border: 'none',
               }}
-              title={
-                layoutMode === 'strips'
-                  ? 'Imprime uniquement les étiquettes / bandelettes à découper (tout le reste du site est masqué)'
-                  : layoutMode === 'agenda'
-                  ? 'Imprime uniquement les fiches agendas quotidiennes (tout le reste du site est masqué)'
-                  : 'Imprime uniquement la sélection'
-              }
+              title="Lancer l'impression directe de la sélection"
             >
-              <span>🖨️</span>{' '}
-              {layoutMode === 'strips'
-                ? 'Imprimer uniquement les Étiquettes'
-                : layoutMode === 'agenda'
-                ? 'Imprimer uniquement les Fiches Agendas'
-                : layoutMode === 'cards'
-                ? 'Imprimer les Fiches Blocs'
-                : 'Imprimer le Tableau A4'}
+              <span>🖨️</span> Imprimer
             </button>
 
             {standalonePrintUrl && (
@@ -647,17 +837,17 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   margin: 0,
                   background: '#0284c7',
                   color: '#fff',
-                  padding: '9px 14px',
-                  fontSize: '0.82rem',
+                  padding: '10px 16px',
+                  fontSize: '0.84rem',
                   borderRadius: '8px',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px',
+                  gap: '8px',
                   textDecoration: 'none',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
                 }}
-                title="Ouvrir dans un nouvel onglet pour imprimer uniquement la fiche (recommandé si l'impression est bloquée dans la prévisualisation)"
+                title="Ouvrir dans un nouvel onglet avec la sélection exacte (recommandé si l'impression est bloquée par le navigateur)"
               >
                 <span>🚀</span> Nouvel onglet (Impression pure)
               </a>
@@ -671,353 +861,209 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                 margin: 0,
                 background: '#475569',
                 color: '#fff',
-                padding: '9px 14px',
-                fontSize: '0.82rem',
+                padding: '10px 14px',
+                fontSize: '0.84rem',
                 borderRadius: '8px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
                 fontWeight: 700,
                 cursor: 'pointer',
+                border: 'none',
               }}
-              title="Télécharger uniquement la fiche/étiquette en HTML autonome prêt pour impression ou PDF"
+              title="Télécharger la fiche en fichier HTML autonome"
             >
-              <span>💾</span> Télécharger (HTML / PDF)
+              <span>💾</span> Télécharger HTML
             </button>
           </div>
         </div>
 
-        {/* Info barre astuce raccourci */}
-        <div style={{ marginTop: '10px', padding: '6px 10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.73rem', color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        {/* LES 4 MENUS DÉROULANTS PAR OPTIONS */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
+          {/* 1. Période à imprimer */}
           <div>
-            💡 <strong>Raccourci clavier :</strong> Vous pouvez aussi appuyer directement sur <strong>Ctrl + P</strong> (ou <strong>Cmd + P</strong> sur Mac) pour ouvrir la boîte d'impression.
+            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #64748b)', fontWeight: 800, display: 'block', marginBottom: '6px' }}>
+              1. Période à imprimer
+            </label>
+            <select
+              value={rangeMode}
+              onChange={e => {
+                const val = e.target.value as RangeOption;
+                setRangeMode(val);
+                try { localStorage.setItem('char_agenda_range', val); } catch {}
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--bd, #cbd5e1)',
+                background: 'var(--card, #fff)',
+                color: 'var(--tx, #111)',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="selected">🎯 Jour sélectionné ({selectedDate})</option>
+              <option value="5days">🌟 5 prochains jours (dès aujourd'hui)</option>
+              <option value="week">📅 Semaine en cours (7 jours)</option>
+              <option value="month">📆 Mois affiché ({selectedMonthLabel})</option>
+              <option value="custom">🗓️ De date à date (personnalisée)...</option>
+              <option value="all">🌊 Toute la saison (saison complète)</option>
+            </select>
           </div>
-          <div style={{ fontSize: '0.7rem', color: '#0369a1', fontWeight: 600 }}>
-            Si la fenêtre d'impression ne s'ouvre pas dans cette prévisualisation, cliquez sur <em>« 🚀 Ouvrir en plein écran & Imprimer »</em> !
+
+          {/* 2. Séances affichées */}
+          <div>
+            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #64748b)', fontWeight: 800, display: 'block', marginBottom: '6px' }}>
+              2. Séances affichées
+            </label>
+            <select
+              value={filterMode}
+              onChange={e => {
+                const val = e.target.value as FilterOption;
+                setFilterMode(val);
+                try { localStorage.setItem('char_agenda_filter', val); } catch {}
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--bd, #cbd5e1)',
+                background: 'var(--card, #fff)',
+                color: 'var(--tx, #111)',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="validated">✓ Validées & Refusées (toutes les décisions)</option>
+              <option value="validated_only">✓ Validées seules (créneaux confirmés)</option>
+              <option value="navigable">💨 Navigables uniquement (vent & marée OK)</option>
+              <option value="all">📋 Toutes les séances (avec créneaux en attente)</option>
+            </select>
+          </div>
+
+          {/* 3. Format d'impression */}
+          <div>
+            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #64748b)', fontWeight: 800, display: 'block', marginBottom: '6px' }}>
+              3. Format d'impression
+            </label>
+            <select
+              value={layoutMode}
+              onChange={e => {
+                const val = e.target.value as LayoutOption;
+                setLayoutMode(val);
+                try { localStorage.setItem('char_agenda_layout', val); } catch {}
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--bd, #cbd5e1)',
+                background: 'var(--card, #fff)',
+                color: 'var(--tx, #111)',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="agenda">📁 Fiche Agenda Quotidienne (A4/A5 classeur, planning & clients)</option>
+              <option value="strips">✂️ Bandelettes / Étiquettes compactes (agenda de poche)</option>
+              <option value="cards">📑 Fiches Blocs synthétiques</option>
+              <option value="table">📊 Grand Tableau récapitulatif (A4 paysage)</option>
+            </select>
+          </div>
+
+          {/* 4. Option émargement */}
+          <div>
+            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #64748b)', fontWeight: 800, display: 'block', marginBottom: '6px' }}>
+              4. Option émargement
+            </label>
+            <select
+              value={emargementMode}
+              onChange={e => {
+                const val = e.target.value as EmargementOption;
+                setEmargementMode(val);
+                try { localStorage.setItem('char_agenda_emargement', val); } catch {}
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--bd, #cbd5e1)',
+                background: 'var(--card, #fff)',
+                color: 'var(--tx, #111)',
+                fontWeight: 800,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="with_bookings">Tableau complet (clients saisis + lignes d'écriture manuscrite)</option>
+              <option value="handwritten">Lignes vierges d'écriture manuscrite seules</option>
+              <option value="none">Sans tableau d'émargement (horaires & météo seuls)</option>
+            </select>
           </div>
         </div>
 
-        {/* Modal si print bloqué */}
-        {showPrintModal && (
-          <div style={{ marginTop: '10px', padding: '12px', background: '#fef2f2', border: '1.5px solid #ef4444', borderRadius: '8px', fontSize: '0.78rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <strong style={{ color: '#b91c1c', fontSize: '0.85rem' }}>⚠️ Fenêtre d'impression restreinte par votre navigateur</strong>
-                <p style={{ margin: '4px 0 8px', color: '#7f1d1d' }}>
-                  Le navigateur interdit aux applications intégrées dans une iframe de lancer la boîte d'impression directement. Voici les 2 solutions instantanées :
-                </p>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {standalonePrintUrl && (
-                    <a
-                      href={standalonePrintUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ background: '#0284c7', color: '#fff', padding: '6px 12px', borderRadius: '6px', textDecoration: 'none', fontWeight: 800, fontSize: '0.76rem' }}
-                    >
-                      🚀 Ouvrir dans un nouvel onglet & Imprimer
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleDownloadHtml}
-                    style={{ background: '#16a34a', color: '#fff', padding: '6px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: '0.76rem' }}
-                  >
-                    💾 Télécharger le fichier (.html / PDF)
-                  </button>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPrintModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '1rem', cursor: 'pointer', color: '#7f1d1d', fontWeight: 800 }}
-              >
-                ✕
-              </button>
-            </div>
+        {/* Sélecteur de date à date quand rangeMode === 'custom' */}
+        {rangeMode === 'custom' && (
+          <div style={{ marginTop: '12px', padding: '10px 14px', background: '#f0f9ff', border: '1.5px solid #0284c7', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 900, color: '#0369a1' }}>
+              🗓️ Sélection de date à date :
+            </span>
+            <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: '#0f172a' }}>
+              <span>Date de début (Du) :</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={e => {
+                  setCustomStartDate(e.target.value);
+                  try { localStorage.setItem('char_agenda_start', e.target.value); } catch {}
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #0284c7',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  background: '#fff',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: '#0f172a' }}>
+              <span>Date de fin (Au) :</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={e => {
+                  setCustomEndDate(e.target.value);
+                  try { localStorage.setItem('char_agenda_end', e.target.value); } catch {}
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #0284c7',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  background: '#fff',
+                }}
+              />
+            </label>
+            <span style={{ fontSize: '0.76rem', color: '#0369a1', fontWeight: 700 }}>
+              ➔ <strong>{daysData.length} jour{daysData.length > 1 ? 's' : ''}</strong> seront exactement imprimés
+            </span>
           </div>
         )}
 
-        {/* Filter & Layout Selectors */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--bd, #e5e7eb)' }}>
-          {/* Période */}
+        {/* Bandeau indicateur d'état */}
+        <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--bd, #e2e8f0)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '0.76rem', color: 'var(--mu, #64748b)' }}>
           <div>
-            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
-              Période à imprimer
-            </label>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === 'selected' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('selected')}
-                title="Imprimer uniquement la journée sélectionnée"
-              >
-                🎯 Jour ({selectedDate})
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === '5days' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('5days')}
-              >
-                🌟 5 prochains jours
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === 'week' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('week')}
-              >
-                Semaine (7 j)
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === 'month' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('month')}
-              >
-                Mois affiché
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === 'custom' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('custom')}
-              >
-                📅 De date à date
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${rangeMode === 'all' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setRangeMode('all')}
-              >
-                Toute la saison
-              </button>
-            </div>
-
-            {rangeMode === 'custom' && (
-              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <label style={{ fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>Du :</span>
-                  <input
-                    type="date"
-                    value={customStartDate}
-                    onChange={e => setCustomStartDate(e.target.value)}
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--bd, #cbd5e1)',
-                      fontSize: '0.75rem',
-                      background: 'var(--card, #fff)',
-                      color: 'inherit',
-                    }}
-                  />
-                </label>
-                <label style={{ fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>Au :</span>
-                  <input
-                    type="date"
-                    value={customEndDate}
-                    onChange={e => setCustomEndDate(e.target.value)}
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--bd, #cbd5e1)',
-                      fontSize: '0.75rem',
-                      background: 'var(--card, #fff)',
-                      color: 'inherit',
-                    }}
-                  />
-                </label>
-              </div>
-            )}
+            <strong style={{ color: 'var(--tx, #111)' }}>{daysData.length} jour{daysData.length > 1 ? 's' : ''}</strong> sélectionnés · <strong style={{ color: 'var(--tx, #111)' }}>{totalSlotsCount} séance{totalSlotsCount > 1 ? 's' : ''} validée{totalSlotsCount > 1 ? 's' : ''}</strong>
+            {totalRejectedSlotsCount > 0 && <span style={{ color: '#dc2626', fontWeight: 700 }}> · {totalRejectedSlotsCount} refusée{totalRejectedSlotsCount > 1 ? 's' : ''}</span>}
           </div>
 
-          {/* Filtrage séances */}
-          <div>
-            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
-              Séances affichées
-            </label>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`cal-nav-btn ${filterMode === 'validated' && showRejected ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => {
-                  setFilterMode('validated');
-                  setShowRejected(true);
-                }}
-                title="Affiche les décisions prises : séances validées (vert) et séances refusées (rouge avec motif)"
-              >
-                ✓ Validées & Refusées
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${filterMode === 'validated_only' || (filterMode === 'validated' && !showRejected) ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => {
-                  setFilterMode('validated_only');
-                  setShowRejected(false);
-                }}
-                title="Affiche uniquement les séances validées"
-              >
-                Validées seules
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${filterMode === 'all' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => {
-                  setFilterMode('all');
-                  setShowRejected(true);
-                }}
-                title="Toutes les séances (y compris créneaux en attente)"
-              >
-                Toutes (avec en attente)
-              </button>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.73rem', cursor: 'pointer', marginTop: '6px', color: '#b91c1c', fontWeight: 700 }}>
-              <input
-                type="checkbox"
-                checked={showRejected}
-                onChange={e => setShowRejected(e.target.checked)}
-              />
-              <span>⛔ Indiquer clairement les refus sur l'étiquette</span>
-            </label>
-          </div>
-
-          {/* Format mise en page */}
-          <div>
-            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
-              Format de découpe / collage
-            </label>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`cal-nav-btn ${layoutMode === 'agenda' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px', fontWeight: layoutMode === 'agenda' ? 900 : 500 }}
-                onClick={() => setLayoutMode('agenda')}
-                title="Format compact 1 page par jour pour petit classeur ou carnet : Marées, Coeff, Vacances et lignes manuscrites sans texte d'exemple"
-              >
-                📁 Fiche Journée (Petit Classeur / A5)
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${layoutMode === 'strips' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px', fontWeight: layoutMode === 'strips' ? 900 : 500 }}
-                onClick={() => setLayoutMode('strips')}
-                title="Bandelettes étroites (~68mm) prêtes à découper et coller directement dans les colonnes d'un agenda"
-              >
-                ✂️ Étiquettes (À coller dans l'agenda)
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${layoutMode === 'cards' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setLayoutMode('cards')}
-                title="Fiches journalières découpables"
-              >
-                📑 Fiches blocs
-              </button>
-              <button
-                type="button"
-                className={`cal-nav-btn ${layoutMode === 'table' ? 'on' : ''}`}
-                style={{ fontSize: '0.72rem', padding: '5px 8px', borderRadius: '6px' }}
-                onClick={() => setLayoutMode('table')}
-                title="Tableau récapitulatif A4 complet"
-              >
-                📊 Tableau A4
-              </button>
-            </div>
-          </div>
-
-          {/* Options secondaires */}
-          <div>
-            <label style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--mu, #666)', fontWeight: 800, display: 'block', marginBottom: '4px' }}>
-              Options d'émargement
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', cursor: 'pointer', marginTop: '4px' }}>
-              <input
-                type="checkbox"
-                checked={includeNotesBox}
-                onChange={e => setIncludeNotesBox(e.target.checked)}
-              />
-              Zone d'émargement stylo (inscrits / paiements)
-            </label>
-          </div>
-        </div>
-
-        {/* Status banner */}
-        <div style={{ marginTop: '12px', padding: '8px 12px', background: 'var(--cell, #f9fafb)', borderRadius: '8px', fontSize: '0.76rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <div>
-            <strong>{daysData.length} jour{daysData.length > 1 ? 's' : ''}</strong> sélectionnés · <strong>{totalSlotsCount} séance{totalSlotsCount > 1 ? 's' : ''}</strong> à imprimer
-            {filterMode === 'validated' && totalSlotsCount === 0 && (
-              <span style={{ color: '#dc2626', marginLeft: '8px', fontWeight: 600 }}>
-                ⚠️ Aucune séance validée sur cette sélection.
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.68rem', color: '#666', marginRight: '2px' }}>Filtre :</span>
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '3px 8px',
-                fontSize: '0.72rem',
-                background: filterMode === 'validated' && showRejected ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
-                color: '#111',
-                fontWeight: filterMode === 'validated' && showRejected ? 800 : 500,
-              }}
-              onClick={() => {
-                setFilterMode('validated');
-                setShowRejected(true);
-              }}
-              title="Affiche toutes les décisions : séances validées et séances refusées (avec motif clair)"
-            >
-              ✓ Décisions (Validées & Refusées)
-            </button>
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '3px 8px',
-                fontSize: '0.72rem',
-                background: filterMode === 'validated_only' || (filterMode === 'validated' && !showRejected) ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
-                color: '#111',
-                fontWeight: filterMode === 'validated_only' ? 800 : 500,
-              }}
-              onClick={() => {
-                setFilterMode('validated_only');
-                setShowRejected(false);
-              }}
-              title="Uniquement les séances validées (masque les refus)"
-            >
-              Validées seules
-            </button>
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '3px 8px',
-                fontSize: '0.72rem',
-                background: filterMode === 'all' ? 'var(--ac, #ffc40d)' : 'var(--cell, #e5e7eb)',
-                color: '#111',
-                fontWeight: filterMode === 'all' ? 800 : 500,
-              }}
-              onClick={() => {
-                setFilterMode('all');
-                setShowRejected(true);
-              }}
-              title="Toutes les séances calculées, y compris créneaux en attente"
-            >
-              📋 Tout imprimer
-            </button>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
             {onValidateDay && (
               <>
                 <button
@@ -1025,13 +1071,14 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   className="fbtn"
                   style={{
                     margin: 0,
-                    padding: '4px 8px',
+                    padding: '4px 10px',
                     fontSize: '0.72rem',
                     background: '#0284c7',
                     color: '#fff',
+                    borderRadius: '6px',
                   }}
                   onClick={() => handleValidateAllInView('wind_only')}
-                  title="Valider automatiquement les créneaux vent OK et refuser les hors vent sur cette période"
+                  title="Valider automatiquement les créneaux vent OK sur cette période"
                 >
                   ⚡ Valider si Vent OK
                 </button>
@@ -1040,13 +1087,14 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                   className="fbtn"
                   style={{
                     margin: 0,
-                    padding: '4px 8px',
+                    padding: '4px 10px',
                     fontSize: '0.72rem',
                     background: '#16a34a',
                     color: '#fff',
+                    borderRadius: '6px',
                   }}
                   onClick={() => handleValidateAllInView('all')}
-                  title="Valider toutes les séances sans exception sur cette période"
+                  title="Valider toutes les séances sur cette période"
                 >
                   ✓ Tout valider
                 </button>
@@ -1126,12 +1174,12 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#b91c1c', textTransform: 'uppercase' }}>
                             {day.holiday.holidayName}
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#7f1d1d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>{day.holiday.isZoneB ? '★ Bretagne (Zone B)' : 'Zones :'}</span>
+                          <div style={{ fontSize: '0.72rem', color: '#7f1d1d', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>{day.holiday.zonesLabel}</span>
                             <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
-                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#94a3b8' }}>Zone A</span>
-                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#94a3b8' }}>Zone B</span>
-                              <span style={{ padding: '0 5px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#94a3b8' }}>Zone C</span>
+                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#cbd5e1', opacity: day.holiday.isZoneA ? 1 : 0.45 }}>Zone A</span>
+                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#cbd5e1', opacity: day.holiday.isZoneB ? 1 : 0.45 }}>Zone B</span>
+                              <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#cbd5e1', opacity: day.holiday.isZoneC ? 1 : 0.45 }}>Zone C</span>
                             </span>
                           </div>
                         </div>
@@ -1311,89 +1359,300 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                             </div>
                           </div>
 
-                          {/* GRILLE D'INSCRIPTION : NOMS, CHARS, ÂGES, TÉLÉPHONE, RÈGLEMENT */}
+                          {/* GESTION & SAISIE DES INSCRIPTIONS VIA L'APPLICATION + TABLEAU D'ÉMARGEMENT IMPRIMABLE */}
                           {s.isRejected ? (
                             <div style={{ padding: '14px', textAlign: 'center', color: '#991b1b', background: '#fef2f2', fontStyle: 'italic', fontSize: '0.8rem', fontWeight: 700 }}>
-                              ⛔ Ce créneau est refusé / annulé pour conditions météo défavorables (aucune inscription).
+                              ⛔ Ce créneau est refusé / annulé pour conditions météo défavorables (aucune inscription client).
+                            </div>
+                          ) : emargementMode === 'none' ? (
+                            <div className="print-hide" style={{ padding: '8px 12px', color: '#64748b', fontSize: '0.74rem', fontStyle: 'italic', background: '#f8fafc' }}>
+                              Tableau d'émargement masqué (sélectionné dans le menu déroulant « 4. Option émargement »).
                             </div>
                           ) : (
                             <div style={{ padding: '4px 6px' }}>
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-                                <thead>
-                                  <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                    <th style={{ width: '28px', padding: '4px', textAlign: 'center' }}>N°</th>
-                                    <th style={{ width: '34%', padding: '4px 8px', textAlign: 'left' }}>1. Nom du client / Réservation</th>
-                                    <th style={{ width: '20%', padding: '4px 8px', textAlign: 'left' }}>2. Nombre de Chars (Mono / Bi)</th>
-                                    <th style={{ width: '14%', padding: '4px 8px', textAlign: 'left' }}>3. Âges</th>
-                                    <th style={{ width: '18%', padding: '4px 8px', textAlign: 'left' }}>4. Téléphone portable</th>
-                                    <th style={{ width: '14%', padding: '4px 8px', textAlign: 'left' }}>5. Règlement / Solde</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {[0, 1, 2, 3, 4].map(idx => {
-                                    const b = getBooking(slotStorageKey, idx);
-                                    return (
-                                      <tr
-                                        key={idx}
-                                        style={{
-                                          height: '32px',
-                                          borderBottom: '1px solid #e2e8f0',
-                                          background: idx % 2 === 0 ? '#fff' : '#fcfcfc',
-                                        }}
-                                      >
-                                        <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '0.72rem', borderRight: '1px solid #f1f5f9' }}>
-                                          {idx + 1}.
-                                        </td>
-                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
-                                          <input
-                                            type="text"
-                                            className="agenda-daily-input"
-                                            value={b.name}
-                                            onChange={e => updateBooking(slotStorageKey, idx, 'name', e.target.value)}
-                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
-                                          />
-                                        </td>
-                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
-                                          <input
-                                            type="text"
-                                            className="agenda-daily-input"
-                                            value={b.chars}
-                                            onChange={e => updateBooking(slotStorageKey, idx, 'chars', e.target.value)}
-                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
-                                          />
-                                        </td>
-                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
-                                          <input
-                                            type="text"
-                                            className="agenda-daily-input"
-                                            value={b.ages}
-                                            onChange={e => updateBooking(slotStorageKey, idx, 'ages', e.target.value)}
-                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
-                                          />
-                                        </td>
-                                        <td style={{ padding: '0 6px', borderRight: '1px solid #f1f5f9' }}>
-                                          <input
-                                            type="text"
-                                            className="agenda-daily-input"
-                                            value={b.phone}
-                                            onChange={e => updateBooking(slotStorageKey, idx, 'phone', e.target.value)}
-                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
-                                          />
-                                        </td>
-                                        <td style={{ padding: '0 6px' }}>
-                                          <input
-                                            type="text"
-                                            className="agenda-daily-input"
-                                            value={b.payment}
-                                            onChange={e => updateBooking(slotStorageKey, idx, 'payment', e.target.value)}
-                                            style={{ width: '100%', padding: '2px 4px', fontSize: '0.75rem', border: 'none', background: 'transparent', outline: 'none' }}
-                                          />
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
+                              {/* 1. INTERFACE DE SAISIE INTERACTIVE DANS L'APPLICATION (Masquée à l'impression) */}
+                              {(() => {
+                                const slotBookings = getSlotBookings(slotStorageKey);
+                                return (
+                                  <>
+                                    <div className="print-hide" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px', marginBottom: '8px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: slotBookings.length > 0 ? '8px' : 0 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontSize: '0.9rem' }}>👥</span>
+                                          <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>
+                                            Inscriptions clients ({slotBookings.length} réservé{slotBookings.length > 1 ? 's' : ''})
+                                          </strong>
+                                          <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                            · Saisissez via l'appli ou laissez des lignes vierges pour écrire au stylo
+                                          </span>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAddBooking(slotStorageKey)}
+                                            style={{
+                                              background: '#0284c7',
+                                              color: '#fff',
+                                              border: 'none',
+                                              borderRadius: '6px',
+                                              padding: '5px 10px',
+                                              fontSize: '0.74rem',
+                                              fontWeight: 800,
+                                              cursor: 'pointer',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '4px',
+                                            }}
+                                          >
+                                            <span>+</span> Ajouter un client
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handlePrefillExample(slotStorageKey)}
+                                            style={{
+                                              background: '#fff',
+                                              color: '#475569',
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: '6px',
+                                              padding: '4px 8px',
+                                              fontSize: '0.72rem',
+                                              cursor: 'pointer',
+                                            }}
+                                            title="Pré-remplir un exemple réaliste (Famille + Duo)"
+                                          >
+                                            ✨ Exemple test
+                                          </button>
+                                          {slotBookings.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleClearSlotBookings(slotStorageKey)}
+                                              style={{
+                                                background: '#fee2e2',
+                                                color: '#b91c1c',
+                                                border: '1px solid #fca5a5',
+                                                borderRadius: '6px',
+                                                padding: '4px 8px',
+                                                fontSize: '0.72rem',
+                                                cursor: 'pointer',
+                                              }}
+                                              title="Vider les clients de ce créneau"
+                                            >
+                                              🗑️ Vider
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Formulaire de saisie dynamique à l'écran */}
+                                      {slotBookings.length === 0 ? (
+                                        <div style={{ fontSize: '0.73rem', color: '#64748b', fontStyle: 'italic', padding: '4px 0' }}>
+                                          Aucun client pré-saisi pour ce créneau. Cliquez sur <strong>« + Ajouter un client »</strong> pour noter des réservations à l'avance, ou imprimez directement pour écrire au stylo sur la plage.
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                          {slotBookings.map((b, bIdx) => (
+                                            <div
+                                              key={b.id || bIdx}
+                                              style={{
+                                                background: '#fff',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '6px',
+                                                padding: '6px 8px',
+                                                display: 'grid',
+                                                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr)) 36px',
+                                                gap: '6px',
+                                                alignItems: 'center',
+                                              }}
+                                            >
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Client / Nom</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.name}
+                                                  placeholder="ex: Famille Dupont"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'name', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Téléphone</label>
+                                                <div style={{ display: 'flex', gap: '3px' }}>
+                                                  <input
+                                                    type="tel"
+                                                    value={b.phone}
+                                                    placeholder="06 00 00 00 00"
+                                                    onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'phone', e.target.value)}
+                                                    style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                  />
+                                                  {b.phone && (
+                                                    <a
+                                                      href={`tel:${b.phone}`}
+                                                      style={{ padding: '4px 6px', background: '#e0f2fe', borderRadius: '4px', textDecoration: 'none', fontSize: '0.75rem' }}
+                                                      title="Appeler le client"
+                                                    >
+                                                      📞
+                                                    </a>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Participants</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.pax}
+                                                  placeholder="ex: 3 (2 ad + 1 enf)"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'pax', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Chars (Mono/Bi)</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.chars}
+                                                  placeholder="ex: 1 bi + 1 mono"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'chars', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Formule</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.formula}
+                                                  placeholder="Initiation / Balade"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'formula', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Règlement</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.payment}
+                                                  placeholder="ex: 135€ CB réglé"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'payment', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div>
+                                                <label style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>Combis / Notes</label>
+                                                <input
+                                                  type="text"
+                                                  value={b.notes}
+                                                  placeholder="ex: 2 combis M, 1 S"
+                                                  onChange={e => handleUpdateBooking(slotStorageKey, b.id, 'notes', e.target.value)}
+                                                  style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                                />
+                                              </div>
+                                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '2px' }}>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleRemoveBooking(slotStorageKey, b.id)}
+                                                  style={{
+                                                    background: '#fee2e2',
+                                                    color: '#dc2626',
+                                                    border: 'none',
+                                                    borderRadius: '4px',
+                                                    width: '28px',
+                                                    height: '28px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 900,
+                                                    fontSize: '0.75rem',
+                                                  }}
+                                                  title="Supprimer cette inscription"
+                                                >
+                                                  ✕
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* 2. TABLEAU PROPRE IMPRIMABLE (ET PRÉVISUALISATION DIRECTE) */}
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', background: '#fff' }}>
+                                      <thead>
+                                        <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          <th style={{ width: '26px', padding: '6px 4px', textAlign: 'center', borderRight: '1px solid #cbd5e1' }}>N°</th>
+                                          <th style={{ width: '28%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>1. Client / Responsable</th>
+                                          <th style={{ width: '16%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>2. Téléphone portable</th>
+                                          <th style={{ width: '12%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>3. Participants</th>
+                                          <th style={{ width: '14%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>4. Chars (M/B)</th>
+                                          <th style={{ width: '14%', padding: '6px 8px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>5. Formule & Notes</th>
+                                          <th style={{ width: '16%', padding: '6px 8px', textAlign: 'left' }}>6. Règlement & Émargement</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {/* A) Clients saisis via l'application (imprimés en texte clair net) */}
+                                        {emargementMode === 'with_bookings' &&
+                                          slotBookings.map((b, bIdx) => (
+                                            <tr
+                                              key={b.id || bIdx}
+                                              style={{
+                                                height: '32px',
+                                                borderBottom: '1px solid #94a3b8',
+                                                background: bIdx % 2 === 0 ? '#fff' : '#fcfcfc',
+                                              }}
+                                            >
+                                              <td style={{ textAlign: 'center', fontWeight: 900, color: '#475569', borderRight: '1px solid #e2e8f0', fontSize: '0.72rem' }}>
+                                                {bIdx + 1}.
+                                              </td>
+                                              <td style={{ padding: '4px 8px', fontWeight: 800, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
+                                                {b.name || '—'}
+                                              </td>
+                                              <td style={{ padding: '4px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: '0.76rem' }}>
+                                                {b.phone || '—'}
+                                              </td>
+                                              <td style={{ padding: '4px 8px', color: '#1e293b', borderRight: '1px solid #e2e8f0' }}>
+                                                {b.pax || '—'}
+                                              </td>
+                                              <td style={{ padding: '4px 8px', fontWeight: 700, color: '#0f172a', borderRight: '1px solid #e2e8f0' }}>
+                                                {b.chars || '—'}
+                                              </td>
+                                              <td style={{ padding: '4px 8px', color: '#334155', borderRight: '1px solid #e2e8f0', fontSize: '0.72rem' }}>
+                                                <strong>{b.formula || 'Initiation'}</strong>{b.notes ? ` · ${b.notes}` : ''}
+                                              </td>
+                                              <td style={{ padding: '4px 8px', color: '#0f172a', fontWeight: 700 }}>
+                                                {b.payment || '—'}
+                                              </td>
+                                            </tr>
+                                          ))}
+
+                                        {/* B) Lignes vierges lignées avec hauteur confortable pour écriture manuscrite au stylo sur la plage */}
+                                        {(() => {
+                                          const bookedCount = emargementMode === 'with_bookings' ? slotBookings.length : 0;
+                                          const blankRowsCount = bookedCount > 0 ? 3 : 6;
+                                          const blankIndices = Array.from({ length: blankRowsCount }, (_, i) => bookedCount + i);
+
+                                          return blankIndices.map(rowIdx => (
+                                            <tr
+                                              key={`blank-${rowIdx}`}
+                                              style={{
+                                                height: '34px',
+                                                borderBottom: '1px solid #94a3b8',
+                                                background: '#fff',
+                                              }}
+                                            >
+                                              <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '0.72rem', borderRight: '1px solid #cbd5e1' }}>
+                                                {rowIdx + 1}.
+                                              </td>
+                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                              <td style={{ padding: '0 8px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                              <td style={{ padding: '0 8px' }}>&nbsp;</td>
+                                            </tr>
+                                          ));
+                                        })()}
+                                      </tbody>
+                                    </table>
+                                  </>
+                                );
+                              })()}
 
                               {/* POINTAGE & NOTES DE LA SÉANCE */}
                               <div
@@ -1492,10 +1751,10 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                     </span>
                   </div>
                   {day.holiday.isHoliday ? (
-                    <div style={{ fontSize: '0.58rem', fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '1px 4px', borderRadius: '3px', marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>🎒 {day.holiday.periodName || 'Vacances'}</span>
-                      <span style={{ fontSize: '0.54rem', opacity: 0.9 }}>
-                        {day.holiday.zones.includes('B') ? 'Zone B (Bretagne)' : day.holiday.zones.join('/')}
+                    <div style={{ fontSize: '0.58rem', fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '1px 4px', borderRadius: '3px', marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>🎒 {day.holiday.periodName || 'Vacances'}</span>
+                      <span style={{ fontSize: '0.52rem', opacity: 0.95, whiteSpace: 'nowrap' }}>
+                        {day.holiday.zonesLabel}
                       </span>
                     </div>
                   ) : (
@@ -1781,7 +2040,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       </h3>
                       {day.holiday.isHoliday ? (
                         <span style={{ fontSize: '0.62rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px' }}>
-                          🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zones.includes('B') ? 'Zone B Bretagne' : day.holiday.zones.join('/')})
+                          🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zonesLabel})
                         </span>
                       ) : (
                         <span style={{ fontSize: '0.62rem', fontWeight: 600, background: '#f1f5f9', color: '#64748b', padding: '1px 6px', borderRadius: '4px' }}>
@@ -1937,7 +2196,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                             {day.weekdayStr.slice(0, 3)} {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}
                             {day.holiday.isHoliday && (
                               <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800 }}>
-                                🎒 {day.holiday.periodName || 'Vacances'}
+                                🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zonesLabel})
                               </div>
                             )}
                           </td>
@@ -1955,7 +2214,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           {day.weekdayStr.slice(0, 3)} {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}
                           {day.holiday.isHoliday && (
                             <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800 }}>
-                              🎒 {day.holiday.periodName || 'Vacances'}
+                              🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zonesLabel})
                             </div>
                           )}
                         </td>
@@ -1983,7 +2242,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                             <div>{day.weekdayStr.slice(0, 4)}. {day.dateObj.getUTCDate()} {day.dateObj.toLocaleDateString('fr-FR', { month: 'short', timeZone: 'UTC' })}</div>
                             {day.holiday.isHoliday ? (
                               <div style={{ fontSize: '0.62rem', color: '#92400e', fontWeight: 800, marginTop: '2px' }}>
-                                🎒 {day.holiday.periodName || 'Vacances'}
+                                🎒 {day.holiday.periodName || 'Vacances'} ({day.holiday.zonesLabel})
                               </div>
                             ) : (
                               <div style={{ fontSize: '0.6rem', color: '#64748b', fontWeight: 500, marginTop: '1px' }}>

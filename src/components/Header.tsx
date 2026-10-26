@@ -1,33 +1,26 @@
 import React, { useEffect, useState } from 'react';
 
 export const Header: React.FC = () => {
-  const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>('auto');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
-    const saved = localStorage.getItem('cvTheme') as 'auto' | 'light' | 'dark' | null;
-    if (saved) {
-      setTheme(saved);
-      if (saved === 'auto') {
-        document.documentElement.removeAttribute('data-theme');
-      } else {
-        document.documentElement.setAttribute('data-theme', saved);
-      }
+    // Par défaut, l'application est toujours en thème clair avec fond blanc net
+    const saved = localStorage.getItem('cvTheme');
+    if (saved === 'dark_mode') {
+      setTheme('dark');
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      setTheme('light');
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('cvTheme', 'light');
     }
   }, []);
 
   const toggleTheme = () => {
-    let next: 'auto' | 'light' | 'dark' = 'auto';
-    if (theme === 'auto') next = 'light';
-    else if (theme === 'light') next = 'dark';
-    else next = 'auto';
-
+    const next = theme === 'light' ? 'dark' : 'light';
     setTheme(next);
-    localStorage.setItem('cvTheme', next);
-    if (next === 'auto') {
-      document.documentElement.removeAttribute('data-theme');
-    } else {
-      document.documentElement.setAttribute('data-theme', next);
-    }
+    localStorage.setItem('cvTheme', next === 'dark' ? 'dark_mode' : 'light');
+    document.documentElement.setAttribute('data-theme', next);
   };
 
   return (
@@ -46,7 +39,7 @@ export const Header: React.FC = () => {
       <button
         type="button"
         onClick={toggleTheme}
-        title={`Thème : ${theme === 'auto' ? 'système' : theme === 'dark' ? 'sombre' : 'clair'}`}
+        title={`Thème : ${theme === 'dark' ? 'sombre' : 'clair'}`}
         aria-label="Changer de thème"
         style={{
           background: 'var(--cell)',
@@ -61,7 +54,7 @@ export const Header: React.FC = () => {
           letterSpacing: '0.04em',
         }}
       >
-        {theme === 'auto' ? '🌓 Auto' : theme === 'dark' ? '🌙 Sombre' : '☀️ Clair'}
+        {theme === 'dark' ? '🌙 Sombre' : '☀️ Clair'}
       </button>
     </header>
   );

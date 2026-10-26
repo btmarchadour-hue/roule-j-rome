@@ -9,6 +9,7 @@ export interface HolidayInfo {
   holidayName?: string;
   periodName?: string;
   zones: ('A' | 'B' | 'C')[];
+  zonesLabel: string;
   isZoneB: boolean; // Académie de Rennes (Bretagne / Finistère)
   isZoneA: boolean;
   isZoneC: boolean;
@@ -125,6 +126,7 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
     return {
       isHoliday: false,
       zones: [],
+      zonesLabel: 'Période scolaire',
       isZoneB: false,
       isZoneA: false,
       isZoneC: false,
@@ -147,7 +149,18 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
   if (isZoneB) zones.push('B');
   if (isZoneC) zones.push('C');
 
-  let label = `${holidayName} (${zones.length === 3 ? 'Toutes zones A, B, C' : `Zone ${zones.join(', ')}`})`;
+  let zonesLabel = '';
+  if (zones.length === 3) {
+    zonesLabel = 'Toutes zones (A, B, C)';
+  } else if (zones.length === 2) {
+    zonesLabel = `Zones ${zones.join(' & ')}`;
+  } else if (zones.length === 1) {
+    zonesLabel = `Zone ${zones[0]}`;
+  } else {
+    zonesLabel = 'Hors vacances';
+  }
+
+  let label = `${holidayName} (${zonesLabel})`;
   if (publicHolidayName) {
     label += ` · Férié : ${publicHolidayName}`;
   }
@@ -157,6 +170,7 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
     holidayName,
     periodName: holidayName,
     zones,
+    zonesLabel,
     isZoneB,
     isZoneA,
     isZoneC,

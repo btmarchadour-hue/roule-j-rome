@@ -28,6 +28,7 @@ import {
 } from '../utils/tides';
 import { CurveChart } from './CurveChart';
 import { CustomSlotsManager } from './CustomSlotsManager';
+import { getFrenchHolidayInfo } from '../utils/frenchHolidays';
 import { WindPanel } from './WindPanel';
 
 interface DayDetailPanelProps {
@@ -163,13 +164,78 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const focusData = dayFocus(selectedDate, settings, tideW, first, last, windList, customSlotsMap);
   const valInfo = validations ? vstat(focusData, validations) : { st: 'none' as const };
 
+  const holiday = getFrenchHolidayInfo(selectedDate);
+
   return (
     <div className="pan card cal" id="pan">
-      <div className="pt">Plage de roulage</div>
-      <div className="ps">
-        Date : {p2(d)}/{p2(m0)}/{y} · seuil :{' '}
-        {settings.L.toFixed(2).replace('.', 'm')}
-        {settings.mg ? ` − ${settings.mg} cm` : ''} · {settings.h0}h–{settings.h1}h
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        <div>
+          <div className="pt">Plage de roulage</div>
+          <div className="ps" style={{ marginBottom: 0 }}>
+            Date : {p2(d)}/{p2(m0)}/{y} · seuil :{' '}
+            {settings.L.toFixed(2).replace('.', 'm')}
+            {settings.mg ? ` − ${settings.mg} cm` : ''} · {settings.h0}h–{settings.h1}h
+          </div>
+        </div>
+
+        {holiday.isHoliday && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#fef2f2',
+              border: '1.5px solid #fca5a5',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              fontSize: '0.74rem',
+            }}
+          >
+            <span>🎒 {holiday.holidayName}</span>
+            <span style={{ fontWeight: 800, color: '#b91c1c' }}>({holiday.zonesLabel})</span>
+            <span style={{ display: 'inline-flex', gap: '3px' }}>
+              <span
+                style={{
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  fontSize: '0.62rem',
+                  fontWeight: 900,
+                  color: '#fff',
+                  background: holiday.isZoneA ? '#0284c7' : '#cbd5e1',
+                  opacity: holiday.isZoneA ? 1 : 0.45,
+                }}
+              >
+                A
+              </span>
+              <span
+                style={{
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  fontSize: '0.62rem',
+                  fontWeight: 900,
+                  color: '#fff',
+                  background: holiday.isZoneB ? '#dc2626' : '#cbd5e1',
+                  opacity: holiday.isZoneB ? 1 : 0.45,
+                }}
+              >
+                B
+              </span>
+              <span
+                style={{
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  fontSize: '0.62rem',
+                  fontWeight: 900,
+                  color: '#fff',
+                  background: holiday.isZoneC ? '#d97706' : '#cbd5e1',
+                  opacity: holiday.isZoneC ? 1 : 0.45,
+                }}
+              >
+                C
+              </span>
+            </span>
+          </div>
+        )}
       </div>
 
       <CurveChart
