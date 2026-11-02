@@ -557,20 +557,22 @@ td.n {
   display: flex;
   gap: 6px;
   margin: 0 0 12px;
+  flex-wrap: wrap;
 }
 
 .tabs button {
-  flex: 1;
+  flex: 1 1 140px;
+  min-width: 120px;
   border: 0;
   border-radius: 10px;
-  padding: 11px;
+  padding: 10px 8px;
   background: var(--cell);
   color: var(--tx);
   font: inherit;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: .04em;
-  font-size: .8rem;
+  font-size: .78rem;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -803,6 +805,11 @@ td.n {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
+.printable-agenda-sheet.orientation-landscape {
+  max-width: 1150px;
+  margin: 0 auto;
+}
+
 .agenda-strip {
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
@@ -827,7 +834,8 @@ td.n {
   .ft,
   .hyp,
   #tab1,
-  #tab2 {
+  #tab2,
+  #tab4 {
     display: none !important;
   }
 
@@ -836,6 +844,8 @@ td.n {
     color: #000 !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -854,6 +864,7 @@ td.n {
     border: none !important;
     box-shadow: none !important;
     background: transparent !important;
+    width: 100% !important;
   }
 
   .printable-agenda-sheet {
@@ -863,6 +874,7 @@ td.n {
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
+    max-width: 100% !important;
     background: #fff !important;
   }
 
@@ -884,7 +896,7 @@ td.n {
     padding: 0 !important;
   }
 
-  /* 3. PAGES AGENDAS : DONNÉES DU JOUR & FICHES SÉANCES (1 PAGE PAR SÉANCE) */
+  /* 3. PAGES AGENDAS : DONNÉES DU JOUR & FICHES SÉANCES (EXACTEMENT 1 PAGE PAR SÉANCE) */
   .agenda-day-page,
   .agenda-session-page,
   .agenda-daily-page {
@@ -895,15 +907,58 @@ td.n {
     break-after: page !important;
     page-break-after: always !important;
     margin: 0 0 0 0 !important;
-    padding: 6mm 6mm !important;
+    padding: 3.5mm 4.5mm !important;
     background: #fff !important;
-    page-break-before: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
   }
 
   .agenda-day-page table,
   .agenda-session-page table {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    font-size: 7.2pt !important;
+    box-sizing: border-box !important;
+  }
+
+  .agenda-day-page th,
+  .agenda-day-page td,
+  .agenda-session-page th,
+  .agenda-session-page td {
+    padding: 2.5px 4px !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+    line-height: 1.25 !important;
+  }
+
+  .agenda-session-page tbody tr {
+    height: auto !important;
+  }
+
+  .agenda-session-conditions {
+    padding: 2mm 3mm !important;
+    margin-bottom: 2mm !important;
+    font-size: 6.8pt !important;
+    line-height: 1.25 !important;
+  }
+
+  .agenda-session-bilan {
+    padding: 2mm 3mm !important;
+    margin-bottom: 2mm !important;
+    font-size: 6.8pt !important;
+    line-height: 1.25 !important;
+  }
+
+  .agenda-session-debrief {
+    padding: 2.5mm 3mm !important;
+    font-size: 6.8pt !important;
+    line-height: 1.25 !important;
   }
 
   .agenda-slot-section {
@@ -922,7 +977,7 @@ td.n {
 
   table {
     min-width: 0 !important;
-    font-size: 8pt !important;
+    box-sizing: border-box !important;
   }
 
   /* Aucun texte fantôme ou d'exemple à l'impression : lignes 100% vierges pour écriture manuscrite */
@@ -934,8 +989,8 @@ td.n {
   }
 
   @page {
-    size: auto;
-    margin: 6mm 6mm;
+    size: A4 landscape;
+    margin: 5mm 6mm;
   }
 }
 

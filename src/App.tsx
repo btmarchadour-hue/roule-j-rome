@@ -69,12 +69,13 @@ const defaultSettings: AppSettings = {
 };
 
 export const App: React.FC = () => {
-  // Navigation tabs: 1 = Calendrier, 2 = Focus, 3 = Fiche Agenda Papier
+  // Navigation tabs: 1 = Calendrier, 2 = Focus, 3 = Fiche Agenda Papier, 4 = Réglages & Hypothèses
   // L'application s'ouvre TOUJOURS sur le Calendrier (Tab 1) par défaut
   const [activeTab, setActiveTab] = useState<number>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === '4') return 4;
       if (tabParam === '3' || params.has('autoprint')) return 3;
       if (tabParam === '2') return 2;
     } catch {
@@ -527,8 +528,8 @@ export const App: React.FC = () => {
     <>
       <Header />
       <main>
-        {/* En-tête des marées en haut de page (masqué en onglet 3 et à l'impression) */}
-        {activeTab !== 3 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
+        {/* En-tête des marées en haut de page (masqué en onglet 3 et 4 et à l'impression) */}
+        {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
 
         {/* Navigation tabs */}
         <nav className="tabs noprint">
@@ -552,6 +553,13 @@ export const App: React.FC = () => {
             onClick={() => handleTabChange(3)}
           >
             📋 Fiche Agenda Papier
+          </button>
+          <button
+            type="button"
+            className={activeTab === 4 ? 'on' : ''}
+            onClick={() => handleTabChange(4)}
+          >
+            💡 Hypothèses & Notes
           </button>
         </nav>
 
@@ -624,6 +632,7 @@ export const App: React.FC = () => {
               />
             </div>
 
+            {/* Formulaire des Réglages (Séances, seuils, vent, actualisation) */}
             <SettingsCard
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
@@ -632,7 +641,60 @@ export const App: React.FC = () => {
               isLoadingWind={isLoadingWind}
             />
 
-            <NotesAndHypotheses />
+            {/* Lien d'accès direct vers le nouvel onglet Hypothèses & Notes */}
+            <div
+              className="card nop"
+              style={{
+                marginTop: '14px',
+                background: 'var(--card)',
+                border: '1.5px dashed var(--bd)',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '1.5rem' }}>💡</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--tx)' }}>
+                    Réglages validés et hypothèses du moniteur & notes de calcul
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
+                    Règles d'enchaînement, pauses, surcote barométrique détaillée et explications techniques.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="fbtn"
+                onClick={() => {
+                  handleTabChange(4);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                style={{
+                  margin: 0,
+                  padding: '8px 16px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  borderRadius: '8px',
+                  background: 'var(--cell, #f1f5f9)',
+                  color: 'var(--tx, #111)',
+                  border: '1.5px solid var(--bd, #cbd5e1)',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span>Consulter les Hypothèses & Notes</span>
+                <span style={{ fontSize: '0.95rem' }}>➔</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -669,12 +731,71 @@ export const App: React.FC = () => {
             windList={windList}
             validations={validations}
             customSlotsMap={customSlotsMap}
+            onUpdateCustomSlots={handleUpdateCustomSlots}
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
             onValidateDay={handleValidateDay}
             onToggleSlotValidation={handleToggleSlotValidation}
             onSetSlotDecision={handleSetSlotDecision}
           />
+        )}
+
+        {/* Tab 4: Réglages validés, Hypothèses & Notes */}
+        {activeTab === 4 && (
+          <div id="tab4">
+            <div
+              className="card nop"
+              style={{
+                marginBottom: '16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+                background: 'var(--card)',
+                padding: '12px 16px',
+                borderRadius: '10px',
+                border: '1px solid var(--bd)',
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>💡</span> Réglages validés, Hypothèses & Notes
+                </h2>
+                <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: 'var(--mu)' }}>
+                  Règles opérationnelles convenues avec le moniteur, hypothèses de roulage et explications physiques détaillées.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="fbtn"
+                onClick={() => {
+                  handleTabChange(1);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                style={{
+                  margin: 0,
+                  padding: '8px 14px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  borderRadius: '8px',
+                  background: 'var(--cell, #f1f5f9)',
+                  color: 'var(--tx, #111)',
+                  border: '1.5px solid var(--bd, #cbd5e1)',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>⬅</span>
+                <span>Revenir au Calendrier</span>
+              </button>
+            </div>
+
+            <NotesAndHypotheses />
+          </div>
         )}
       </main>
     </>
