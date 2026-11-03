@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { DATA } from '../data/tideData';
+import { subscribeToBookings, saveBookingToFirestore } from '../utils/firebaseSync';
 import {
   AppSettings,
   CustomSlot,
@@ -318,12 +319,35 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     return {};
   });
 
-  const saveBookingsMap = (next: Record<string, AgendaBookingItem[]>) => {
+  // Abonnement temps réel Firestore aux réservations & émargements clients
+  useEffect(() => {
+    const unsubscribe = subscribeToBookings(remoteBookings => {
+      if (remoteBookings && Object.keys(remoteBookings).length > 0) {
+        setBookingsMap(prev => {
+          const merged = { ...prev, ...remoteBookings };
+          try {
+            localStorage.setItem('char_agenda_bookings_v3', JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const saveBookingsMap = (next: Record<string, AgendaBookingItem[]>, updatedSlotKey?: string) => {
     setBookingsMap(next);
     try {
       localStorage.setItem('char_agenda_bookings_v3', JSON.stringify(next));
     } catch {
       // ignore
+    }
+    if (updatedSlotKey) {
+      saveBookingToFirestore(updatedSlotKey, next[updatedSlotKey] || []).catch(err =>
+        console.warn('Erreur Firestore réservation:', err)
+      );
     }
   };
 
@@ -344,10 +368,11 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
       status: 'pending',
       notes: '',
     };
-    saveBookingsMap({
+    const next = {
       ...bookingsMap,
       [slotKey]: [...list, newBooking],
-    });
+    };
+    saveBookingsMap(next, slotKey);
   };
 
   const handleUpdateBooking = (
@@ -357,18 +382,20 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
     value: any
   ) => {
     const list = getSlotBookings(slotKey).map(b => (b.id === id ? { ...b, [field]: value } : b));
-    saveBookingsMap({
+    const next = {
       ...bookingsMap,
       [slotKey]: list,
-    });
+    };
+    saveBookingsMap(next, slotKey);
   };
 
   const handleRemoveBooking = (slotKey: string, id: string) => {
     const list = getSlotBookings(slotKey).filter(b => b.id !== id);
-    saveBookingsMap({
+    const next = {
       ...bookingsMap,
       [slotKey]: list,
-    });
+    };
+    saveBookingsMap(next, slotKey);
   };
 
   const handlePrefillExample = (slotKey: string) => {
@@ -1497,28 +1524,29 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                           </div>
                         )
                       ) : (
-                        <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '0.74rem', background: '#fff', border: '1.5px solid #cbd5e1', borderRadius: '6px', overflow: 'hidden' }}>
-                          <colgroup>
-                            <col style={{ width: '10%' }} />
-                            <col style={{ width: '12%' }} />
-                            <col style={{ width: '22%' }} />
-                            <col style={{ width: '14%' }} />
-                            <col style={{ width: '18%' }} />
-                            <col style={{ width: '11%' }} />
-                            <col style={{ width: '13%' }} />
-                          </colgroup>
-                          <thead>
-                            <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Séance</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Horaires</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Décision</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Hauteurs d'eau</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Météo & Vent prévu</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>Inscriptions</th>
-                              <th style={{ padding: '6px 8px', textAlign: 'right' }}>Fiche dédiée</th>
-                            </tr>
-                          </thead>
-                          <tbody>
+                        <div style={{ borderRadius: '6px', border: '1.5px solid #cbd5e1', overflow: 'hidden', marginBottom: '8px', width: '100%', boxSizing: 'border-box' }}>
+                          <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '0.68rem', background: '#fff', boxSizing: 'border-box' }}>
+                            <colgroup>
+                              <col style={{ width: '12%' }} />
+                              <col style={{ width: '15%' }} />
+                              <col style={{ width: '18%' }} />
+                              <col style={{ width: '17%' }} />
+                              <col style={{ width: '18%' }} />
+                              <col style={{ width: '10%' }} />
+                              <col style={{ width: '10%' }} />
+                            </colgroup>
+                            <thead>
+                              <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.60rem', textTransform: 'uppercase', letterSpacing: '0.02em', height: '26px' }}>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Séance</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Horaires</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Décision</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Hauteurs d'eau</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Météo & Vent</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }}>Inscrits</th>
+                                <th style={{ padding: '3px 3px', textAlign: 'right', whiteSpace: 'normal', lineHeight: 1.15 }}>Fiche</th>
+                              </tr>
+                            </thead>
+                            <tbody>
                             {daySlots.map((s, sIdx) => {
                               const slotStorageKey = `${day.ds}-${s.key}`;
                               const bookings = getSlotBookings(slotStorageKey);
@@ -1530,113 +1558,131 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                                     background: s.isRejected ? '#fef2f2' : s.isValidated ? '#f0fdf4' : sIdx % 2 === 0 ? '#fff' : '#fcfcfc',
                                   }}
                                 >
-                                  <td style={{ padding: '6px 8px', fontWeight: 900, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <td style={{ padding: '4px 4px', fontWeight: 900, color: '#0f172a' }}>
                                     <div>Séance {sIdx + 1}</div>
                                     {s.slot.isCustom && (
-                                      <div style={{ marginTop: '2px' }}>
-                                        <span style={{ fontSize: '0.62rem', fontWeight: 900, color: '#4338ca', background: '#e0e7ff', border: '1px solid #c7d2fe', padding: '1px 5px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block' }}>
-                                          ✨ Sur mesure
+                                      <div style={{ marginTop: '1px' }}>
+                                        <span style={{ fontSize: '0.58rem', fontWeight: 900, color: '#4338ca', background: '#e0e7ff', border: '1px solid #c7d2fe', padding: '1px 4px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block' }}>
+                                          Sur mesure
                                         </span>
-                                        {s.slot.customTitle && (
-                                          <div style={{ fontSize: '0.66rem', color: '#4338ca', fontWeight: 700, marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {s.slot.customTitle}
-                                          </div>
-                                        )}
                                       </div>
                                     )}
                                   </td>
-                                  <td style={{ padding: '6px 8px', fontWeight: 900, color: s.isRejected ? '#b91c1c' : '#0369a1', textDecoration: s.isRejected ? 'line-through' : 'none', whiteSpace: 'nowrap' }}>
+                                  <td style={{ padding: '4px 4px', fontWeight: 900, color: s.isRejected ? '#b91c1c' : '#0369a1', textDecoration: s.isRejected ? 'line-through' : 'none', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
                                     {s.startStr} – {s.endStr}
                                   </td>
-                                  <td style={{ padding: '6px 8px', overflow: 'hidden' }}>
-                                    <span
-                                      style={{
-                                        fontSize: '0.63rem',
-                                        fontWeight: 900,
-                                        color: s.isRejected ? '#fff' : s.isValidated ? '#fff' : s.slot.isCustom ? '#4338ca' : '#92400e',
-                                        background: s.isRejected ? '#dc2626' : s.isValidated ? '#16a34a' : s.slot.isCustom ? '#e0e7ff' : '#fef3c7',
-                                        border: s.isRejected || s.isValidated ? 'none' : s.slot.isCustom ? '1px solid #c7d2fe' : '1px solid #fcd34d',
-                                        padding: '2px 5px',
-                                        borderRadius: '3px',
-                                        textTransform: 'uppercase',
-                                        display: 'inline-block',
-                                        whiteSpace: 'nowrap',
-                                        maxWidth: '100%',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                      }}
-                                    >
-                                      {s.isRejected
-                                        ? '⛔ REFUSÉE'
-                                        : s.isValidated
-                                        ? (s.slot.isCustom ? '✓ VALIDÉE (SUR MESURE)' : '✓ VALIDÉE')
-                                        : s.slot.isCustom
-                                        ? '✨ SUR MESURE (CONFIRMÉ)'
-                                        : 'NON VALIDÉE (CHOIX NON EFFECTUÉ)'}
-                                    </span>
-                                  </td>
-                                  <td style={{ padding: '6px 8px', color: '#0369a1', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                    {s.hStart != null ? `${s.hStart.toFixed(2)} m` : '—'} {s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'} {s.hEnd != null ? `${s.hEnd.toFixed(2)} m` : '—'}
-                                  </td>
-                                  <td style={{ padding: '6px 8px', color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {s.weather ? (
-                                      <span>
-                                        <strong>{s.weather.windKts} nds</strong> {s.weather.gustKts ? `(raf. ${s.weather.gustKts})` : ''} · {s.weather.dir}
+                                  <td style={{ padding: '4px 4px' }}>
+                                    {s.isRejected ? (
+                                      <span style={{ fontSize: '0.60rem', fontWeight: 900, color: '#b91c1c', background: '#fee2e2', border: '1px solid #fca5a5', padding: '1px 4px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block', whiteSpace: 'nowrap' }}>
+                                        ⛔ Refusée
+                                      </span>
+                                    ) : s.isValidated ? (
+                                      <span style={{ fontSize: '0.60rem', fontWeight: 900, color: '#166534', background: '#dcfce7', border: '1px solid #86efac', padding: '1px 4px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block', whiteSpace: 'nowrap' }}>
+                                        {s.slot.isCustom ? '✓ Sur mesure' : '✓ Validée'}
+                                      </span>
+                                    ) : s.slot.isCustom ? (
+                                      <span style={{ fontSize: '0.60rem', fontWeight: 900, color: '#4338ca', background: '#e0e7ff', border: '1px solid #c7d2fe', padding: '1px 4px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block', whiteSpace: 'nowrap' }}>
+                                        ✨ Confirmée
                                       </span>
                                     ) : (
-                                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                                      <span style={{ fontSize: '0.60rem', fontWeight: 800, color: '#92400e', background: '#fef3c7', border: '1px solid #fcd34d', padding: '1px 4px', borderRadius: '3px', textTransform: 'uppercase', display: 'inline-block', whiteSpace: 'nowrap' }}>
+                                        Non validée
+                                      </span>
                                     )}
                                   </td>
-                                  <td style={{ padding: '6px 8px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                  <td style={{ padding: '4px 4px', color: '#0369a1', fontWeight: 700, fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                                    {s.hStart != null ? `${s.hStart.toFixed(2)}m` : '—'} {s.trend === 'down' ? '↘' : s.trend === 'up' ? '↗' : '→'} {s.hEnd != null ? `${s.hEnd.toFixed(2)}m` : '—'}
+                                  </td>
+                                  <td style={{ padding: '4px 4px', color: '#334155', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                                    {s.weather ? (
+                                      <span>
+                                        <strong>{s.weather.windKts} nds</strong> {s.weather.dir}
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8' }}>—</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '4px 4px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', fontSize: '0.68rem' }}>
                                     {bookings.length > 0 ? (
                                       <span style={{ color: '#166534' }}>{bookings.length} client{bookings.length > 1 ? 's' : ''}</span>
                                     ) : (
                                       <span style={{ color: '#64748b' }}>0 inscrit</span>
                                     )}
                                   </td>
-                                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, color: '#0369a1', whiteSpace: 'nowrap' }}>
-                                    ➔ Page {sIdx + 2} (12 places)
+                                  <td style={{ padding: '4px 4px', textAlign: 'right', fontWeight: 800, color: '#0369a1', whiteSpace: 'nowrap', fontSize: '0.68rem' }}>
+                                    ➔ Page {sIdx + 2}
                                   </td>
                                 </tr>
                               );
                             })}
                           </tbody>
                         </table>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                  </div>
 
                     {/* 5. GESTION DU MATÉRIEL, CONSIGNES SÉCURITÉ & BILAN ENCAISSEMENTS */}
-                    <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '2px solid #0f172a', display: 'grid', gridTemplateColumns: printOrientation === 'landscape' ? 'repeat(3, 1fr)' : 'repeat(auto-fit, minmax(240px, 1fr))', gap: '10px', fontSize: '0.73rem' }}>
-                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div
+                      className="agenda-day-summary-boxes"
+                      style={{
+                        marginTop: '10px',
+                        paddingTop: '8px',
+                        borderTop: '2px solid #0f172a',
+                        display: 'grid',
+                        gap: '10px',
+                        fontSize: '0.72rem',
+                      }}
+                    >
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', minWidth: 0, overflow: 'hidden' }}>
                         <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
                           🏁 Pointage matériel & chars sortis :
                         </div>
                         <div style={{ color: '#475569', lineHeight: 1.5 }}>
-                          <div>• Monoplaces : ________  ·  Biplaces : ________</div>
-                          <div>• Voiles gréées : [ ] 2.5m²  [ ] 3.5m²  [ ] 4.5m²  [ ] 5.5m²</div>
-                          <div>• Total participants journée : ________</div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>Mono : <strong>____</strong></span>
+                            <span>Bi : <strong>____</strong></span>
+                          </div>
+                          <div style={{ marginTop: '2px' }}>
+                            Voiles : [ ] 2.5 · [ ] 3.5 · [ ] 4.5 · [ ] 5.5 m²
+                          </div>
+                          <div style={{ marginTop: '2px' }}>
+                            Total participants journée : <strong>____</strong>
+                          </div>
                         </div>
                       </div>
 
-                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', minWidth: 0, overflow: 'hidden' }}>
                         <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
-                          ⚠️ Consignes sécurité & état de la plage :
+                          ⚠️ Consignes sécurité & état plage :
                         </div>
                         <div style={{ color: '#475569', lineHeight: 1.5 }}>
-                          <div>• Sable : [ ] Dur  [ ] Mou  ·  Bâches d'eau : [ ] Faibles  [ ] Fortes</div>
-                          <div>• Zone baigneurs balisée : [ ] Oui  [ ] Non</div>
-                          <div>• Notes : _______________________________________________</div>
+                          <div>Sable : [ ] Dur [ ] Mou · Bâches : [ ] Faibles [ ] Fortes</div>
+                          <div>Zone baigneurs balisée : [ ] Oui [ ] Non</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                            <span>Notes :</span>
+                            <span style={{ flex: 1, borderBottom: '1px dotted #94a3b8', height: '10px', display: 'inline-block' }}>&nbsp;</span>
+                          </div>
                         </div>
                       </div>
 
-                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', minWidth: 0, overflow: 'hidden' }}>
                         <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
                           💶 Bilan des Encaissements du jour :
                         </div>
                         <div style={{ color: '#475569', lineHeight: 1.5 }}>
-                          <div>CB : ________ €  ·  Chèques : ________ €  ·  Espèces : ________ €</div>
-                          <div>ANCV : ________ €  ·  Total Journée : __________________ €</div>
-                          <div>Signature responsable : _______________________________</div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>CB : <strong>___ €</strong></span>
+                            <span>Chq : <strong>___ €</strong></span>
+                            <span>Esp : <strong>___ €</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '2px' }}>
+                            <span>ANCV : <strong>___ €</strong></span>
+                            <span style={{ fontWeight: 700 }}>Total : <strong>______ €</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                            <span style={{ whiteSpace: 'nowrap' }}>Signature :</span>
+                            <span style={{ flex: 1, borderBottom: '1px solid #0f172a', height: '10px', display: 'inline-block' }}>&nbsp;</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1859,15 +1905,18 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                         ) : (
                           <>
                             {/* Formulaire de saisie dynamique à l'écran (Masqué à l'impression) */}
-                            <div className="print-hide nop noprint" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: slotBookings.length > 0 ? '8px' : 0 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontSize: '0.9rem' }}>👥</span>
-                                  <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>
-                                    Gestion des réservations ({slotBookings.length} client{slotBookings.length > 1 ? 's' : ''} saisi{slotBookings.length > 1 ? 's' : ''})
+                            <div className="print-hide nop noprint" style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: slotBookings.length > 0 ? '10px' : 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontSize: '1rem' }}>👥</span>
+                                  <strong style={{ fontSize: '0.82rem', color: '#0f172a' }}>
+                                    Gestion des réservations
                                   </strong>
-                                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                    · Remplissez les inscriptions ou laissez les lignes vierges pour écrire au stylo
+                                  <span style={{ fontSize: '0.68rem', fontWeight: 800, background: slotBookings.length > 0 ? '#dcfce7' : '#e2e8f0', color: slotBookings.length > 0 ? '#166534' : '#475569', padding: '2px 8px', borderRadius: '12px' }}>
+                                    {slotBookings.length} / 12 inscrit{slotBookings.length > 1 ? 's' : ''}
+                                  </span>
+                                  <span style={{ fontSize: '0.70rem', color: '#64748b' }}>
+                                    · Saisie en ligne facultative (ou écriture manuscrite au stylo)
                                   </span>
                                 </div>
 
@@ -2042,27 +2091,27 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
 
                             {/* GRAND TABLEAU D'ÉMARGEMENT DE 12 PERSONNES ("possibilité d'inscrire 12 personnes") */}
                             <div className="agenda-session-table-wrapper" style={{ border: '1.5px solid #0f172a', borderRadius: '6px', overflow: 'hidden', marginBottom: '6px', width: '100%', boxSizing: 'border-box' }}>
-                              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '0.70rem', background: '#fff', boxSizing: 'border-box' }}>
+                              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '0.68rem', background: '#fff', boxSizing: 'border-box' }}>
                                 <colgroup>
-                                  <col style={{ width: '3.5%' }} />
-                                  <col style={{ width: '20.5%' }} />
-                                  <col style={{ width: '12%' }} />
-                                  <col style={{ width: '25%' }} />
-                                  <col style={{ width: '10%' }} />
+                                  <col style={{ width: '4%' }} />
+                                  <col style={{ width: '21%' }} />
                                   <col style={{ width: '13%' }} />
+                                  <col style={{ width: '22%' }} />
+                                  <col style={{ width: '10%' }} />
+                                  <col style={{ width: '14%' }} />
                                   <col style={{ width: '8%' }} />
                                   <col style={{ width: '8%' }} />
                                 </colgroup>
                                 <thead>
-                                  <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.02em', height: '22px' }}>
-                                    <th style={{ padding: '3px 2px', textAlign: 'center', borderRight: '1px solid #cbd5e1' }}>N°</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>1. Client / Nom</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>2. Téléphone</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>3. Email client</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>4. Chars (M/Bi)</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>5. Formule & Notes</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #cbd5e1' }}>6. Règlement</th>
-                                    <th style={{ padding: '3px 4px', textAlign: 'left' }}>7. Signature</th>
+                                  <tr style={{ background: '#f1f5f9', borderBottom: '1.5px solid #0f172a', color: '#0f172a', fontSize: '0.60rem', textTransform: 'uppercase', letterSpacing: '0.02em', height: '26px' }}>
+                                    <th style={{ padding: '3px 2px', textAlign: 'center', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Numéro">N°</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Client / Nom & Prénom">1. Client / Nom</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Téléphone">2. Téléphone</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Email client">3. Email client</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Chars (Mono / Bi)">4. Chars (M/Bi)</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Formule & Notes">5. Formule & Notes</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', borderRight: '1px solid #cbd5e1', whiteSpace: 'normal', lineHeight: 1.15 }} title="Règlement">6. Règlement</th>
+                                    <th style={{ padding: '3px 3px', textAlign: 'left', whiteSpace: 'normal', lineHeight: 1.15 }} title="Signature">7. Signature</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -2079,28 +2128,28 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                                             background: rowIdx % 2 === 0 ? '#fff' : '#fcfcfc',
                                           }}
                                         >
-                                          <td style={{ textAlign: 'center', fontWeight: 900, color: '#0f172a', borderRight: '1px solid #e2e8f0', fontSize: '0.70rem', padding: '2px 2px' }}>
+                                          <td style={{ textAlign: 'center', fontWeight: 900, color: '#0f172a', borderRight: '1px solid #e2e8f0', fontSize: '0.68rem', padding: '2px 2px' }}>
                                             {rowIdx + 1}.
                                           </td>
-                                          <td style={{ padding: '2px 4px', fontWeight: 800, color: '#0f172a', borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', fontWeight: 800, color: '#0f172a', borderRight: '1px solid #e2e8f0', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.15, fontSize: '0.68rem' }}>
                                             {booking.name || '—'}
                                           </td>
-                                          <td style={{ padding: '2px 4px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: '0.70rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {booking.phone || '—'}
                                           </td>
-                                          <td style={{ padding: '2px 4px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontSize: '0.68rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', color: '#1e293b', borderRight: '1px solid #e2e8f0', fontSize: '0.63rem', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.15 }}>
                                             {booking.email || booking.pax || '—'}
                                           </td>
-                                          <td style={{ padding: '2px 4px', fontWeight: 700, color: '#0f172a', borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', fontWeight: 700, color: '#0f172a', borderRight: '1px solid #e2e8f0', fontSize: '0.66rem', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.15 }}>
                                             {booking.chars || '—'}
                                           </td>
-                                          <td style={{ padding: '2px 4px', color: '#334155', borderRight: '1px solid #e2e8f0', fontSize: '0.66rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', color: '#334155', borderRight: '1px solid #e2e8f0', fontSize: '0.63rem', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.15 }}>
                                             <strong>{booking.formula || 'Initiation'}</strong>{booking.notes ? ` · ${booking.notes}` : ''}
                                           </td>
-                                          <td style={{ padding: '2px 4px', color: '#0f172a', fontWeight: 700, borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <td style={{ padding: '2px 3px', color: '#0f172a', fontWeight: 700, borderRight: '1px solid #e2e8f0', fontSize: '0.65rem', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.15 }}>
                                             {booking.payment || '—'}
                                           </td>
-                                          <td style={{ padding: '2px 4px', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.66rem' }}>
+                                          <td style={{ padding: '2px 3px', color: '#94a3b8', fontStyle: 'italic', fontSize: '0.64rem' }}>
                                             &nbsp;
                                           </td>
                                         </tr>
@@ -2117,16 +2166,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                                           background: '#fff',
                                         }}
                                       >
-                                        <td style={{ textAlign: 'center', color: '#64748b', fontWeight: 900, fontSize: '0.70rem', borderRight: '1px solid #cbd5e1', padding: '2px 2px' }}>
+                                        <td style={{ textAlign: 'center', color: '#64748b', fontWeight: 900, fontSize: '0.68rem', borderRight: '1px solid #cbd5e1', padding: '2px 2px' }}>
                                           {rowIdx + 1}.
                                         </td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
-                                        <td style={{ padding: '0 4px' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px', borderRight: '1px solid #cbd5e1' }}>&nbsp;</td>
+                                        <td style={{ padding: '0 3px' }}>&nbsp;</td>
                                       </tr>
                                     );
                                   })}
@@ -2183,10 +2232,16 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                             <span style={{ fontWeight: 800, color: '#0f172a' }}>
                               ✍️ Débriefing pédagogique & observations moniteur :
                             </span>
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                              <span>Moniteur(s) : ___________________________</span>
-                              <span>Voiles : ___________________</span>
-                              <span>Vent réel : _______ nds</span>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                Moniteur(s) : <span style={{ width: '80px', borderBottom: '1px dotted #94a3b8', display: 'inline-block' }}>&nbsp;</span>
+                              </span>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                Voiles : <span style={{ width: '60px', borderBottom: '1px dotted #94a3b8', display: 'inline-block' }}>&nbsp;</span>
+                              </span>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                Vent réel : <span style={{ width: '40px', borderBottom: '1px dotted #94a3b8', display: 'inline-block' }}>&nbsp;</span> nds
+                              </span>
                             </div>
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>

@@ -109,6 +109,11 @@ main {
   padding: 14px;
 }
 
+main.agenda-wide {
+  max-width: 1150px;
+  width: 100%;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--bd);
@@ -818,7 +823,58 @@ td.n {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
+/* RÈGLES D'AFFICHAGE ÉCRAN POUR LES FICHES D'AGENDA & ÉMARGEMENT */
+.agenda-day-page,
+.agenda-session-page {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.agenda-session-table-wrapper {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+.agenda-day-page table,
+.agenda-session-page table {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+}
+
+.agenda-day-page th,
+.agenda-session-page th {
+  white-space: normal !important;
+  word-break: break-word !important;
+  box-sizing: border-box !important;
+  line-height: 1.15 !important;
+  vertical-align: middle !important;
+}
+
+.agenda-day-page td,
+.agenda-session-page td {
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+}
+
+.agenda-day-summary-boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
 @media print {
+  .agenda-day-summary-boxes {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 8px !important;
+  }
   /* 1. MASQUER ABSOLUMENT TOUT LE SITE ET TOUS LES MENUS */
   header,
   footer,
@@ -835,7 +891,8 @@ td.n {
   .hyp,
   #tab1,
   #tab2,
-  #tab4 {
+  #tab4,
+  #tab5 {
     display: none !important;
   }
 
@@ -915,9 +972,15 @@ td.n {
     overflow: hidden !important;
   }
 
+  .agenda-session-table-wrapper {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
   .agenda-day-page table,
   .agenda-session-page table {
     width: 100% !important;
+    min-width: 0 !important;
     max-width: 100% !important;
     table-layout: fixed !important;
     border-collapse: collapse !important;

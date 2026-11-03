@@ -7,9 +7,21 @@ import { MarnageChart } from './components/MarnageChart';
 import { NotesAndHypotheses } from './components/NotesAndHypotheses';
 import { PrintableAgendaSheet } from './components/PrintableAgendaSheet';
 import { SettingsCard } from './components/SettingsCard';
+import { SlotObservationModal } from './components/SlotObservationModal';
+import { StatisticsTab } from './components/StatisticsTab';
 import { TableView } from './components/TableView';
 import { TideHeaderCard } from './components/TideHeaderCard';
 import { WindguruTable } from './components/WindguruTable';
+import { SyncStatusBar } from './components/SyncStatusBar';
+import { AppLockScreen } from './components/AppLockScreen';
+import {
+  subscribeToValidations,
+  saveValidationToFirestore,
+  deleteValidationFromFirestore,
+  subscribeToCustomSlots,
+  saveCustomSlotsToFirestore,
+  seedLocalDataToFirestoreIfEmpty,
+} from './utils/firebaseSync';
 import {
   AppSettings,
   CustomSlot,
@@ -166,6 +178,44 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // Initialisation et abonnements temps réel Firestore (partage entre Bertrand et Jérôme)
+  useEffect(() => {
+    seedLocalDataToFirestoreIfEmpty();
+
+    const unsubValidations = subscribeToValidations(remoteVals => {
+      if (remoteVals && Object.keys(remoteVals).length > 0) {
+        setValidations(prev => {
+          const merged = { ...prev, ...remoteVals };
+          try {
+            localStorage.setItem(VK, JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
+    });
+
+    const unsubCustomSlots = subscribeToCustomSlots(remoteSlots => {
+      if (remoteSlots && Object.keys(remoteSlots).length > 0) {
+        setCustomSlotsMap(prev => {
+          const merged = { ...prev, ...remoteSlots };
+          try {
+            localStorage.setItem(CS_KEY, JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
+    });
+
+    return () => {
+      unsubValidations();
+      unsubCustomSlots();
+    };
+  }, []);
+
   const handleUpdateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettings(prev => {
       const updated = { ...prev, ...newSettings };
@@ -190,6 +240,9 @@ export const App: React.FC = () => {
         } catch {
           // ignore
         }
+        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
+          console.warn('Erreur Firestore custom slots:', err)
+        );
         return updated;
       });
     },
@@ -199,6 +252,36 @@ export const App: React.FC = () => {
   const handleTabChange = (tab: number) => {
     setActiveTab(tab);
   };
+
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
+    try {
+      return (
+        localStorage.getItem('cv_app_unlocked') === 'true' ||
+        sessionStorage.getItem('cv_app_unlocked') === 'true'
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  const handleLock = useCallback(() => {
+    try {
+      localStorage.removeItem('cv_app_unlocked');
+      sessionStorage.removeItem('cv_app_unlocked');
+    } catch {
+      // ignore
+    }
+    setIsUnlocked(false);
+  }, []);
+
+  const [activeObservationSlot, setActiveObservationSlot] = useState<{
+    dateStr: string;
+    slotKey: string;
+    slotStart: string;
+    slotEnd: string;
+    isCustom?: boolean;
+    customTitle?: string;
+  } | null>(null);
 
   const handlePrevMonth = () => {
     setMonth(prevM => {
@@ -406,6 +489,9 @@ export const App: React.FC = () => {
     } catch {
       // ignore
     }
+    saveValidationToFirestore(ds, updated[ds]).catch(err =>
+      console.warn('Erreur Firestore validation:', err)
+    );
   };
 
   const handleClearValidation = useCallback((ds: string) => {
@@ -417,6 +503,9 @@ export const App: React.FC = () => {
       } catch {
         // ignore
       }
+      deleteValidationFromFirestore(ds).catch(err =>
+        console.warn('Erreur Firestore delete validation:', err)
+      );
       return updated;
     });
   }, []);
@@ -487,6 +576,15 @@ export const App: React.FC = () => {
         } catch {
           // ignore
         }
+        if (nextItems.length === 0) {
+          deleteValidationFromFirestore(ds).catch(err =>
+            console.warn('Erreur Firestore delete validation:', err)
+          );
+        } else {
+          saveValidationToFirestore(ds, updated[ds]).catch(err =>
+            console.warn('Erreur Firestore save validation:', err)
+          );
+        }
         return updated;
       });
     },
@@ -524,11 +622,16 @@ export const App: React.FC = () => {
   const first = EX[0]?.t ?? 0;
   const last = EX[EX.length - 1]?.t ?? 0;
 
+  if (!isUnlocked) {
+    return <AppLockScreen onUnlock={() => setIsUnlocked(true)} />;
+  }
+
   return (
     <>
       <Header />
-      <main>
-        {/* En-tête des marées en haut de page (masqué en onglet 3 et 4 et à l'impression) */}
+      <SyncStatusBar onLock={handleLock} />
+      <main className={activeTab === 3 || activeTab === 4 ? 'agenda-wide' : ''}>
+        {/* En-tête des marées en haut de page (masqué en onglet 3, 4 et 5 et à l'impression) */}
         {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
 
         {/* Navigation tabs */}
@@ -558,6 +661,13 @@ export const App: React.FC = () => {
             type="button"
             className={activeTab === 4 ? 'on' : ''}
             onClick={() => handleTabChange(4)}
+          >
+            📊 Statistiques & Relevés
+          </button>
+          <button
+            type="button"
+            className={activeTab === 5 ? 'on' : ''}
+            onClick={() => handleTabChange(5)}
           >
             💡 Hypothèses & Notes
           </button>
@@ -607,6 +717,7 @@ export const App: React.FC = () => {
               onToggleSlotValidation={handleToggleSlotValidation}
               onSetSlotDecision={handleSetSlotDecision}
               onOpenPrintAgenda={() => handleTabChange(3)}
+              onOpenObservationModal={slot => setActiveObservationSlot(slot)}
             />
 
             <TableView
@@ -673,7 +784,7 @@ export const App: React.FC = () => {
                 type="button"
                 className="fbtn"
                 onClick={() => {
-                  handleTabChange(4);
+                  handleTabChange(5);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 style={{
@@ -717,6 +828,7 @@ export const App: React.FC = () => {
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
             onOpenPrintAgenda={() => handleTabChange(3)}
+            onOpenObservationModal={slot => setActiveObservationSlot(slot)}
           />
         )}
 
@@ -740,9 +852,23 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Tab 4: Réglages validés, Hypothèses & Notes */}
+        {/* Tab 4: Statistiques Opérationnelles & Observatoire des Écarts */}
         {activeTab === 4 && (
           <div id="tab4">
+            <StatisticsTab
+              settings={settings}
+              EX={EX}
+              windList={windList}
+              validations={validations}
+              customSlotsMap={customSlotsMap}
+              selectedDate={selectedDate}
+            />
+          </div>
+        )}
+
+        {/* Tab 5: Réglages validés, Hypothèses & Notes */}
+        {activeTab === 5 && (
+          <div id="tab5">
             <div
               className="card nop"
               style={{
@@ -794,8 +920,25 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            <NotesAndHypotheses />
+            <NotesAndHypotheses onLock={handleLock} />
           </div>
+        )}
+
+        {/* Modal de saisie rapide d'un relevé terrain depuis le calendrier */}
+        {activeObservationSlot && (
+          <SlotObservationModal
+            isOpen={Boolean(activeObservationSlot)}
+            onClose={() => setActiveObservationSlot(null)}
+            dateStr={activeObservationSlot.dateStr}
+            slotKey={activeObservationSlot.slotKey}
+            slotStart={activeObservationSlot.slotStart}
+            slotEnd={activeObservationSlot.slotEnd}
+            slotTitle={activeObservationSlot.customTitle}
+            isCustom={activeObservationSlot.isCustom}
+            onSaveSuccess={() => {
+              setActiveObservationSlot(null);
+            }}
+          />
         )}
       </main>
     </>

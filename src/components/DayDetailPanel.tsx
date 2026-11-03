@@ -53,6 +53,14 @@ interface DayDetailPanelProps {
     reason?: string
   ) => void;
   onOpenPrintAgenda?: () => void;
+  onOpenObservationModal?: (slot: {
+    dateStr: string;
+    slotKey: string;
+    slotStart: string;
+    slotEnd: string;
+    isCustom?: boolean;
+    customTitle?: string;
+  }) => void;
 }
 
 export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
@@ -71,6 +79,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   onToggleSlotValidation,
   onSetSlotDecision,
   onOpenPrintAgenda,
+  onOpenObservationModal,
 }) => {
   const [y, m0, d] = selectedDate.split('-').map(Number);
   const m = m0 - 1;
@@ -642,6 +651,27 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                     ✕ Refuser
                   </button>
                 </>
+              )}
+
+              {onOpenObservationModal && (
+                <button
+                  type="button"
+                  className="slot-toggle-btn"
+                  style={{ color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
+                  onClick={() =>
+                    onOpenObservationModal({
+                      dateStr: selectedDate,
+                      slotKey,
+                      slotStart: lc(x.a, y, m, d),
+                      slotEnd: lc(x.b, y, m, d),
+                      isCustom: x.isCustom,
+                      customTitle: x.title,
+                    })
+                  }
+                  title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
+                >
+                  📝 Relevé
+                </button>
               )}
             </div>
           );

@@ -46,6 +46,14 @@ interface FocusTabProps {
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
   onOpenPrintAgenda?: () => void;
+  onOpenObservationModal?: (slot: {
+    dateStr: string;
+    slotKey: string;
+    slotStart: string;
+    slotEnd: string;
+    isCustom?: boolean;
+    customTitle?: string;
+  }) => void;
 }
 
 export const FocusTab: React.FC<FocusTabProps> = ({
@@ -64,6 +72,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onSelectDayInCalendar,
   customSlotsMap = {},
   onOpenPrintAgenda,
+  onOpenObservationModal,
 }) => {
   const td = tdy();
   const tomorrowDs = shf(td, 1);
@@ -217,6 +226,28 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     ✕ Refuser
                   </button>
                 </>
+              )}
+
+              {onOpenObservationModal && (
+                <button
+                  type="button"
+                  className="slot-toggle-btn"
+                  style={{ color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenObservationModal({
+                      dateStr: currentDs,
+                      slotKey,
+                      slotStart: lc(x.a, f.y, f.m, f.d),
+                      slotEnd: lc(x.b, f.y, f.m, f.d),
+                      isCustom: x.isCustom,
+                      customTitle: x.customTitle,
+                    });
+                  }}
+                  title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
+                >
+                  📝 Relevé
+                </button>
               )}
             </div>
           ) : (

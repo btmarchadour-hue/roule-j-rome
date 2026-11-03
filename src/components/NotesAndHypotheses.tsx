@@ -1,8 +1,197 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, ensureAuth } from '../firebase';
 
-export const NotesAndHypotheses: React.FC = () => {
+interface NotesAndHypothesesProps {
+  onLock?: () => void;
+}
+
+export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }) => {
+  const [customPassword, setCustomPassword] = useState('');
+  const [currentCloudPassword, setCurrentCloudPassword] = useState<string | null>(null);
+  const [isSavingPwd, setIsSavingPwd] = useState(false);
+  const [pwdStatus, setPwdStatus] = useState('');
+
+  // Charger le mot de passe cloud actif s'il a été personnalisé
+  useEffect(() => {
+    let isMounted = true;
+    const loadCurrentPwd = async () => {
+      try {
+        await ensureAuth();
+        const docRef = doc(db, 'app_config', 'security');
+        const snap = await getDoc(docRef);
+        if (snap.exists() && isMounted) {
+          const data = snap.data();
+          if (data?.clubPassword) {
+            setCurrentCloudPassword(data.clubPassword);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadCurrentPwd();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleSavePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customPassword.trim()) return;
+    setIsSavingPwd(true);
+    setPwdStatus('');
+    try {
+      await ensureAuth();
+      const newPwd = customPassword.trim().toLowerCase();
+      const docRef = doc(db, 'app_config', 'security');
+      await setDoc(docRef, {
+        clubPassword: newPwd,
+        updatedAt: Date.now(),
+      });
+      setCurrentCloudPassword(newPwd);
+      setPwdStatus('✓ Nouveau mot de passe enregistré et synchronisé pour Benoît et Jérôme !');
+      setCustomPassword('');
+    } catch {
+      setPwdStatus('Erreur lors de l’enregistrement du mot de passe dans le cloud.');
+    } finally {
+      setIsSavingPwd(false);
+    }
+  };
+
   return (
     <>
+      {/* 1. CARTE SÉCURITÉ & MOT DE PASSE D'OUVERTURE (MONITEURS) */}
+      <div
+        className="card nop"
+        style={{
+          marginBottom: '16px',
+          background: '#ffffff',
+          borderRadius: '12px',
+          border: '1.5px solid #0284c7',
+          padding: '18px 20px',
+          boxShadow: '0 4px 12px rgba(2, 132, 199, 0.08)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase' }}>
+              <span>🔒</span> Sécurité de l'application
+            </div>
+            <h3 style={{ margin: '6px 0 2px', fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
+              Mot de Passe & Accès Moniteurs
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
+              Gestion de l'accès à l'application, protection des données clients et synchronisation cloud entre Benoît et Jérôme.
+            </p>
+          </div>
+
+          {onLock && (
+            <button
+              type="button"
+              className="fbtn"
+              onClick={onLock}
+              style={{
+                margin: 0,
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                color: '#b91c1c',
+                fontWeight: 800,
+                padding: '7px 12px',
+                borderRadius: '8px',
+                fontSize: '0.74rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              title="Tester le verrouillage immédiat de l'écran"
+            >
+              <span>🔒</span>
+              <span>Verrouiller maintenant</span>
+            </button>
+          )}
+        </div>
+
+        <div style={{ marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+          {/* Colonne gauche : Fonctionnement et mots de passe reconnus */}
+          <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '0.76rem', color: '#334155', lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+              🛡️ Comment fonctionne la protection ?
+            </div>
+            <div>
+              • <strong>Toute personne extérieure</strong> qui ouvre l'adresse tombe sur un écran de verrouillage strict, sans affichage des plannings ni des clients, avec un lien de redirection vers le site public.
+            </div>
+            <div style={{ marginTop: '4px' }}>
+              • <strong>Mots de passe reconnus par défaut :</strong>{' '}
+              <code style={{ background: '#e2e8f0', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0f172a' }}>
+                lestrevet
+              </code>{' '}
+              ou{' '}
+              <code style={{ background: '#e2e8f0', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0f172a' }}>
+                boutdumonde
+              </code>
+            </div>
+            {currentCloudPassword && (
+              <div style={{ marginTop: '4px', color: '#0369a1' }}>
+                • <strong>Mot de passe personnalisé actif :</strong>{' '}
+                <code style={{ background: '#bae6fd', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0369a1' }}>
+                  {currentCloudPassword}
+                </code>
+              </div>
+            )}
+            <div style={{ marginTop: '4px', color: '#64748b', fontSize: '0.72rem' }}>
+              • La case <i>« Mémoriser cet appareil »</i> vous évite de retaper le mot de passe à chaque ouverture sur vos téléphones ou ordinateurs personnels.
+            </div>
+          </div>
+
+          {/* Colonne droite : Formulaire pour définir un nouveau mot de passe */}
+          <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+            <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.76rem', marginBottom: '6px' }}>
+              ✏️ Définir ou modifier le mot de passe partagé
+            </div>
+            <form onSubmit={handleSavePassword} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input
+                type="text"
+                placeholder="Nouveau mot de passe..."
+                value={customPassword}
+                onChange={e => setCustomPassword(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #cbd5e1',
+                  fontSize: '0.82rem',
+                  outline: 'none',
+                  background: '#fff',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={isSavingPwd || !customPassword.trim()}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: customPassword.trim() ? '#0284c7' : '#94a3b8',
+                  color: '#ffffff',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  cursor: customPassword.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {isSavingPwd ? 'Enregistrement dans le Cloud…' : 'Enregistrer le nouveau mot de passe'}
+              </button>
+            </form>
+
+            {pwdStatus && (
+              <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#166534', fontWeight: 800 }}>
+                {pwdStatus}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <p className="note nop">
         Le petit chiffre en haut à droite d'une case = nombre maximal de séances possibles ce jour-là.
         Roulage = marée sous le seuil ET lumière du jour (lever/coucher du soleil calculés pour la

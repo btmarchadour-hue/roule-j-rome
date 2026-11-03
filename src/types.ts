@@ -158,3 +158,52 @@ export interface DayRowData {
   ls: string;
   ph: string;
 }
+
+// -----------------------------------------------------------------------------
+// MODULE STATISTIQUES & OBSERVATOIRE DES ÉCARTS TERRAIN (LESTREVET)
+// -----------------------------------------------------------------------------
+
+export type CancellationReason =
+  | 'wind_low'         // Vent insuffisant (< 8 nds)
+  | 'wind_high'        // Vent trop fort ou rafales (> 25/35 nds)
+  | 'wind_dir'         // Déventé / mauvais secteur (vent de terre)
+  | 'no_clients'       // Manque d'inscrits / réservations nulles
+  | 'beach_state'      // État de la plage (bâches profondes, cailloux, sable mou)
+  | 'weather_extreme'  // Orage / pluie battante / submersion
+  | 'instructor'       // Indisponibilité moniteur / matériel
+  | 'other';           // Autre motif
+
+export interface SlotObservation {
+  id: string;
+  ds: string;                  // Date YYYY-MM-DD
+  slotKey: string;             // Identifiant du créneau (ex: "s0", "custom-1")
+  slotStart: string;           // "10:30"
+  slotEnd: string;             // "11:30"
+  isCustom?: boolean;
+  customTitle?: string;
+  status: 'realized' | 'cancelled';
+  cancellationReason?: CancellationReason;
+  cancellationNote?: string;
+  // Écarts mesurés vs théorie
+  actualPassableTime?: string; // Heure réelle d'accès effectif au sable (ex: "10:15")
+  timeDeltaMin?: number;        // Différence en minutes (- = accessible plus tôt, + = retard)
+  actualWaterHeight?: number;   // Hauteur d'eau constatée (m)
+  waterDeltaCm?: number;        // Surcote ou sous-cote constatée (cm, ex: +20 cm)
+  // Paramètres environnementaux réels au moment de la séance
+  observedPressure?: number;    // Pression atmosphérique réelle (hPa)
+  observedWindKts?: number;     // Vent moyen réel (nds)
+  observedGustKts?: number;     // Rafales réelles (nds)
+  observedWindDir?: string;     // Secteur réel (ex: "O", "SO", "ONO")
+  observedWaveH?: number;       // Hauteur de houle réelle (m)
+  observedWavePeriod?: number;  // Période de houle (s)
+  beachCondition?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
+  // Bilan participants
+  participantsCount?: number;
+  monoCount?: number;
+  biCount?: number;
+  notes?: string;
+  author?: string;
+  updatedAt?: number;
+  createdAt: number;
+}
+

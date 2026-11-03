@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "ValidationDoc": {
+      "title": "ValidationDoc",
+      "description": "Validation et décisions de créneaux pour une date donnée.",
+      "type": "object",
+      "properties": {
+        "ts": { "type": "number", "description": "Timestamp de dernière mise à jour." },
+        "k": { "type": "string", "description": "Code météo global ou verdict du jour." },
+        "author": { "type": "string", "description": "Nom de la personne ayant validé (ex: Jérôme, Benoît)." },
+        "items": { "type": "array", "description": "Liste des décisions par créneau." }
+      },
+      "required": ["ts"]
+    },
+    "CustomSlotDoc": {
+      "title": "CustomSlotDoc",
+      "description": "Configuration de créneaux sur mesure pour une journée spécifique.",
+      "type": "object",
+      "properties": {
+        "replaceDefault": { "type": "boolean", "description": "Si vrai, remplace les créneaux automatiques calculés." },
+        "slots": { "type": "array", "description": "Liste des créneaux sur-mesure." },
+        "updatedBy": { "type": "string", "description": "Dernier moniteur ayant modifié (ex: Jérôme)." },
+        "updatedAt": { "type": "number", "description": "Timestamp de modification." }
+      },
+      "required": ["replaceDefault", "slots"]
+    },
+    "SlotObservation": {
+      "title": "SlotObservation",
+      "description": "Relevé terrain, écart de marée/surcote ou motif d'annulation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identifiant unique du relevé." },
+        "ds": { "type": "string", "description": "Date YYYY-MM-DD." },
+        "slotKey": { "type": "string", "description": "Clé du créneau horaire." },
+        "slotStart": { "type": "string", "description": "Heure de début (ex: 10:00)." },
+        "slotEnd": { "type": "string", "description": "Heure de fin (ex: 11:30)." },
+        "status": { "type": "string", "enum": ["realized", "cancelled"] },
+        "cancellationReason": { "type": "string" },
+        "cancellationNote": { "type": "string" },
+        "timeDeltaMin": { "type": "number" },
+        "waterDeltaCm": { "type": "number" },
+        "observedWaterH": { "type": "number" },
+        "observedPressure": { "type": "number" },
+        "observedWindKts": { "type": "number" },
+        "observedGustKts": { "type": "number" },
+        "observedWindDir": { "type": "string" },
+        "observedWaveH": { "type": "number" },
+        "beachCondition": { "type": "string" },
+        "participantsCount": { "type": "number" },
+        "monoCount": { "type": "number" },
+        "biCount": { "type": "number" },
+        "notes": { "type": "string" },
+        "author": { "type": "string", "description": "Moniteur ayant saisi le relevé." },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["ds", "slotKey", "slotStart", "slotEnd", "status"]
+    },
+    "ReservationDoc": {
+      "title": "ReservationDoc",
+      "description": "Feuille d'émargement et réservations clients pour une date et un créneau.",
+      "type": "object",
+      "properties": {
+        "ds": { "type": "string", "description": "Date YYYY-MM-DD." },
+        "slotKey": { "type": "string", "description": "Clé du créneau." },
+        "clients": { "type": "array", "description": "Liste des clients inscrits." },
+        "updatedBy": { "type": "string", "description": "Moniteur ayant inscrit ou modifié." },
+        "updatedAt": { "type": "number", "description": "Timestamp de mise à jour." }
+      },
+      "required": ["ds", "slotKey", "clients"]
+    },
+    "SecurityConfig": {
+      "title": "SecurityConfig",
+      "description": "Configuration du mot de passe d'accès pour les moniteurs.",
+      "type": "object",
+      "properties": {
+        "clubPassword": { "type": "string", "description": "Mot de passe partagé." },
+        "updatedAt": { "type": "number", "description": "Timestamp de modification." }
+      },
+      "required": ["clubPassword"]
+    }
+  },
+  "firestore": {
+    "/validations/{dateStr}": {
+      "schema": "ValidationDoc",
+      "description": "Décisions prises sur les créneaux pour une date donnée."
+    },
+    "/custom_slots/{dateStr}": {
+      "schema": "CustomSlotDoc",
+      "description": "Créneaux spécifiques créés pour une date donnée."
+    },
+    "/observations/{obsId}": {
+      "schema": "SlotObservation",
+      "description": "Relevés terrain et observations pour les statistiques et la calibration."
+    },
+    "/reservations/{reservationKey}": {
+      "schema": "ReservationDoc",
+      "description": "Inscriptions clients et émargement de séance."
+    },
+    "/app_config/{configId}": {
+      "schema": "SecurityConfig",
+      "description": "Paramètres globaux et mot de passe d'accès moniteurs."
+    }
+  }
+}
