@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   AppSettings,
   CustomSlot,
@@ -91,6 +91,20 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const XS = pl.extra;
   const DW = dayWind(y, m, d, settings, tideW, first, last, windList);
 
+  const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState(false);
+
+  const calculatedDefaultSlots = SS.map((x, idx) => ({
+    start: lc(x[0], y, m, d),
+    end: lc(x[1], y, m, d),
+    title: `Séance ${idx + 1}`,
+  })).concat(
+    XS.map(x => ({
+      start: lc(x[0], y, m, d),
+      end: lc(x[1], y, m, d),
+      title: `Optionnel (+${x[3]} min)`,
+    }))
+  );
+
   const a = toU(y, m, d, 0);
   const z = toU(y, m, d + 1, 0);
   const R = dayRow(y, m, d, settings, EX, tideW, first, last, windList);
@@ -179,75 +193,142 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
   return (
     <div className="pan card cal" id="pan">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' }}>
         <div>
           <div className="pt">Plage de roulage</div>
           <div className="ps" style={{ marginBottom: 0 }}>
             Date : {p2(d)}/{p2(m0)}/{y} · seuil :{' '}
             {settings.L.toFixed(2).replace('.', 'm')}
-            {settings.mg ? ` − ${settings.mg} cm` : ''} · {settings.h0}h–{settings.h1}h
+            {settings.mg ? ` − ${settings.mg} cm` : ''} · min. 09h00–{settings.h1}h
           </div>
         </div>
 
-        {holiday.isHoliday && (
-          <div
+        {/* 2 boutons d'action principaux : + NOTER UN RELEVÉ & ✏️ MODIFIER LES CRÉNEAUX */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {onOpenObservationModal && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenObservationModal({
+                  dateStr: selectedDate,
+                  slotKey: allSlots[0] ? `s0` : 'general',
+                  slotStart: allSlots[0] ? lc(allSlots[0].a, y, m, d) : '09:00',
+                  slotEnd: allSlots[0] ? lc(allSlots[0].b, y, m, d) : '10:00',
+                  isCustom: allSlots[0]?.isCustom,
+                  customTitle: allSlots[0]?.title,
+                });
+              }}
+              style={{
+                background: '#0284c7',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                fontWeight: 800,
+                fontSize: '0.78rem',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(2, 132, 199, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
+              }}
+              title="Noter un relevé terrain (hauteurs d'eau, surcote, météo) ou une cause d'annulation"
+            >
+              <span style={{ fontSize: '0.95rem', fontWeight: 900 }}>+</span>
+              <span>NOTER UN RELEVÉ</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setIsCustomSlotsOpen(true);
+              const el = document.getElementById('custom-slots-section');
+              el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }}
             style={{
+              background: '#ffffff',
+              color: '#0f172a',
+              border: '1.5px solid #0284c7',
+              borderRadius: '8px',
+              padding: '7px 13px',
+              fontWeight: 800,
+              fontSize: '0.78rem',
+              cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: '#fef2f2',
-              border: '1.5px solid #fca5a5',
-              padding: '3px 8px',
-              borderRadius: '6px',
-              fontSize: '0.74rem',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+              transition: 'all 0.15s ease',
             }}
+            title="Redéfinir manuellement les créneaux prédéfinis pour une souplesse totale"
           >
-            <span>🎒 {holiday.holidayName}</span>
-            <span style={{ fontWeight: 800, color: '#b91c1c' }}>({holiday.zonesLabel})</span>
-            <span style={{ display: 'inline-flex', gap: '3px' }}>
-              <span
-                style={{
-                  padding: '1px 5px',
-                  borderRadius: '3px',
-                  fontSize: '0.62rem',
-                  fontWeight: 900,
-                  color: '#fff',
-                  background: holiday.isZoneA ? '#0284c7' : '#cbd5e1',
-                  opacity: holiday.isZoneA ? 1 : 0.45,
-                }}
-              >
-                A
-              </span>
-              <span
-                style={{
-                  padding: '1px 5px',
-                  borderRadius: '3px',
-                  fontSize: '0.62rem',
-                  fontWeight: 900,
-                  color: '#fff',
-                  background: holiday.isZoneB ? '#dc2626' : '#cbd5e1',
-                  opacity: holiday.isZoneB ? 1 : 0.45,
-                }}
-              >
-                B
-              </span>
-              <span
-                style={{
-                  padding: '1px 5px',
-                  borderRadius: '3px',
-                  fontSize: '0.62rem',
-                  fontWeight: 900,
-                  color: '#fff',
-                  background: holiday.isZoneC ? '#d97706' : '#cbd5e1',
-                  opacity: holiday.isZoneC ? 1 : 0.45,
-                }}
-              >
-                C
-              </span>
-            </span>
-          </div>
-        )}
+            <span>✏️</span>
+            <span>MODIFIER LES CRÉNEAUX</span>
+          </button>
+        </div>
       </div>
+
+      {holiday.isHoliday && (
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: '#fef2f2',
+            border: '1.5px solid #fca5a5',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '0.74rem',
+            marginBottom: '8px',
+          }}
+        >
+          <span>🎒 {holiday.holidayName}</span>
+          <span style={{ fontWeight: 800, color: '#b91c1c' }}>({holiday.zonesLabel})</span>
+          <span style={{ display: 'inline-flex', gap: '3px' }}>
+            <span
+              style={{
+                padding: '1px 5px',
+                borderRadius: '3px',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                color: '#fff',
+                background: holiday.isZoneA ? '#0284c7' : '#cbd5e1',
+                opacity: holiday.isZoneA ? 1 : 0.45,
+              }}
+            >
+              A
+            </span>
+            <span
+              style={{
+                padding: '1px 5px',
+                borderRadius: '3px',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                color: '#fff',
+                background: holiday.isZoneB ? '#dc2626' : '#cbd5e1',
+                opacity: holiday.isZoneB ? 1 : 0.45,
+              }}
+            >
+              B
+            </span>
+            <span
+              style={{
+                padding: '1px 5px',
+                borderRadius: '3px',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                color: '#fff',
+                background: holiday.isZoneC ? '#d97706' : '#cbd5e1',
+                opacity: holiday.isZoneC ? 1 : 0.45,
+              }}
+            >
+              C
+            </span>
+          </span>
+        </div>
+      )}
 
       <CurveChart
         dateStr={selectedDate}
@@ -759,6 +840,9 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         windList={windList}
         customSlotsMap={customSlotsMap}
         onUpdateCustomSlots={onUpdateCustomSlots}
+        defaultSlots={calculatedDefaultSlots}
+        isOpenControlled={isCustomSlotsOpen}
+        onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
       />
 
       {/* Wind conditions */}

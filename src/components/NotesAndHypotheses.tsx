@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
+import { APP_VERSION_INFO } from '../version';
 
 interface NotesAndHypothesesProps {
   onLock?: () => void;
@@ -251,7 +252,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
           </li>
           <li>
             <b>Méthode de création des séances :</b> calage par défaut dès le début de plage praticable
-            (ou depuis la fin selon réglage), 1 h après le lever du soleil. Les séances s'enchaînent avec la pause
+            (ou depuis la fin selon réglage), au plus tôt 1 h après le lever du soleil. <strong>Règle d'or horaire appliquée :</strong> aucune séance automatique n'est positionnée avant 09h00 du matin (les séances sur mesure créées manuellement restent possibles à toute heure selon vos besoins). Les séances s'enchaînent avec la pause
             réglementaire (15 min en été, 30 min l'hiver) pour maximiser le nombre de créneaux réalisables.
           </li>
           <li>
@@ -361,8 +362,8 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
           charavoileduboutdumonde.com
         </a>
         <br />
-        <span style={{ fontSize: '.7rem' }}>
-          Version du 12/10/2026 · n°9 (météo en tête, graphiques bleus, ouverture sur aujourd'hui) · React
+        <span style={{ fontSize: '.7rem', color: 'var(--mu)' }}>
+          {APP_VERSION_INFO.displayString} · Char à Voile Lestrevet
         </span>
       </footer>
     </>

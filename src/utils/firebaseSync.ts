@@ -162,7 +162,12 @@ export const subscribeToObservations = (
     snapshot => {
       const list: SlotObservation[] = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+        if (!docSnap.id.startsWith('sample-obs-')) {
+          list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+        } else {
+          // Supprimer automatiquement les résidus de données d'exemple fictives
+          deleteDoc(docSnap.ref).catch(() => {});
+        }
       });
       // Tri du plus récent au plus ancien
       list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -269,18 +274,29 @@ export const seedLocalDataToFirestoreIfEmpty = async () => {
     // 1. Check observations
     const obsCol = collection(db, 'observations');
     const obsSnap = await getDocs(obsCol);
-    if (obsSnap.empty) {
-      const localObsRaw = localStorage.getItem('char_slot_observations_v1');
+    // Purger les éventuels documents d'exemple fictifs de Firestore
+    obsSnap.forEach(d => {
+      if (d.id.startsWith('sample-obs-')) {
+        deleteDoc(d.ref).catch(() => {});
+      }
+    });
+
+    const realDocs = obsSnap.docs.filter(d => !d.id.startsWith('sample-obs-'));
+    if (realDocs.length === 0) {
+      const localObsRaw = localStorage.getItem('char_slot_observations_v1') || localStorage.getItem('cv_observations_v1');
       if (localObsRaw) {
         const localObs = JSON.parse(localObsRaw);
-        if (Array.isArray(localObs) && localObs.length > 0) {
-          const batch = writeBatch(db);
-          localObs.forEach((o: SlotObservation) => {
-            const id = o.id || `${o.ds}_${o.slotKey}`;
-            const ref = doc(db, 'observations', id);
-            batch.set(ref, { ...o, id, author: o.author || 'Jérôme' });
-          });
-          await batch.commit();
+        if (Array.isArray(localObs)) {
+          const cleanReal = localObs.filter((o: SlotObservation) => o && o.id && !o.id.startsWith('sample-obs-'));
+          if (cleanReal.length > 0) {
+            const batch = writeBatch(db);
+            cleanReal.forEach((o: SlotObservation) => {
+              const id = o.id || `${o.ds}_${o.slotKey}`;
+              const ref = doc(db, 'observations', id);
+              batch.set(ref, { ...o, id, author: o.author || 'Jérôme' });
+            });
+            await batch.commit();
+          }
         }
       }
     }

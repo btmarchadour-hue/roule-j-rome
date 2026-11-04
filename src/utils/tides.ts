@@ -299,9 +299,11 @@ export function dayInfo(
 ): [number, number][] {
   const l = dayLight(y, m, d, settings.lum, settings.lmg);
   if (!l) return [];
-  const h0 = settings.h0 * 60;
+  // Règle d'or club : aucune séance automatique proposée avant 9h00 (9 * 60 = 540 min)
+  const min9h = 9 * 60;
+  const h0 = Math.max(min9h, (settings.h0 || 0) * 60);
   const h1 = settings.h1 * 60;
-  const a = Math.max(l[0], toU(y, m, d, h0), first);
+  const a = Math.max(l[0], toU(y, m, d, h0), toU(y, m, d, min9h), first);
   const b = Math.min(l[1], toU(y, m, d, h1), last);
   if (allDay(y, m, d, settings)) {
     return b - a >= 1 ? [[a, b]] : [];
@@ -330,10 +332,12 @@ export function plan(
   const extra: [number, number, string, number, string][] = [];
   if (!P.length || !l) return { full, extra };
 
+  // Pas de séance automatique avant 9h00 (les séances sur mesure restent possibles à toute heure)
+  const minStartTime = toU(y, m, d, 9 * 60);
   const dur = settings.sdur;
   const rnd = settings.rnd || 15;
   const gap = inSummer(m, d, settings) ? settings.gs : settings.gw;
-  const lo = l[0] + settings.pre;
+  const lo = Math.max(l[0] + settings.pre, minStartTime);
   const hi = l[1] - settings.post;
   const xon = settings.xon;
   const tol = Math.max(0, settings.xtol || 0);
@@ -357,24 +361,33 @@ export function plan(
       if (back) {
         let sx = fg(b - dur);
         while (sx >= a - E) {
-          arr.unshift([sx, sx + dur]);
+          if (sx >= minStartTime - E) {
+            arr.unshift([sx, sx + dur]);
+          }
           sx = fg(sx - gap - dur);
         }
       } else {
         let t = cg(a);
         while (t + dur <= b + E) {
-          arr.push([t, t + dur]);
+          if (t >= minStartTime - E) {
+            arr.push([t, t + dur]);
+          }
           t = cg(t + dur + gap);
         }
       }
     }
 
-    for (const x of arr) full.push(x);
+    for (const x of arr) {
+      if (x[0] >= minStartTime - E) {
+        full.push(x);
+      }
+    }
 
     if (!xon || !(tol > 0)) continue;
 
     const need = dur - tol;
     const add = (s0: number) => {
+      if (s0 < minStartTime - E) return; // Strict: pas de séance optionnelle automatique avant 9h00
       const o = ov(s0, a, b);
       const over = Math.round(dur - o);
       if (over <= 0) return;
@@ -388,21 +401,25 @@ export function plan(
       const firstSess = arr[0][0];
       const lastSess = arr[arr.length - 1][1];
       const sB = fg(firstSess - gap - dur);
-      if (sB >= l[0] - E && ov(sB, a, b) >= need - E && ov(sB, a, b) > 0) add(sB);
+      if (sB >= l[0] - E && sB >= minStartTime - E && ov(sB, a, b) >= need - E && ov(sB, a, b) > 0) add(sB);
       const sA = cg(lastSess + gap);
       if (sA + dur <= l[1] + E && sA < b && ov(sA, a, b) >= need - E && sA + dur > b + E) add(sA);
     } else {
       let best: [number, number] | null = null;
-      for (let s0 = cg(Math.max(l[0], a - tol)); s0 <= b; s0 = cg(s0 + 1)) {
+      for (let s0 = cg(Math.max(l[0], a - tol, minStartTime)); s0 <= b; s0 = cg(s0 + 1)) {
+        if (s0 < minStartTime - E) continue;
         if (s0 + dur > l[1] + E) break;
         const o = ov(s0, a, b);
         if (o >= need - E && (!best || o >= best[1] - E)) best = [s0, o];
       }
-      if (best) add(best[0]);
+      if (best && best[0] >= minStartTime - E) add(best[0]);
     }
   }
 
-  return { full, extra };
+  return {
+    full: full.filter(item => item[0] >= minStartTime - E),
+    extra: extra.filter(item => item[0] >= minStartTime - E),
+  };
 }
 
 export function windAt(u: number, windList: WindPoint[]): WindPoint | null {

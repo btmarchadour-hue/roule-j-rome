@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { APP_VERSION_INFO } from '../version';
 
 export const Header: React.FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -33,7 +34,24 @@ export const Header: React.FC = () => {
         }}
       />
       <div style={{ flex: 1 }}>
-        <div className="bt">Char à Voile du Bout du Monde</div>
+        <div className="bt" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span>Char à Voile du Bout du Monde</span>
+          <span
+            style={{
+              fontSize: '0.62rem',
+              fontWeight: 800,
+              background: '#e0f2fe',
+              color: '#0369a1',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              border: '1px solid #bae6fd',
+              letterSpacing: '0.02em',
+            }}
+            title={APP_VERSION_INFO.displayString}
+          >
+            {APP_VERSION_INFO.versionLabel}
+          </span>
+        </div>
         <div className="bs">École de char à voile · Plage de Lestrevet</div>
       </div>
       <button

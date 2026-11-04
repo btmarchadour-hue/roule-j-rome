@@ -131,10 +131,14 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
             value={settings.xpl}
             onChange={e => onUpdateSettings({ xpl: e.target.value as 'fin' | 'debut', xplCustomized: true })}
           >
-            <option value="debut">Dès la 1re plage disponible (1h après le lever de soleil)</option>
+            <option value="debut">Dès la 1re plage disponible (1h après lever de soleil, min. 09h00)</option>
             <option value="fin">À partir de la fin de plage (dernière séance)</option>
           </select>
         </label>
+
+        <span className="note" style={{ gridColumn: '1/-1', color: '#0369a1', fontWeight: 600 }}>
+          🕒 Règle club : aucune séance automatique avant 09h00 (séances sur mesure possibles plus tôt).
+        </span>
 
         <span className="note" style={{ gridColumn: '1/-1' }}>
           Créneau optionnel : une séance complète qui déborde d'au plus {settings.xtol} min de la plage

@@ -6,7 +6,6 @@ import {
   computeCalibrationStats,
   getStoredObservations,
   exportObservationsAsCsv,
-  INITIAL_SAMPLE_OBSERVATIONS,
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { subscribeToObservations, deleteObservationFromFirestore } from '../utils/firebaseSync';
@@ -28,19 +27,36 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   customSlotsMap,
   selectedDate,
 }) => {
-  // Liste des observations terrain enregistrées
-  const [observations, setObservations] = useState<SlotObservation[]>(() => getStoredObservations());
+  // Liste des observations terrain enregistrées (données réelles uniquement)
+  const [observations, setObservations] = useState<SlotObservation[]>(() =>
+    getStoredObservations().filter(o => o && o.id && !o.id.startsWith('sample-obs-'))
+  );
 
-  // Abonnement temps réel Firestore pour recevoir les relevés notés par Jérôme ou Bertrand
+  // Abonnement temps réel Firestore pour recevoir les relevés notés par Jérôme ou Benoît
   useEffect(() => {
-    const unsubscribe = subscribeToObservations(remoteObs => {
-      if (remoteObs && remoteObs.length > 0) {
-        setObservations(remoteObs);
-        try {
-          localStorage.setItem('char_slot_observations_v1', JSON.stringify(remoteObs));
-        } catch {
-          // ignore
+    // Purger définitivement tout ancien échantillon fictif du stockage local
+    try {
+      localStorage.removeItem('char_slot_observations_v1');
+      const stored = localStorage.getItem('cv_observations_v1');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((o: SlotObservation) => o && o.id && !o.id.startsWith('sample-obs-'));
+          localStorage.setItem('cv_observations_v1', JSON.stringify(clean));
+          setObservations(clean);
         }
+      }
+    } catch {
+      // ignore
+    }
+
+    const unsubscribe = subscribeToObservations(remoteObs => {
+      const cleanRemote = (remoteObs || []).filter(o => o && o.id && !o.id.startsWith('sample-obs-'));
+      setObservations(cleanRemote);
+      try {
+        localStorage.setItem('cv_observations_v1', JSON.stringify(cleanRemote));
+      } catch {
+        // ignore
       }
     });
     return () => unsubscribe();
@@ -149,35 +165,6 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   const handleEditObservation = (obs: SlotObservation) => {
     setEditingObservation(obs);
     setModalOpen(true);
-  };
-
-  const hasSampleData = useMemo(() => {
-    return observations.some(o => o.id?.startsWith('sample-obs-'));
-  }, [observations]);
-
-  const handleClearSamples = () => {
-    if (window.confirm("Voulez-vous effacer les 8 exemples de démonstration pour démarrer avec un carnet vierge ?")) {
-      const realOnly = observations.filter(o => !o.id?.startsWith('sample-obs-'));
-      setObservations(realOnly);
-      try {
-        localStorage.setItem('cv_observations_v1', JSON.stringify(realOnly));
-      } catch {
-        // ignore
-      }
-      observations
-        .filter(o => o.id?.startsWith('sample-obs-'))
-        .forEach(o => deleteObservationFromFirestore(o.id).catch(() => {}));
-    }
-  };
-
-  const handleLoadSamples = () => {
-    const merged = [...observations.filter(o => !o.id?.startsWith('sample-obs-')), ...INITIAL_SAMPLE_OBSERVATIONS];
-    setObservations(merged);
-    try {
-      localStorage.setItem('cv_observations_v1', JSON.stringify(merged));
-    } catch {
-      // ignore
-    }
   };
 
   // Survol interactif du camembert
@@ -297,53 +284,6 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </button>
         </div>
       </div>
-
-      {/* 1.1 BANNIÈRE D'INFORMATION DONNÉES D'EXEMPLES */}
-      {hasSampleData && (
-        <div
-          style={{
-            background: '#fffbeb',
-            border: '1.5px solid #fde68a',
-            borderRadius: '10px',
-            padding: '10px 14px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '10px',
-            fontSize: '0.76rem',
-            color: '#92400e',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.15rem' }}>💡</span>
-            <div>
-              <strong>Données d'exemples (démonstration) :</strong> Le carnet contient 8 relevés fictifs réalistes pour vous montrer comment réagissent les graphiques de surcote, la corrélation barométrique et le camembert.
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleClearSamples}
-            style={{
-              background: '#ffffff',
-              border: '1px solid #f59e0b',
-              color: '#b45309',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontWeight: 800,
-              fontSize: '0.74rem',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span>🗑️</span>
-            <span>Vider les 8 exemples (démarrer à zéro)</span>
-          </button>
-        </div>
-      )}
 
       {/* 2. SÉLECTEUR DE PÉRIODE & FILTRES */}
       <div
@@ -851,28 +791,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         {/* Tableau des relevés réels enregistrés */}
         <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
           <div style={{ padding: '8px 12px', background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', fontSize: '0.74rem', fontWeight: 800, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>📋 Carnet de bord des relevés terrain ({observations.length} entrées)</span>
-              {hasSampleData && (
-                <button
-                  type="button"
-                  onClick={handleClearSamples}
-                  style={{
-                    background: '#fef2f2',
-                    border: '1px solid #fecaca',
-                    color: '#b91c1c',
-                    borderRadius: '4px',
-                    padding: '2px 6px',
-                    fontSize: '0.66rem',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                  }}
-                  title="Effacer les 8 exemples de démonstration"
-                >
-                  Supprimer les 8 exemples
-                </button>
-              )}
-            </div>
+            <span>📋 Carnet de bord des relevés terrain ({observations.length} entrées)</span>
             <span style={{ fontSize: '0.68rem', color: '#64748b' }}>Cliquez sur une ligne pour modifier</span>
           </div>
 
@@ -895,31 +814,21 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               <tbody>
                 {observations.length === 0 ? (
                   <tr>
-                    <td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                      <div style={{ fontWeight: 800, marginBottom: '4px' }}>Carnet de bord vierge prêt pour vos relevés</div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Cliquez sur « + Noter un relevé » ci-dessus ou sur « 📝 Relevé » dans le planning.</div>
-                      <button
-                        type="button"
-                        onClick={handleLoadSamples}
-                        style={{
-                          marginTop: '10px',
-                          background: '#f1f5f9',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          padding: '4px 10px',
-                          fontSize: '0.68rem',
-                          color: '#475569',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Recharger les données d'exemple de démonstration
-                      </button>
+                    <td colSpan={10} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
+                      <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>📝</div>
+                      <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.88rem', marginBottom: '4px' }}>
+                        Carnet de relevés vierge (prêt pour la saison)
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b', maxWidth: '520px', margin: '0 auto', lineHeight: 1.5 }}>
+                        Aucun relevé terrain enregistré pour le moment.
+                        <br />
+                        Pour enregistrer une observation de marée (hauteur d'eau, surcote, vent) ou une cause d’annulation, cliquez sur le bouton bleu « <strong>+ Noter un relevé terrain</strong> » ci-dessus ou sur « <strong>📝 Relevé</strong> » directement depuis le planning.
+                      </div>
                     </td>
                   </tr>
                 ) : (
                   observations.map((obs, idx) => {
                     const isRealized = obs.status === 'realized';
-                    const isSample = obs.id?.startsWith('sample-obs-');
                     return (
                       <tr
                         key={obs.id || idx}
@@ -931,12 +840,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                         onClick={() => handleEditObservation(obs)}
                       >
                         <td style={{ padding: '6px 8px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                          <span>{obs.ds}</span>
-                          {isSample && (
-                            <span style={{ marginLeft: '5px', fontSize: '0.58rem', background: '#fef3c7', color: '#92400e', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>
-                              Exemple
-                            </span>
-                          )}
+                          {obs.ds}
                         </td>
                         <td style={{ padding: '6px 8px', color: '#334155', whiteSpace: 'nowrap' }}>
                           {obs.slotStart}–{obs.slotEnd} {obs.customTitle ? `(${obs.customTitle})` : ''}

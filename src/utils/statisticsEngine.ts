@@ -57,191 +57,27 @@ export const CANCELLATION_REASONS_INFO: Record<
 
 const OBSERVATIONS_STORAGE_KEY = 'cv_observations_v1';
 
-// Échantillons initiaux réalistes pour Lestrevet illustrant l'effet barométrique et le vent d'Ouest
-export const INITIAL_SAMPLE_OBSERVATIONS: SlotObservation[] = [
-  {
-    id: 'sample-obs-1',
-    ds: '2026-02-15',
-    slotKey: 's0',
-    slotStart: '10:30',
-    slotEnd: '11:30',
-    status: 'realized',
-    actualPassableTime: '10:15',
-    timeDeltaMin: -15, // 15 min d'avance
-    actualWaterHeight: 4.35,
-    waterDeltaCm: 15,
-    observedPressure: 1002, // Dépression
-    observedWindKts: 18,
-    observedGustKts: 24,
-    observedWindDir: 'O',
-    observedWaveH: 0.8,
-    observedWavePeriod: 8,
-    beachCondition: 'dur',
-    participantsCount: 10,
-    monoCount: 8,
-    biCount: 1,
-    notes: 'Vent d’Ouest modéré avec 1002 hPa : surcote de +15 cm bien visible sur la laisse de basse mer.',
-    createdAt: Date.now() - 86400000 * 15,
-  },
-  {
-    id: 'sample-obs-2',
-    ds: '2026-02-16',
-    slotKey: 's1',
-    slotStart: '11:45',
-    slotEnd: '12:45',
-    status: 'realized',
-    actualPassableTime: '11:55',
-    timeDeltaMin: 10, // 10 min de retard
-    actualWaterHeight: 4.65,
-    waterDeltaCm: 25,
-    observedPressure: 994, // Forte dépression
-    observedWindKts: 22,
-    observedGustKts: 31,
-    observedWindDir: 'OSO',
-    observedWaveH: 1.4,
-    observedWavePeriod: 10,
-    beachCondition: 'baches_faibles',
-    participantsCount: 8,
-    monoCount: 6,
-    biCount: 1,
-    notes: 'Grosse surcote (+25 cm) avec vent de mer fort et 994 hPa. Roulage retardé mais très bonne séance.',
-    createdAt: Date.now() - 86400000 * 14,
-  },
-  {
-    id: 'sample-obs-3',
-    ds: '2026-02-17',
-    slotKey: 's0',
-    slotStart: '12:30',
-    slotEnd: '13:30',
-    status: 'cancelled',
-    cancellationReason: 'wind_high',
-    cancellationNote: 'Rafales à 38 nds enregistrées au sémaphore, sécurité limite pour les débutants.',
-    observedPressure: 990,
-    observedWindKts: 28,
-    observedGustKts: 38,
-    observedWindDir: 'ONO',
-    observedWaveH: 1.8,
-    observedWavePeriod: 11,
-    beachCondition: 'baches_fortes',
-    createdAt: Date.now() - 86400000 * 13,
-  },
-  {
-    id: 'sample-obs-4',
-    ds: '2026-02-20',
-    slotKey: 's0',
-    slotStart: '14:00',
-    slotEnd: '15:00',
-    status: 'realized',
-    actualPassableTime: '14:00',
-    timeDeltaMin: 0,
-    actualWaterHeight: 4.48,
-    waterDeltaCm: -2,
-    observedPressure: 1022, // Anticyclone
-    observedWindKts: 14,
-    observedGustKts: 18,
-    observedWindDir: 'NNE',
-    observedWaveH: 0.4,
-    observedWavePeriod: 6,
-    beachCondition: 'dur',
-    participantsCount: 12,
-    monoCount: 10,
-    biCount: 1,
-    notes: 'Haute pression (1022 hPa) : marée parfaitement conforme aux calculs SHOM, sable très dur.',
-    createdAt: Date.now() - 86400000 * 10,
-  },
-  {
-    id: 'sample-obs-5',
-    ds: '2026-02-21',
-    slotKey: 's1',
-    slotStart: '15:15',
-    slotEnd: '16:15',
-    status: 'cancelled',
-    cancellationReason: 'wind_low',
-    cancellationNote: 'Pétole totale l’après-midi (4 à 6 nds), roulage impossible.',
-    observedPressure: 1025,
-    observedWindKts: 5,
-    observedGustKts: 7,
-    observedWindDir: 'E',
-    createdAt: Date.now() - 86400000 * 9,
-  },
-  {
-    id: 'sample-obs-6',
-    ds: '2026-02-23',
-    slotKey: 's0',
-    slotStart: '09:30',
-    slotEnd: '10:30',
-    status: 'realized',
-    actualPassableTime: '09:20',
-    timeDeltaMin: -10,
-    actualWaterHeight: 4.40,
-    waterDeltaCm: 10,
-    observedPressure: 1008,
-    observedWindKts: 16,
-    observedGustKts: 21,
-    observedWindDir: 'SO',
-    observedWaveH: 0.9,
-    observedWavePeriod: 8,
-    beachCondition: 'dur',
-    participantsCount: 11,
-    monoCount: 9,
-    biCount: 1,
-    notes: 'Créneau matinal ensoleillé. Roulage fluide.',
-    createdAt: Date.now() - 86400000 * 7,
-  },
-  {
-    id: 'sample-obs-7',
-    ds: '2026-02-25',
-    slotKey: 's0',
-    slotStart: '11:00',
-    slotEnd: '12:00',
-    status: 'cancelled',
-    cancellationReason: 'no_clients',
-    cancellationNote: 'Aucune réservation enregistrée ce mercredi hors vacances.',
-    observedPressure: 1014,
-    observedWindKts: 15,
-    observedGustKts: 19,
-    observedWindDir: 'O',
-    createdAt: Date.now() - 86400000 * 5,
-  },
-  {
-    id: 'sample-obs-8',
-    ds: '2026-02-26',
-    slotKey: 's0',
-    slotStart: '11:45',
-    slotEnd: '12:45',
-    status: 'realized',
-    actualPassableTime: '11:45',
-    timeDeltaMin: 0,
-    actualWaterHeight: 4.52,
-    waterDeltaCm: 2,
-    observedPressure: 1012,
-    observedWindKts: 17,
-    observedGustKts: 22,
-    observedWindDir: 'O',
-    observedWaveH: 0.7,
-    observedWavePeriod: 7,
-    beachCondition: 'dur',
-    participantsCount: 9,
-    monoCount: 7,
-    biCount: 1,
-    notes: 'Conditions idéales.',
-    createdAt: Date.now() - 86400000 * 4,
-  },
-];
+export const INITIAL_SAMPLE_OBSERVATIONS: SlotObservation[] = [];
 
 export function getStoredObservations(): SlotObservation[] {
   try {
     const raw = localStorage.getItem(OBSERVATIONS_STORAGE_KEY);
     if (!raw) {
-      // Stocker les échantillons initiaux pour guider le moniteur
-      localStorage.setItem(OBSERVATIONS_STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_OBSERVATIONS));
-      return INITIAL_SAMPLE_OBSERVATIONS;
+      return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) {
+      // Filtrer et purger définitivement les anciennes données d'exemple fictives
+      const clean = parsed.filter(o => o && o.id && !o.id.startsWith('sample-obs-'));
+      if (clean.length !== parsed.length) {
+        localStorage.setItem(OBSERVATIONS_STORAGE_KEY, JSON.stringify(clean));
+      }
+      return clean;
+    }
+    return [];
   } catch (e) {
     console.error('Erreur lecture observations:', e);
-    return INITIAL_SAMPLE_OBSERVATIONS;
+    return [];
   }
 }
 

@@ -71,7 +71,7 @@ const defaultSettings: AppSettings = {
   mg: 0,
   lum: -1.1,
   lmg: 0,
-  h0: 0,
+  h0: 9, // Aucune séance automatique avant 9h00
   h1: 24,
   les: false,
   vmin: 8,
