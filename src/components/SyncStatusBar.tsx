@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getActiveInstructor, setActiveInstructor } from '../utils/firebaseSync';
+import { getActiveInstructor, setActiveInstructor, syncLocalDataWithFirestore } from '../utils/firebaseSync';
 
 interface SyncStatusBarProps {
   isOnline?: boolean;
@@ -10,11 +10,28 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
   const [currentInstructor, setCurrentInstructor] = useState<string>(() => getActiveInstructor());
   const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
   const [customNameInput, setCustomNameInput] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncFeedback, setSyncFeedback] = useState<string>('');
 
   useEffect(() => {
     const active = getActiveInstructor();
     setCurrentInstructor(active);
   }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    setSyncFeedback('');
+    try {
+      await syncLocalDataWithFirestore();
+      setSyncFeedback('✓ Synchronisé avec le Cloud');
+      setTimeout(() => setSyncFeedback(''), 4000);
+    } catch {
+      setSyncFeedback('⚠️ Erreur de synchronisation');
+      setTimeout(() => setSyncFeedback(''), 4000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleSelectInstructor = (name: string) => {
     setCurrentInstructor(name);
@@ -46,7 +63,7 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
       }}
     >
       {/* Statut de synchronisation Cloud Firestore */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <span
           style={{
             display: 'inline-flex',
@@ -70,8 +87,37 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
               display: 'inline-block',
             }}
           />
-          {isOnline ? 'Cloud Synchro Temps Réel' : 'Hors ligne (Local)'}
+          {isOnline ? 'Cloud Synchro En Direct' : 'Hors ligne (Local)'}
         </span>
+
+        <button
+          type="button"
+          onClick={handleManualSync}
+          disabled={isSyncing}
+          style={{
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
+            borderRadius: '6px',
+            padding: '2px 8px',
+            fontSize: '0.68rem',
+            fontWeight: 700,
+            color: '#0369a1',
+            cursor: isSyncing ? 'not-allowed' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}
+          title="Forcer la synchronisation entre téléphone et ordinateur"
+        >
+          <span>{isSyncing ? '⏳' : '🔄'}</span>
+          <span>{isSyncing ? 'Synchronisation…' : 'Synchroniser'}</span>
+        </button>
+
+        {syncFeedback && (
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: syncFeedback.startsWith('✓') ? '#166534' : '#b91c1c' }}>
+            {syncFeedback}
+          </span>
+        )}
 
         <span style={{ color: 'var(--mu, #64748b)', fontSize: '0.72rem' }}>
           Données partagées téléphone & ordinateur (Jérôme & Benoît)

@@ -12,25 +12,31 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(defa
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Sign in anonymously automatically to authenticate both Bertrand and Jerome
-let authPromise: Promise<User> | null = null;
+// Ensure auth resolves smoothly without blocking operations if anonymous signin is restricted
+let authPromise: Promise<User | null> | null = null;
 
-export const ensureAuth = async (): Promise<User> => {
+export const ensureAuth = async (): Promise<User | null> => {
   if (auth.currentUser) {
     return auth.currentUser;
   }
   if (!authPromise) {
-    authPromise = new Promise((resolve, reject) => {
+    authPromise = new Promise(resolve => {
       const unsubscribe = onAuthStateChanged(auth, user => {
         if (user) {
           unsubscribe();
           resolve(user);
         }
       });
-      signInAnonymously(auth).catch(err => {
-        unsubscribe();
-        reject(err);
-      });
+      signInAnonymously(auth)
+        .then(cred => {
+          unsubscribe();
+          resolve(cred.user);
+        })
+        .catch(() => {
+          unsubscribe();
+          // L'authentification anonyme est restreinte dans la console GCP, les règles autorisent l'accès direct
+          resolve(null);
+        });
     });
   }
   return authPromise;

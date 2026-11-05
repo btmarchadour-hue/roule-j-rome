@@ -84,10 +84,11 @@ export const saveValidationToFirestore = async (
     const author = getActiveInstructor();
     const payload = {
       ...validationData,
-      author: validationData.author || author,
+      author: validationData?.author || author,
       updatedAt: Date.now(),
     };
     await setDoc(docRef, payload);
+    console.info(`✓ Validation [${dateStr}] synchronisée dans Firestore`);
   } catch (error) {
     console.error('Erreur enregistrement validation Firestore:', error);
     throw error;
@@ -99,6 +100,7 @@ export const deleteValidationFromFirestore = async (dateStr: string) => {
     await ensureAuth();
     const docRef = doc(db, 'validations', dateStr);
     await deleteDoc(docRef);
+    console.info(`✓ Validation [${dateStr}] supprimée de Firestore`);
   } catch (error) {
     console.error('Erreur suppression validation Firestore:', error);
     throw error;
@@ -143,6 +145,7 @@ export const saveCustomSlotsToFirestore = async (
       updatedAt: Date.now(),
     };
     await setDoc(docRef, payload);
+    console.info(`✓ Créneaux sur mesure [${dateStr}] synchronisés dans Firestore`);
   } catch (error) {
     console.error('Erreur enregistrement custom slots Firestore:', error);
     throw error;
@@ -196,6 +199,7 @@ export const saveObservationToFirestore = async (
       createdAt: observation.createdAt || Date.now(),
     };
     await setDoc(docRef, payload);
+    console.info(`✓ Relevé terrain [${docId}] synchronisé dans Firestore`);
   } catch (error) {
     console.error('Erreur enregistrement observation Firestore:', error);
     throw error;
@@ -207,6 +211,7 @@ export const deleteObservationFromFirestore = async (obsId: string) => {
     await ensureAuth();
     const docRef = doc(db, 'observations', obsId);
     await deleteDoc(docRef);
+    console.info(`✓ Relevé terrain [${obsId}] supprimé de Firestore`);
   } catch (error) {
     console.error('Erreur suppression observation Firestore:', error);
     throw error;
@@ -257,6 +262,7 @@ export const saveBookingToFirestore = async (
       updatedAt: Date.now(),
     };
     await setDoc(docRef, payload);
+    console.info(`✓ Réservations [${reservationKey}] synchronisées dans Firestore`);
   } catch (error) {
     console.error('Erreur enregistrement réservations Firestore:', error);
     throw error;
@@ -264,104 +270,124 @@ export const saveBookingToFirestore = async (
 };
 
 /* -------------------------------------------------------------------------- */
-/* 5. MIGRATION AUTOMATIQUE DES DONNÉES LOCALES VERS FIRESTORE                */
-/* Permet à Jérôme de retrouver instantanément les données déjà créées local  */
+/* 5. SYNCHRONISATION BIDIRECTIONNELLE LOCALE <-> CLOUD FIRESTORE             */
+/* Garantit que toutes les modifications faites sur mobile ou PC sont dans    */
+/* Firestore et propagées instantanément à tous les appareils de l'école.     */
 /* -------------------------------------------------------------------------- */
-export const seedLocalDataToFirestoreIfEmpty = async () => {
+export const syncLocalDataWithFirestore = async () => {
   try {
     await ensureAuth();
 
-    // 1. Check observations
+    // 1. Synchroniser les observations
     const obsCol = collection(db, 'observations');
     const obsSnap = await getDocs(obsCol);
-    // Purger les éventuels documents d'exemple fictifs de Firestore
     obsSnap.forEach(d => {
       if (d.id.startsWith('sample-obs-')) {
         deleteDoc(d.ref).catch(() => {});
       }
     });
 
-    const realDocs = obsSnap.docs.filter(d => !d.id.startsWith('sample-obs-'));
-    if (realDocs.length === 0) {
-      const localObsRaw = localStorage.getItem('char_slot_observations_v1') || localStorage.getItem('cv_observations_v1');
-      if (localObsRaw) {
+    const localObsRaw =
+      localStorage.getItem('char_slot_observations_v1') ||
+      localStorage.getItem('cv_observations_v1');
+    if (localObsRaw) {
+      try {
         const localObs = JSON.parse(localObsRaw);
         if (Array.isArray(localObs)) {
-          const cleanReal = localObs.filter((o: SlotObservation) => o && o.id && !o.id.startsWith('sample-obs-'));
+          const cleanReal = localObs.filter(
+            (o: SlotObservation) => o && o.id && !o.id.startsWith('sample-obs-')
+          );
           if (cleanReal.length > 0) {
             const batch = writeBatch(db);
             cleanReal.forEach((o: SlotObservation) => {
               const id = o.id || `${o.ds}_${o.slotKey}`;
               const ref = doc(db, 'observations', id);
-              batch.set(ref, { ...o, id, author: o.author || 'Jérôme' });
+              batch.set(ref, { ...o, id, author: o.author || 'Jérôme' }, { merge: true });
             });
             await batch.commit();
           }
         }
+      } catch (e) {
+        console.warn('Erreur synchro locale obs:', e);
       }
     }
 
-    // 2. Check validations
-    const valCol = collection(db, 'validations');
-    const valSnap = await getDocs(valCol);
-    if (valSnap.empty) {
-      const localValRaw = localStorage.getItem('char_validations_v2');
-      if (localValRaw) {
+    // 2. Synchroniser les validations
+    const localValRaw = localStorage.getItem('char_validations_v2');
+    if (localValRaw) {
+      try {
         const localVal = JSON.parse(localValRaw);
         if (localVal && Object.keys(localVal).length > 0) {
           const batch = writeBatch(db);
           for (const [dateStr, vData] of Object.entries(localVal)) {
             const ref = doc(db, 'validations', dateStr);
-            batch.set(ref, { ...(vData as any), author: 'Jérôme' });
+            batch.set(
+              ref,
+              { ...(vData as any), author: (vData as any)?.author || 'Jérôme' },
+              { merge: true }
+            );
           }
           await batch.commit();
         }
+      } catch (e) {
+        console.warn('Erreur synchro locale validations:', e);
       }
     }
 
-    // 3. Check custom slots
-    const csCol = collection(db, 'custom_slots');
-    const csSnap = await getDocs(csCol);
-    if (csSnap.empty) {
-      const localCsRaw = localStorage.getItem('char_custom_slots_v1');
-      if (localCsRaw) {
+    // 3. Synchroniser les créneaux sur mesure
+    const localCsRaw = localStorage.getItem('char_custom_slots_v1');
+    if (localCsRaw) {
+      try {
         const localCs = JSON.parse(localCsRaw);
         if (localCs && Object.keys(localCs).length > 0) {
           const batch = writeBatch(db);
           for (const [dateStr, csData] of Object.entries(localCs)) {
             const ref = doc(db, 'custom_slots', dateStr);
-            batch.set(ref, { ...(csData as any), updatedBy: 'Jérôme' });
+            batch.set(
+              ref,
+              { ...(csData as any), updatedBy: (csData as any)?.updatedBy || 'Jérôme' },
+              { merge: true }
+            );
           }
           await batch.commit();
         }
+      } catch (e) {
+        console.warn('Erreur synchro locale custom slots:', e);
       }
     }
 
-    // 4. Check bookings
-    const resCol = collection(db, 'reservations');
-    const resSnap = await getDocs(resCol);
-    if (resSnap.empty) {
-      const localBookingsRaw = localStorage.getItem('char_agenda_bookings_v3');
-      if (localBookingsRaw) {
+    // 4. Synchroniser les réservations
+    const localBookingsRaw = localStorage.getItem('char_agenda_bookings_v3');
+    if (localBookingsRaw) {
+      try {
         const localBookings = JSON.parse(localBookingsRaw);
         if (localBookings && Object.keys(localBookings).length > 0) {
           const batch = writeBatch(db);
           for (const [resKey, clients] of Object.entries(localBookings)) {
             const ref = doc(db, 'reservations', resKey);
             const [ds, slotKey] = resKey.split('_');
-            batch.set(ref, {
-              ds: ds || '',
-              slotKey: slotKey || '',
-              clients,
-              updatedBy: 'Jérôme',
-              updatedAt: Date.now(),
-            });
+            batch.set(
+              ref,
+              {
+                ds: ds || '',
+                slotKey: slotKey || '',
+                clients,
+                updatedBy: 'Jérôme',
+                updatedAt: Date.now(),
+              },
+              { merge: true }
+            );
           }
           await batch.commit();
         }
+      } catch (e) {
+        console.warn('Erreur synchro locale bookings:', e);
       }
     }
   } catch (error) {
-    console.warn('Initial seeding note:', error);
+    console.warn('Synchronisation initiale Firestore terminée avec note:', error);
   }
 };
+
+// Alias rétrocompatible
+export const seedLocalDataToFirestoreIfEmpty = syncLocalDataWithFirestore;

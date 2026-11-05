@@ -137,7 +137,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
         </label>
 
         <span className="note" style={{ gridColumn: '1/-1', color: '#0369a1', fontWeight: 600 }}>
-          🕒 Règle club : aucune séance automatique avant 09h00 (séances sur mesure possibles plus tôt).
+          🕒 Règle de l'école : aucune séance automatique avant 09h00 (séances sur mesure possibles plus tôt).
         </span>
 
         <span className="note" style={{ gridColumn: '1/-1' }}>

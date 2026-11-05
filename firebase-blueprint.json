@@ -74,10 +74,10 @@
       "description": "Configuration du mot de passe d'accès pour les moniteurs.",
       "type": "object",
       "properties": {
-        "clubPassword": { "type": "string", "description": "Mot de passe partagé." },
+        "schoolPassword": { "type": "string", "description": "Mot de passe partagé de l'école." },
+        "clubPassword": { "type": "string", "description": "Mot de passe partagé (rétrocompatibilité)." },
         "updatedAt": { "type": "number", "description": "Timestamp de modification." }
-      },
-      "required": ["clubPassword"]
+      }
     }
   },
   "firestore": {

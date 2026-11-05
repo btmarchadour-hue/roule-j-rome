@@ -21,6 +21,7 @@ import {
   subscribeToCustomSlots,
   saveCustomSlotsToFirestore,
   seedLocalDataToFirestoreIfEmpty,
+  syncLocalDataWithFirestore,
 } from './utils/firebaseSync';
 import {
   AppSettings,
@@ -178,35 +179,32 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Initialisation et abonnements temps réel Firestore (partage entre Bertrand et Jérôme)
+  // Initialisation et abonnements temps réel Firestore (partage instantané entre smartphone et PC)
   useEffect(() => {
-    seedLocalDataToFirestoreIfEmpty();
+    // 1. Pousser les données locales non synchronisées vers Firestore
+    syncLocalDataWithFirestore();
 
+    // 2. Écouter en temps réel les validations validées/refusées
     const unsubValidations = subscribeToValidations(remoteVals => {
       if (remoteVals && Object.keys(remoteVals).length > 0) {
-        setValidations(prev => {
-          const merged = { ...prev, ...remoteVals };
-          try {
-            localStorage.setItem(VK, JSON.stringify(merged));
-          } catch {
-            // ignore
-          }
-          return merged;
-        });
+        setValidations(remoteVals);
+        try {
+          localStorage.setItem(VK, JSON.stringify(remoteVals));
+        } catch {
+          // ignore
+        }
       }
     });
 
+    // 3. Écouter en temps réel les créneaux personnalisés
     const unsubCustomSlots = subscribeToCustomSlots(remoteSlots => {
       if (remoteSlots && Object.keys(remoteSlots).length > 0) {
-        setCustomSlotsMap(prev => {
-          const merged = { ...prev, ...remoteSlots };
-          try {
-            localStorage.setItem(CS_KEY, JSON.stringify(merged));
-          } catch {
-            // ignore
-          }
-          return merged;
-        });
+        setCustomSlotsMap(remoteSlots);
+        try {
+          localStorage.setItem(CS_KEY, JSON.stringify(remoteSlots));
+        } catch {
+          // ignore
+        }
       }
     });
 

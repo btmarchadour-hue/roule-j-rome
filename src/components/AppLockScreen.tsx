@@ -24,8 +24,8 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
         const snap = await getDoc(docRef);
         if (snap.exists() && isMounted) {
           const data = snap.data();
-          if (data && data.clubPassword) {
-            setCloudPassword(data.clubPassword);
+          if (data && (data.schoolPassword || data.clubPassword)) {
+            setCloudPassword(data.schoolPassword || data.clubPassword);
           }
         }
       } catch {

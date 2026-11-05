@@ -592,7 +592,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
           // Si présent sans statut d'annulation explicite, validé
           status = 'valid';
         } else if (slot.isCustom) {
-          // Une séance sur mesure configurée par le club est validée/confirmée par défaut (sauf si expressément refusée)
+          // Une séance sur mesure configurée par l'école est validée/confirmée par défaut (sauf si expressément refusée)
           status = 'valid';
         } else {
           // Ni validé ni refusé : choix non effectué
@@ -1373,7 +1373,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       </span>
                     </div>
 
-                    {/* 1. EN-TÊTE : CLUB, DATE, SEMAINE ET VACANCES SCOLAIRES */}
+                    {/* 1. EN-TÊTE : ÉCOLE, DATE, SEMAINE ET VACANCES SCOLAIRES */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #0f172a', paddingBottom: '10px', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
                       <div>
                         <div style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 800, color: '#64748b', letterSpacing: '0.06em' }}>

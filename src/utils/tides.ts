@@ -299,7 +299,7 @@ export function dayInfo(
 ): [number, number][] {
   const l = dayLight(y, m, d, settings.lum, settings.lmg);
   if (!l) return [];
-  // Règle d'or club : aucune séance automatique proposée avant 9h00 (9 * 60 = 540 min)
+  // Règle de l'école : aucune séance automatique proposée avant 9h00 (9 * 60 = 540 min)
   const min9h = 9 * 60;
   const h0 = Math.max(min9h, (settings.h0 || 0) * 60);
   const h1 = settings.h1 * 60;

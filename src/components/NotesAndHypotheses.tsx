@@ -23,8 +23,8 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         const snap = await getDoc(docRef);
         if (snap.exists() && isMounted) {
           const data = snap.data();
-          if (data?.clubPassword) {
-            setCurrentCloudPassword(data.clubPassword);
+          if (data?.schoolPassword || data?.clubPassword) {
+            setCurrentCloudPassword(data.schoolPassword || data.clubPassword);
           }
         }
       } catch {
@@ -47,6 +47,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
       const newPwd = customPassword.trim().toLowerCase();
       const docRef = doc(db, 'app_config', 'security');
       await setDoc(docRef, {
+        schoolPassword: newPwd,
         clubPassword: newPwd,
         updatedAt: Date.now(),
       });

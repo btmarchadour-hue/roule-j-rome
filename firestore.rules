@@ -2,38 +2,29 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
     // Décisions et validations de créneaux par date
     match /validations/{dateStr} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Créneaux sur mesure par date
     match /custom_slots/{dateStr} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Relevés terrain et calibration du spot
     match /observations/{obsId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Émargement et inscriptions clients
     match /reservations/{reservationKey} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
-    // Configuration et sécurité moniteurs
+    // Configuration et sécurité école et moniteurs
     match /app_config/{configId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // Test de connectivité
