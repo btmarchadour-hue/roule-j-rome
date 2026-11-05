@@ -181,38 +181,25 @@ export const App: React.FC = () => {
 
   // Initialisation et abonnements temps réel Firestore (partage instantané entre smartphone et PC)
   useEffect(() => {
-    // 1. Pousser les données locales non synchronisées vers Firestore
-    syncLocalDataWithFirestore();
-
-    // 2. Écouter en temps réel les validations validées/refusées
-    let initialValLoaded = false;
+    // 1. Écouter en temps réel les validations validées/refusées (Firestore = source de vérité absolue)
     const unsubValidations = subscribeToValidations(remoteVals => {
-      if (remoteVals && (Object.keys(remoteVals).length > 0 || initialValLoaded)) {
-        initialValLoaded = true;
-        setValidations(remoteVals);
-        try {
-          localStorage.setItem(VK, JSON.stringify(remoteVals));
-        } catch {
-          // ignore
-        }
-      } else if (remoteVals && Object.keys(remoteVals).length === 0 && !initialValLoaded) {
-        initialValLoaded = true;
+      const data = remoteVals || {};
+      setValidations(data);
+      try {
+        localStorage.setItem(VK, JSON.stringify(data));
+      } catch {
+        // ignore
       }
     });
 
-    // 3. Écouter en temps réel les créneaux personnalisés
-    let initialCsLoaded = false;
+    // 2. Écouter en temps réel les créneaux personnalisés
     const unsubCustomSlots = subscribeToCustomSlots(remoteSlots => {
-      if (remoteSlots && (Object.keys(remoteSlots).length > 0 || initialCsLoaded)) {
-        initialCsLoaded = true;
-        setCustomSlotsMap(remoteSlots);
-        try {
-          localStorage.setItem(CS_KEY, JSON.stringify(remoteSlots));
-        } catch {
-          // ignore
-        }
-      } else if (remoteSlots && Object.keys(remoteSlots).length === 0 && !initialCsLoaded) {
-        initialCsLoaded = true;
+      const data = remoteSlots || {};
+      setCustomSlotsMap(data);
+      try {
+        localStorage.setItem(CS_KEY, JSON.stringify(data));
+      } catch {
+        // ignore
       }
     });
 

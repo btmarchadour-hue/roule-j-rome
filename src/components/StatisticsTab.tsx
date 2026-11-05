@@ -397,7 +397,13 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </span>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            <strong>{periodStats.totalRealizedSlots}</strong> réalisées sur <strong>{periodStats.totalPossibleSlots}</strong> créneaux possibles
+            {periodStats.totalRealizedSlots > 0 ? (
+              <>
+                <strong>{periodStats.totalRealizedSlots}</strong> réalisées sur <strong>{periodStats.totalPossibleSlots}</strong> créneaux possibles
+              </>
+            ) : (
+              `0 séance validée sur ${periodStats.totalPossibleSlots} créneaux possibles calculés`
+            )}
           </div>
         </div>
 
@@ -422,11 +428,13 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               {periodStats.totalCancelledSlots}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#dc2626', fontWeight: 700 }}>
-              séances
+              séance{periodStats.totalCancelledSlots > 1 ? 's' : ''}
             </span>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            Soit {Math.round((100 - periodStats.realizationRate) * 10) / 10}% de créneaux non exploités
+            {periodStats.totalCancelledSlots > 0
+              ? `Soit ${Math.round((periodStats.totalCancelledSlots / Math.max(1, periodStats.totalPossibleSlots)) * 1000) / 10}% des créneaux de la période`
+              : 'Aucune annulation enregistrée sur la période'}
           </div>
         </div>
 
@@ -516,13 +524,17 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
 
           <div style={{ fontSize: '0.74rem', background: '#fef2f2', color: '#991b1b', padding: '4px 10px', borderRadius: '6px', fontWeight: 800, border: '1px solid #fecaca' }}>
-            Total : {periodStats.totalCancelledSlots} séances non réalisées
+            Total : {periodStats.totalCancelledSlots} séance{periodStats.totalCancelledSlots > 1 ? 's' : ''} non réalisée{periodStats.totalCancelledSlots > 1 ? 's' : ''}
           </div>
         </div>
 
-        {pieSlices.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '30px 10px', color: '#64748b', fontSize: '0.85rem' }}>
-            🎉 Aucune séance annulée sur cette période ! 100% des créneaux ont été réalisés.
+        {periodStats.totalRealizedSlots === 0 && periodStats.totalCancelledSlots === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px 10px', color: '#64748b', fontSize: '0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+            📋 Aucune séance enregistrée (validée ou annulée) sur cette période. Les statistiques s'alimenteront automatiquement à mesure de vos validations et relevés réels.
+          </div>
+        ) : pieSlices.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px 10px', color: '#166534', fontSize: '0.85rem', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+            🎉 Aucune séance annulée sur cette période ! 100% des créneaux validés ont été réalisés.
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', alignItems: 'center' }}>

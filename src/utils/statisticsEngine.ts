@@ -276,21 +276,6 @@ export function computePeriodStats(
     curr.setDate(curr.getDate() + 1);
   }
 
-  // Si aucune validation explicite n'a encore été cochée par le moniteur sur la période
-  // Déduire un nombre de séances réalisées basé sur les séances vent OK
-  if (totalRealizedSlots === 0 && totalCancelledSlots === 0 && totalPossibleSlots > 0) {
-    // Estimation indicative pour pré-remplir avec les séances vent favorables
-    totalRealizedSlots = Math.round(totalPossibleSlots * 0.72);
-    totalCancelledSlots = totalPossibleSlots - totalRealizedSlots;
-    reasonsCount.wind_low = Math.round(totalCancelledSlots * 0.45);
-    reasonsCount.wind_high = Math.round(totalCancelledSlots * 0.25);
-    reasonsCount.no_clients = Math.round(totalCancelledSlots * 0.15);
-    reasonsCount.beach_state = Math.max(0, totalCancelledSlots - reasonsCount.wind_low - reasonsCount.wind_high - reasonsCount.no_clients);
-    totalParticipants = totalRealizedSlots * 8; // moyenne 8 participants
-    totalMono = Math.round(totalParticipants * 0.75);
-    totalBi = Math.round(totalParticipants * 0.25);
-  }
-
   const realizationRate = totalPossibleSlots > 0 ? (totalRealizedSlots / totalPossibleSlots) * 100 : 0;
 
   // Calcul du camembert
