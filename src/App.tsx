@@ -97,10 +97,10 @@ export const App: React.FC = () => {
     return 1; // Toujours le calendrier au démarrage
   });
 
-  // Current year & month for calendar grid, and selected date
+  // Current year & month for calendar grid, and selected date (démarrage officiel au 1er novembre 2026)
   const [year, setYear] = useState<number>(2026);
-  const [month, setMonth] = useState<number>(9); // 0-indexed: 9 = October
-  const [selectedDate, setSelectedDate] = useState<string>('2026-10-07');
+  const [month, setMonth] = useState<number>(10); // 0-indexed: 10 = November
+  const [selectedDate, setSelectedDate] = useState<string>('2026-11-01');
 
   // App settings
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -277,6 +277,8 @@ export const App: React.FC = () => {
   } | null>(null);
 
   const handlePrevMonth = () => {
+    const [minY, minM] = minDs.split('-').map(Number);
+    if (year === minY && month <= minM - 1) return;
     setMonth(prevM => {
       if (prevM === 0) {
         setYear(prevY => prevY - 1);

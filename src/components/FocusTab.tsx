@@ -74,7 +74,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onOpenPrintAgenda,
   onOpenObservationModal,
 }) => {
-  const td = tdy();
+  const tdRaw = tdy();
+  const td = tdRaw < minDs ? minDs : tdRaw;
   const tomorrowDs = shf(td, 1);
   const [activeDay, setActiveDay] = useState<'tomorrow' | 'today'>('tomorrow');
 

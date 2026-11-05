@@ -38,7 +38,7 @@ export const VC: Record<'g' | 'o' | 'r' | 'x', [string, string]> = {
   x: ['#667a85', 'JOURNÉE TERMINÉE'],
 };
 
-export const minDs = '2026-10-01';
+export const minDs = '2026-11-01';
 export const maxDs = DATA[DATA.length - 1][0];
 
 export const lastSun = (y: number, m: number) => {

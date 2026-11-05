@@ -9,6 +9,7 @@ import {
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { subscribeToObservations, deleteObservationFromFirestore } from '../utils/firebaseSync';
+import { minDs } from '../utils/tides';
 
 interface StatisticsTabProps {
   settings: AppSettings;
@@ -109,18 +110,19 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     }
 
     if (timeGranularity === 'year') {
+      const yearStart = `${selectedYear}-01-01`;
       return {
-        startDateStr: `${selectedYear}-01-01`,
+        startDateStr: yearStart < minDs ? minDs : yearStart,
         endDateStr: `${selectedYear}-12-31`,
         periodTitle: `Année ${selectedYear}`,
       };
     }
 
-    // 'all' : Historique complet (ex: 2025 - 2027)
+    // 'all' : Historique complet
     return {
-      startDateStr: '2026-01-01',
+      startDateStr: minDs,
       endDateStr: '2026-12-31',
-      periodTitle: `Historique global 2026`,
+      periodTitle: `Historique global (dès nov 2026)`,
     };
   }, [timeGranularity, selectedDate, selectedYear, selectedMonth]);
 

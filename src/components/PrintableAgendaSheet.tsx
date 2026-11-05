@@ -18,6 +18,8 @@ import {
   hAt,
   kOf,
   lc,
+  minDs,
+  maxDs,
   p2,
   shf,
   sunInfo,
@@ -165,7 +167,10 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   onSetSlotDecision,
 }) => {
   const todayStr = useMemo(() => tdy(), []);
-  const allAvailableDates = useMemo(() => DATA.map(d => d[0]), []);
+  const allAvailableDates = useMemo(
+    () => DATA.map(d => d[0]).filter(ds => ds >= minDs && ds <= maxDs),
+    []
+  );
 
   // 1. Période à imprimer
   const [rangeMode, setRangeMode] = useState<RangeOption>(() => {

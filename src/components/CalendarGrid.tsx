@@ -48,6 +48,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     const [y, m] = ds.split('-').map(Number);
     return y === year && m === month + 1;
   }).length;
+  const [minY, minM] = minDs.split('-').map(Number);
+  const isAtMinMonth = year === minY && month <= minM - 1;
 
   const dayCells = [];
   for (let d = 1; d <= numDays; d++) {
@@ -198,7 +200,14 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
           <div className="sub">Plage de Lestrevet · Plomodiern</div>
         </div>
         <div className="nav">
-          <button type="button" onClick={onPrevMonth} aria-label="Mois précédent">
+          <button
+            type="button"
+            onClick={onPrevMonth}
+            disabled={isAtMinMonth}
+            aria-label="Mois précédent"
+            style={isAtMinMonth ? { opacity: 0.25, cursor: 'not-allowed' } : undefined}
+            title={isAtMinMonth ? 'Début du calendrier au 1er novembre 2026' : 'Mois précédent'}
+          >
             ‹
           </button>
           <b>
