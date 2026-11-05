@@ -185,26 +185,34 @@ export const App: React.FC = () => {
     syncLocalDataWithFirestore();
 
     // 2. Écouter en temps réel les validations validées/refusées
+    let initialValLoaded = false;
     const unsubValidations = subscribeToValidations(remoteVals => {
-      if (remoteVals && Object.keys(remoteVals).length > 0) {
+      if (remoteVals && (Object.keys(remoteVals).length > 0 || initialValLoaded)) {
+        initialValLoaded = true;
         setValidations(remoteVals);
         try {
           localStorage.setItem(VK, JSON.stringify(remoteVals));
         } catch {
           // ignore
         }
+      } else if (remoteVals && Object.keys(remoteVals).length === 0 && !initialValLoaded) {
+        initialValLoaded = true;
       }
     });
 
     // 3. Écouter en temps réel les créneaux personnalisés
+    let initialCsLoaded = false;
     const unsubCustomSlots = subscribeToCustomSlots(remoteSlots => {
-      if (remoteSlots && Object.keys(remoteSlots).length > 0) {
+      if (remoteSlots && (Object.keys(remoteSlots).length > 0 || initialCsLoaded)) {
+        initialCsLoaded = true;
         setCustomSlotsMap(remoteSlots);
         try {
           localStorage.setItem(CS_KEY, JSON.stringify(remoteSlots));
         } catch {
           // ignore
         }
+      } else if (remoteSlots && Object.keys(remoteSlots).length === 0 && !initialCsLoaded) {
+        initialCsLoaded = true;
       }
     });
 

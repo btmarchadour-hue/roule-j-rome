@@ -74,6 +74,13 @@ export const subscribeToValidations = (
   );
 };
 
+export const cleanForFirestore = <T>(obj: T): T => {
+  if (obj === undefined) return null as any;
+  return JSON.parse(
+    JSON.stringify(obj, (_, value) => (value === undefined ? null : value))
+  );
+};
+
 export const saveValidationToFirestore = async (
   dateStr: string,
   validationData: any
@@ -82,11 +89,11 @@ export const saveValidationToFirestore = async (
     await ensureAuth();
     const docRef = doc(db, 'validations', dateStr);
     const author = getActiveInstructor();
-    const payload = {
+    const payload = cleanForFirestore({
       ...validationData,
       author: validationData?.author || author,
       updatedAt: Date.now(),
-    };
+    });
     await setDoc(docRef, payload);
     console.info(`✓ Validation [${dateStr}] synchronisée dans Firestore`);
   } catch (error) {
@@ -139,11 +146,11 @@ export const saveCustomSlotsToFirestore = async (
     await ensureAuth();
     const docRef = doc(db, 'custom_slots', dateStr);
     const author = getActiveInstructor();
-    const payload = {
+    const payload = cleanForFirestore({
       ...config,
       updatedBy: author,
       updatedAt: Date.now(),
-    };
+    });
     await setDoc(docRef, payload);
     console.info(`✓ Créneaux sur mesure [${dateStr}] synchronisés dans Firestore`);
   } catch (error) {
@@ -191,13 +198,13 @@ export const saveObservationToFirestore = async (
     const docId = observation.id || `${observation.ds}_${observation.slotKey}`;
     const docRef = doc(db, 'observations', docId);
     const author = getActiveInstructor();
-    const payload: SlotObservation = {
+    const payload = cleanForFirestore({
       ...observation,
       id: docId,
       author: observation.author || author,
       updatedAt: Date.now(),
       createdAt: observation.createdAt || Date.now(),
-    };
+    });
     await setDoc(docRef, payload);
     console.info(`✓ Relevé terrain [${docId}] synchronisé dans Firestore`);
   } catch (error) {
@@ -254,13 +261,13 @@ export const saveBookingToFirestore = async (
     const docRef = doc(db, 'reservations', reservationKey);
     const author = getActiveInstructor();
     const [ds, slotKey] = reservationKey.split('_');
-    const payload = {
+    const payload = cleanForFirestore({
       ds: ds || '',
       slotKey: slotKey || '',
       clients,
       updatedBy: author,
       updatedAt: Date.now(),
-    };
+    });
     await setDoc(docRef, payload);
     console.info(`✓ Réservations [${reservationKey}] synchronisées dans Firestore`);
   } catch (error) {
@@ -302,7 +309,7 @@ export const syncLocalDataWithFirestore = async () => {
             cleanReal.forEach((o: SlotObservation) => {
               const id = o.id || `${o.ds}_${o.slotKey}`;
               const ref = doc(db, 'observations', id);
-              batch.set(ref, { ...o, id, author: o.author || 'Jérôme' }, { merge: true });
+              batch.set(ref, cleanForFirestore({ ...o, id, author: o.author || 'Jérôme' }), { merge: true });
             });
             await batch.commit();
           }
@@ -323,7 +330,7 @@ export const syncLocalDataWithFirestore = async () => {
             const ref = doc(db, 'validations', dateStr);
             batch.set(
               ref,
-              { ...(vData as any), author: (vData as any)?.author || 'Jérôme' },
+              cleanForFirestore({ ...(vData as any), author: (vData as any)?.author || 'Jérôme' }),
               { merge: true }
             );
           }
@@ -345,7 +352,7 @@ export const syncLocalDataWithFirestore = async () => {
             const ref = doc(db, 'custom_slots', dateStr);
             batch.set(
               ref,
-              { ...(csData as any), updatedBy: (csData as any)?.updatedBy || 'Jérôme' },
+              cleanForFirestore({ ...(csData as any), updatedBy: (csData as any)?.updatedBy || 'Jérôme' }),
               { merge: true }
             );
           }
@@ -368,13 +375,13 @@ export const syncLocalDataWithFirestore = async () => {
             const [ds, slotKey] = resKey.split('_');
             batch.set(
               ref,
-              {
+              cleanForFirestore({
                 ds: ds || '',
                 slotKey: slotKey || '',
                 clients,
                 updatedBy: 'Jérôme',
                 updatedAt: Date.now(),
-              },
+              }),
               { merge: true }
             );
           }
