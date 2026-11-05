@@ -16,6 +16,15 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
   useEffect(() => {
     const active = getActiveInstructor();
     setCurrentInstructor(active);
+
+    const handleSyncEvent = (e: any) => {
+      if (e.detail?.msg) {
+        setSyncFeedback(e.detail.msg);
+        setTimeout(() => setSyncFeedback(''), 4000);
+      }
+    };
+    window.addEventListener('cv_sync_status', handleSyncEvent);
+    return () => window.removeEventListener('cv_sync_status', handleSyncEvent);
   }, []);
 
   const handleManualSync = async () => {

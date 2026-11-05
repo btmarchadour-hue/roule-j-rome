@@ -14,34 +14,9 @@ export const db = initializeFirestore(app, {
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Ensure auth resolves smoothly without blocking operations if anonymous signin is restricted
-let authPromise: Promise<User | null> | null = null;
-
+// Direct access mode: anonymous signin is restricted by project policy, direct Firestore access is enabled
 export const ensureAuth = async (): Promise<User | null> => {
-  if (auth.currentUser) {
-    return auth.currentUser;
-  }
-  if (!authPromise) {
-    authPromise = new Promise(resolve => {
-      const unsubscribe = onAuthStateChanged(auth, user => {
-        if (user) {
-          unsubscribe();
-          resolve(user);
-        }
-      });
-      signInAnonymously(auth)
-        .then(cred => {
-          unsubscribe();
-          resolve(cred.user);
-        })
-        .catch(() => {
-          unsubscribe();
-          // L'authentification anonyme est restreinte dans la console GCP, les règles autorisent l'accès direct
-          resolve(null);
-        });
-    });
-  }
-  return authPromise;
+  return auth.currentUser || null;
 };
 
 // Validate connection as per Firebase skill requirements

@@ -50,6 +50,18 @@ export const setActiveInstructor = (name: string): void => {
   }
 };
 
+export const notifySync = (msg: string) => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('cv_sync_status', { detail: { msg, time: Date.now() } })
+      );
+    }
+  } catch {
+    // ignore
+  }
+};
+
 /* -------------------------------------------------------------------------- */
 /* 1. VALIDATIONS SYNCHRONIZATION                                             */
 /* -------------------------------------------------------------------------- */
@@ -66,6 +78,7 @@ export const subscribeToValidations = (
         result[docSnap.id] = docSnap.data() as any;
       });
       onData(result);
+      notifySync('✓ Cloud synchronisé');
     },
     error => {
       console.warn('Erreur synchro validations Firestore:', error);
@@ -96,8 +109,10 @@ export const saveValidationToFirestore = async (
     });
     await setDoc(docRef, payload);
     console.info(`✓ Validation [${dateStr}] synchronisée dans Firestore`);
+    notifySync(`✓ Validation [${dateStr}] envoyée au Cloud`);
   } catch (error) {
     console.error('Erreur enregistrement validation Firestore:', error);
+    notifySync(`⚠️ Erreur d'envoi [${dateStr}] au Cloud`);
     throw error;
   }
 };
@@ -108,6 +123,7 @@ export const deleteValidationFromFirestore = async (dateStr: string) => {
     const docRef = doc(db, 'validations', dateStr);
     await deleteDoc(docRef);
     console.info(`✓ Validation [${dateStr}] supprimée de Firestore`);
+    notifySync(`✓ Validation [${dateStr}] retirée du Cloud`);
   } catch (error) {
     console.error('Erreur suppression validation Firestore:', error);
     throw error;
