@@ -241,6 +241,41 @@ export const deleteObservationFromFirestore = async (obsId: string) => {
   }
 };
 
+export const batchSaveObservationsToFirestore = async (
+  observations: SlotObservation[]
+): Promise<number> => {
+  if (!observations || observations.length === 0) return 0;
+  await ensureAuth();
+
+  const author = getActiveInstructor();
+  const BATCH_SIZE = 400; // Seuil de sécurité sous la limite Firestore de 500 opérations
+  let totalSaved = 0;
+
+  for (let i = 0; i < observations.length; i += BATCH_SIZE) {
+    const chunk = observations.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    for (const obs of chunk) {
+      const docId = obs.id || `obs-${obs.ds}-${obs.slotKey}`;
+      const docRef = doc(db, 'observations', docId);
+      const payload = cleanForFirestore({
+        ...obs,
+        id: docId,
+        author: obs.author || author,
+        updatedAt: Date.now(),
+        createdAt: obs.createdAt || Date.now(),
+      });
+      batch.set(docRef, payload, { merge: true });
+    }
+
+    await batch.commit();
+    totalSaved += chunk.length;
+  }
+
+  notifySync(`✓ ${totalSaved} relevés enregistrés dans le Cloud`);
+  return totalSaved;
+};
+
 /* -------------------------------------------------------------------------- */
 /* 4. RÉSERVATIONS & ÉMARGEMENT CLIENTS (BOOKINGS)                            */
 /* -------------------------------------------------------------------------- */

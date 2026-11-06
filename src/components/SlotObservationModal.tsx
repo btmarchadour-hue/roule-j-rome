@@ -115,7 +115,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     e.preventDefault();
 
     const obs: SlotObservation = {
-      id: initialObservation?.id || `obs-${dateStr}-${slotKey}-${Date.now()}`,
+      id: initialObservation?.id || `obs-${dateStr}-${slotKey}`,
       ds: dateStr,
       slotKey,
       slotStart,

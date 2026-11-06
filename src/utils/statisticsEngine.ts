@@ -114,6 +114,29 @@ export function deleteSlotObservation(id: string): SlotObservation[] {
   return updated;
 }
 
+export function bulkUpsertObservations(newObsList: SlotObservation[]): SlotObservation[] {
+  const current = getStoredObservations();
+  const map = new Map<string, SlotObservation>();
+
+  for (const obs of current) {
+    const key = obs.id || `${obs.ds}_${obs.slotKey}`;
+    map.set(key, obs);
+  }
+
+  for (const obs of newObsList) {
+    const key = obs.id || `${obs.ds}_${obs.slotKey}`;
+    map.set(key, { ...map.get(key), ...obs });
+  }
+
+  const updated = Array.from(map.values()).sort((a, b) => {
+    if (a.ds !== b.ds) return b.ds.localeCompare(a.ds);
+    return (b.slotStart || '').localeCompare(a.slotStart || '');
+  });
+
+  saveStoredObservations(updated);
+  return updated;
+}
+
 // -----------------------------------------------------------------------------
 // CALCULS DES STATISTIQUES GLOBALES & CAMEMBERT
 // -----------------------------------------------------------------------------
@@ -227,10 +250,24 @@ export function computePeriodStats(
 
     // 2. Séances réellement validées ou confirmées
     const dayVal = validations[ds];
-    const dayObs = observations.filter(o => o.ds === ds);
+
+    // Déduplication des observations par créneau (garder le relevé le plus récent pour chaque créneau)
+    const dedupObsMap = new Map<string, SlotObservation>();
+    observations
+      .filter(o => o.ds === ds)
+      .forEach(o => {
+        const existing = dedupObsMap.get(o.slotKey);
+        if (!existing || (o.updatedAt || o.createdAt || 0) >= (existing.updatedAt || existing.createdAt || 0)) {
+          dedupObsMap.set(o.slotKey, o);
+        }
+      });
+    const dayObs = Array.from(dedupObsMap.values());
+
+    const handledSlotKeys = new Set<string>();
 
     if (dayVal && dayVal.items) {
       dayVal.items.forEach(item => {
+        handledSlotKeys.add(item.k);
         if (item.status === 'valid') {
           totalRealizedSlots++;
         } else if (item.status === 'rejected') {
@@ -252,20 +289,26 @@ export function computePeriodStats(
       });
     }
 
-    // Prendre en compte les observations marquées cancelled
+    // Prendre en compte les observations terrain (non encore saisies dans validations)
     dayObs.forEach(obs => {
+      if (handledSlotKeys.has(obs.slotKey)) {
+        // Enregistrer participants si séance validée
+        if (obs.participantsCount) totalParticipants += obs.participantsCount;
+        if (obs.monoCount) totalMono += obs.monoCount;
+        if (obs.biCount) totalBi += obs.biCount;
+        return;
+      }
+      handledSlotKeys.add(obs.slotKey);
+
       if (obs.status === 'cancelled') {
-        const alreadyCountedInVal = dayVal?.items?.some(it => it.k === obs.slotKey && it.status === 'rejected');
-        if (!alreadyCountedInVal) {
-          totalCancelledSlots++;
-          if (obs.cancellationReason) {
-            reasonsCount[obs.cancellationReason]++;
-          } else {
-            reasonsCount.other++;
-          }
+        totalCancelledSlots++;
+        if (obs.cancellationReason) {
+          reasonsCount[obs.cancellationReason]++;
+        } else {
+          reasonsCount.other++;
         }
       } else if (obs.status === 'realized') {
-        // Enregistrer participants si saisis
+        totalRealizedSlots++;
         if (obs.participantsCount) totalParticipants += obs.participantsCount;
         if (obs.monoCount) totalMono += obs.monoCount;
         if (obs.biCount) totalBi += obs.biCount;
@@ -276,7 +319,8 @@ export function computePeriodStats(
     curr.setDate(curr.getDate() + 1);
   }
 
-  const realizationRate = totalPossibleSlots > 0 ? (totalRealizedSlots / totalPossibleSlots) * 100 : 0;
+  const effectivePossibleSlots = Math.max(totalPossibleSlots, totalRealizedSlots + totalCancelledSlots);
+  const realizationRate = effectivePossibleSlots > 0 ? (totalRealizedSlots / effectivePossibleSlots) * 100 : 0;
 
   // Calcul du camembert
   const totalReasons = Object.values(reasonsCount).reduce((acc, c) => acc + c, 0);
@@ -302,7 +346,7 @@ export function computePeriodStats(
     startDateStr,
     endDateStr,
     totalDays,
-    totalPossibleSlots,
+    totalPossibleSlots: effectivePossibleSlots,
     totalRealizedSlots,
     totalCancelledSlots,
     realizationRate: Math.round(realizationRate * 10) / 10,

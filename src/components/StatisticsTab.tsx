@@ -8,8 +8,11 @@ import {
   exportObservationsAsCsv,
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
+import { StatisticsComparator } from './StatisticsComparator';
+import { ImportLogbookModal } from './ImportLogbookModal';
+import { downloadExcelLogbookTemplate } from '../utils/excelImportExport';
 import { subscribeToObservations, deleteObservationFromFirestore } from '../utils/firebaseSync';
-import { minDs } from '../utils/tides';
+import { minDs, maxDs, MOIS, p2, shf } from '../utils/tides';
 
 interface StatisticsTabProps {
   settings: AppSettings;
@@ -67,21 +70,52 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [editingObservation, setEditingObservation] = useState<SlotObservation | null>(null);
 
+  // Modal d'import groupé carnet / REX Excel & CSV
+  const [importModalOpen, setImportModalOpen] = useState(false);
+
+  // Mode d'affichage : Bilan simple d'une période ou Comparateur multi-périodes
+  const [viewMode, setViewMode] = useState<'single' | 'comparator'>('single');
+
   // Granularité temporelle : 'week' | 'month' | 'year' | 'all'
   const [timeGranularity, setTimeGranularity] = useState<'week' | 'month' | 'year' | 'all'>('month');
 
   // Filtre de population / jours : 'all' | 'holidays_only' | 'weekends_only'
   const [filterScope, setFilterScope] = useState<'all' | 'holidays_only' | 'weekends_only'>('all');
 
-  // Mois / Année d'analyse
-  const selectedYear = parseInt(selectedDate.slice(0, 4), 10) || 2026;
-  const selectedMonth = parseInt(selectedDate.slice(5, 7), 10) || 2; // 1-12
+  // Mois / Année d'analyse modifiables directement dans les statistiques (avec les années 2026 à 2031)
+  const [statsYear, setStatsYear] = useState<number>(() => {
+    return parseInt(selectedDate.slice(0, 4), 10) || 2026;
+  });
+  const [statsMonth, setStatsMonth] = useState<number>(() => {
+    return parseInt(selectedDate.slice(5, 7), 10) || 11;
+  });
+  const [statsRefDate, setStatsRefDate] = useState<string>(selectedDate || '2026-11-01');
+
+  // Synchronisation avec la date active sélectionnée sur le calendrier
+  useEffect(() => {
+    if (selectedDate) {
+      const [y, m] = selectedDate.split('-').map(Number);
+      if (y && m) {
+        setStatsYear(y);
+        setStatsMonth(m);
+        setStatsRefDate(selectedDate);
+      }
+    }
+  }, [selectedDate]);
+
+  // Liste des années disponibles dans le jeu de données SHOM (2026 à 2031)
+  const availableYears = useMemo(() => {
+    const minY = parseInt(minDs.slice(0, 4), 10) || 2026;
+    const maxY = parseInt(maxDs.slice(0, 4), 10) || 2031;
+    const list: number[] = [];
+    for (let y = minY; y <= maxY; y++) list.push(y);
+    return list;
+  }, []);
 
   // Calcul des bornes de dates selon la granularité sélectionnée
   const { startDateStr, endDateStr, periodTitle } = useMemo(() => {
     if (timeGranularity === 'week') {
-      // Semaine ISO contenant selectedDate
-      const d = new Date(`${selectedDate}T00:00:00`);
+      const d = new Date(`${statsRefDate}T00:00:00`);
       const day = d.getDay();
       const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Lundi
       const monday = new Date(d.setDate(diff));
@@ -91,40 +125,43 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       const sStr = monday.toISOString().slice(0, 10);
       const eStr = sunday.toISOString().slice(0, 10);
       return {
-        startDateStr: sStr,
-        endDateStr: eStr,
+        startDateStr: sStr < minDs ? minDs : sStr,
+        endDateStr: eStr > maxDs ? maxDs : eStr,
         periodTitle: `Semaine du ${monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} au ${sunday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`,
       };
     }
 
     if (timeGranularity === 'month') {
-      const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
-      const sStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
-      const eStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-      const monthName = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+      const lastDay = new Date(statsYear, statsMonth, 0).getDate();
+      const sStr = `${statsYear}-${p2(statsMonth)}-01`;
+      const eStr = `${statsYear}-${p2(statsMonth)}-${p2(lastDay)}`;
+      const monthName = MOIS[statsMonth - 1] || 'novembre';
       return {
-        startDateStr: sStr,
-        endDateStr: eStr,
-        periodTitle: `Mois de ${monthName}`,
+        startDateStr: sStr < minDs ? minDs : sStr,
+        endDateStr: eStr > maxDs ? maxDs : eStr,
+        periodTitle: `Mois de ${monthName} ${statsYear}`,
       };
     }
 
     if (timeGranularity === 'year') {
-      const yearStart = `${selectedYear}-01-01`;
+      const yearStart = `${statsYear}-01-01`;
+      const yearEnd = `${statsYear}-12-31`;
       return {
         startDateStr: yearStart < minDs ? minDs : yearStart,
-        endDateStr: `${selectedYear}-12-31`,
-        periodTitle: `Année ${selectedYear}`,
+        endDateStr: yearEnd > maxDs ? maxDs : yearEnd,
+        periodTitle: `Année ${statsYear}`,
       };
     }
 
-    // 'all' : Historique complet
+    // 'all' : Historique complet (2026 jusqu'à 2031)
+    const startY = minDs.slice(0, 4);
+    const endY = maxDs.slice(0, 4);
     return {
       startDateStr: minDs,
-      endDateStr: '2026-12-31',
-      periodTitle: `Historique global (dès nov 2026)`,
+      endDateStr: maxDs,
+      periodTitle: `Historique global (${startY}–${endY})`,
     };
-  }, [timeGranularity, selectedDate, selectedYear, selectedMonth]);
+  }, [timeGranularity, statsRefDate, statsYear, statsMonth]);
 
   // Calcul des statistiques de la période sélectionnée
   const periodStats = useMemo(() => {
@@ -236,7 +273,55 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="fbtn"
+            onClick={downloadExcelLogbookTemplate}
+            style={{
+              margin: 0,
+              padding: '8px 12px',
+              fontSize: '0.78rem',
+              fontWeight: 800,
+              background: '#f0fdf4',
+              color: '#166534',
+              border: '1px solid #bbf7d0',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            title="Télécharger le modèle Excel pré-formaté à compléter pour vos imports groupés ou carnets papier"
+          >
+            <span>📥</span>
+            <span>Modèle Excel Vierge</span>
+          </button>
+
+          <button
+            type="button"
+            className="fbtn"
+            onClick={() => setImportModalOpen(true)}
+            style={{
+              margin: 0,
+              padding: '8px 12px',
+              fontSize: '0.78rem',
+              fontWeight: 800,
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              border: '1px solid #bfdbfe',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            title="Importer un carnet ou historique REX (fichiers .xlsx, .xls ou .csv)"
+          >
+            <span>📂</span>
+            <span>Importer Carnet / REX</span>
+          </button>
+
           <button
             type="button"
             className="fbtn"
@@ -257,7 +342,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             }}
             title="Exporter l'ensemble des relevés et statistiques au format CSV"
           >
-            <span>📥</span>
+            <span>📊</span>
             <span>Exporter CSV</span>
           </button>
 
@@ -287,9 +372,75 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         </div>
       </div>
 
-      {/* 2. SÉLECTEUR DE PÉRIODE & FILTRES */}
-      <div
-        style={{
+      {/* SÉLECTEUR DE MODE : BILAN PÉRIODE SIMPLE VS COMPARATEUR MULTI-PÉRIODES */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+        <div style={{ display: 'inline-flex', background: '#e2e8f0', padding: '3px', borderRadius: '10px' }}>
+          <button
+            type="button"
+            onClick={() => setViewMode('single')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              background: viewMode === 'single' ? '#0f172a' : 'transparent',
+              color: viewMode === 'single' ? '#fff' : '#475569',
+              fontSize: '0.80rem',
+              fontWeight: viewMode === 'single' ? 800 : 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>📊</span>
+            <span>Bilan d'une Période</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('comparator')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              background: viewMode === 'comparator' ? '#0284c7' : 'transparent',
+              color: viewMode === 'comparator' ? '#fff' : '#475569',
+              fontSize: '0.80rem',
+              fontWeight: viewMode === 'comparator' ? 800 : 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>⚖️</span>
+            <span>Comparateur Multi-Périodes (A vs B)</span>
+          </button>
+        </div>
+
+        {viewMode === 'comparator' && (
+          <div style={{ fontSize: '0.74rem', color: '#0369a1', fontWeight: 700 }}>
+            ⚡ Comparaison directe d'une année sur l'autre, d'un mois ou d'un trimestre
+          </div>
+        )}
+      </div>
+
+      {viewMode === 'comparator' ? (
+        <StatisticsComparator
+          settings={settings}
+          EX={EX}
+          windList={windList}
+          validations={validations}
+          customSlotsMap={customSlotsMap}
+          observations={observations}
+          availableYears={availableYears}
+        />
+      ) : (
+        <>
+          {/* 2. SÉLECTEUR DE PÉRIODE & FILTRES */}
+          <div
+            style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -310,7 +461,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             {[
               { id: 'week', label: 'Semaine' },
               { id: 'month', label: 'Mois' },
-              { id: 'year', label: `Année ${selectedYear}` },
+              { id: 'year', label: `Année ${statsYear}` },
               { id: 'all', label: 'Tout' },
             ].map(tab => (
               <button
@@ -333,6 +484,204 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Contrôles de navigation contextuelle selon la granularité */}
+          {timeGranularity === 'year' && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setStatsYear(y => Math.max(availableYears[0], y - 1))}
+                disabled={statsYear <= availableYears[0]}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: statsYear <= availableYears[0] ? '#f1f5f9' : '#fff',
+                  cursor: statsYear <= availableYears[0] ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                }}
+                title="Année précédente"
+              >
+                ‹
+              </button>
+              <select
+                value={statsYear}
+                onChange={e => setStatsYear(Number(e.target.value))}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #0284c7',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  background: '#f0f9ff',
+                  color: '#0369a1',
+                  cursor: 'pointer',
+                }}
+              >
+                {availableYears.map(y => (
+                  <option key={y} value={y}>
+                    Année {y}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setStatsYear(y => Math.min(availableYears[availableYears.length - 1], y + 1))}
+                disabled={statsYear >= availableYears[availableYears.length - 1]}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: statsYear >= availableYears[availableYears.length - 1] ? '#f1f5f9' : '#fff',
+                  cursor: statsYear >= availableYears[availableYears.length - 1] ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                }}
+                title="Année suivante"
+              >
+                ›
+              </button>
+            </div>
+          )}
+
+          {timeGranularity === 'month' && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (statsMonth === 1) {
+                    if (statsYear > availableYears[0]) {
+                      setStatsYear(y => y - 1);
+                      setStatsMonth(12);
+                    }
+                  } else {
+                    setStatsMonth(m => m - 1);
+                  }
+                }}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                }}
+                title="Mois précédent"
+              >
+                ‹
+              </button>
+              <select
+                value={statsMonth}
+                onChange={e => setStatsMonth(Number(e.target.value))}
+                style={{
+                  padding: '4px 6px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  background: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {MOIS.map((mName, idx) => (
+                  <option key={idx + 1} value={idx + 1}>
+                    {mName.charAt(0).toUpperCase() + mName.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statsYear}
+                onChange={e => setStatsYear(Number(e.target.value))}
+                style={{
+                  padding: '4px 6px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  background: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {availableYears.map(y => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (statsMonth === 12) {
+                    if (statsYear < availableYears[availableYears.length - 1]) {
+                      setStatsYear(y => y + 1);
+                      setStatsMonth(1);
+                    }
+                  } else {
+                    setStatsMonth(m => m + 1);
+                  }
+                }}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                }}
+                title="Mois suivant"
+              >
+                ›
+              </button>
+            </div>
+          )}
+
+          {timeGranularity === 'week' && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const prev = shf(statsRefDate, -7);
+                  if (prev >= minDs) setStatsRefDate(prev);
+                }}
+                disabled={shf(statsRefDate, -7) < minDs}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: shf(statsRefDate, -7) < minDs ? '#f1f5f9' : '#fff',
+                  cursor: shf(statsRefDate, -7) < minDs ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.74rem',
+                }}
+                title="Semaine précédente"
+              >
+                ‹ Sem. préc.
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = shf(statsRefDate, 7);
+                  if (next <= maxDs) setStatsRefDate(next);
+                }}
+                disabled={shf(statsRefDate, 7) > maxDs}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: shf(statsRefDate, 7) > maxDs ? '#f1f5f9' : '#fff',
+                  cursor: shf(statsRefDate, 7) > maxDs ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.74rem',
+                }}
+                title="Semaine suivante"
+              >
+                Sem. suiv. ›
+              </button>
+            </div>
+          )}
 
           <span style={{ fontWeight: 800, fontSize: '0.82rem', color: '#0f172a', marginLeft: '6px' }}>
             {periodTitle}
@@ -407,6 +756,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               `0 séance validée sur ${periodStats.totalPossibleSlots} créneaux possibles calculés`
             )}
           </div>
+          <div
+            style={{
+              fontSize: '0.67rem',
+              color: '#0369a1',
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px dashed #bae6fd',
+              lineHeight: '1.25',
+            }}
+          >
+            ℹ️ <em>Séances courues rapportées à l'ensemble des créneaux praticables (marée & lumière).</em>
+          </div>
         </div>
 
         {/* KPI 2 : Séances Annulées / Non Réalisées */}
@@ -435,8 +796,20 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
             {periodStats.totalCancelledSlots > 0
-              ? `Soit ${Math.round((periodStats.totalCancelledSlots / Math.max(1, periodStats.totalPossibleSlots)) * 1000) / 10}% des créneaux de la période`
+              ? `Soit ${Math.min(100, Math.round((periodStats.totalCancelledSlots / Math.max(1, periodStats.totalPossibleSlots)) * 1000) / 10)}% des créneaux de la période`
               : 'Aucune annulation enregistrée sur la période'}
+          </div>
+          <div
+            style={{
+              fontSize: '0.67rem',
+              color: '#b91c1c',
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px dashed #fecaca',
+              lineHeight: '1.25',
+            }}
+          >
+            ℹ️ <em>Créneaux non roulés (annulations météo, vent ou manque de réservations).</em>
           </div>
         </div>
 
@@ -466,6 +839,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
             Taux de remplissage : <strong>{periodStats.avgFillRate}%</strong> (base 12 places / séance)
+          </div>
+          <div
+            style={{
+              fontSize: '0.67rem',
+              color: '#047857',
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px dashed #a7f3d0',
+              lineHeight: '1.25',
+            }}
+          >
+            ℹ️ <em>Inscrits rapportés à la jauge max de sécurité (12 pilotes par séance réalisée).</em>
           </div>
         </div>
 
@@ -499,6 +884,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
             {periodStats.totalParticipants > 0 ? `${Math.round((periodStats.totalMono / periodStats.totalParticipants) * 100)}% monoplaces` : 'Répartition conforme aux réservations'}
           </div>
+          <div
+            style={{
+              fontSize: '0.67rem',
+              color: '#475569',
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px dashed #e2e8f0',
+              lineHeight: '1.25',
+            }}
+          >
+            ℹ️ <em>Répartition du parc de chars mobilisé selon les fiches d'émargement.</em>
+          </div>
         </div>
       </div>
 
@@ -522,6 +919,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </h3>
             <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px' }}>
               Vent trop faible, rafales excessives, mauvais secteur ou absence d'inscrits sur la période.
+            </div>
+            <div style={{ fontSize: '0.68rem', color: '#991b1b', marginTop: '3px', fontStyle: 'italic' }}>
+              ℹ️ Pourcentage de chaque motif calculé sur le total des {periodStats.totalCancelledSlots} séances non réalisées.
             </div>
           </div>
 
@@ -696,6 +1096,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </div>
             <div style={{ fontSize: '0.72rem', color: '#334155', marginTop: '2px' }}>
               Surcote moyenne constatée : <strong>{calibrationStats.avgWaterDeltaCm > 0 ? `+${calibrationStats.avgWaterDeltaCm}` : calibrationStats.avgWaterDeltaCm} cm</strong> ({calibrationStats.totalLogged} relevés)
+            </div>
+            <div style={{ fontSize: '0.68rem', color: '#166534', marginTop: '4px', fontStyle: 'italic' }}>
+              ℹ️ Seuil théorique (4.50 m) diminué de la surcote pour maintenir la même largeur de roulage.
             </div>
           </div>
 
@@ -929,6 +1332,8 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
         </div>
       </div>
+    </>
+  )}
 
       {/* MODAL DE SAISIE / ÉDITION D'OBSERVATION */}
       {modalOpen && (
@@ -943,6 +1348,15 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           isCustom={editingObservation?.isCustom}
           initialObservation={editingObservation}
           onSaveSuccess={updated => setObservations(updated)}
+        />
+      )}
+
+      {/* MODAL D'IMPORT GROUPÉ CARNET / REX EXCEL & CSV */}
+      {importModalOpen && (
+        <ImportLogbookModal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          onImportSuccess={updated => setObservations(updated)}
         />
       )}
     </div>
