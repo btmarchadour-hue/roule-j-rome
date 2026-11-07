@@ -9,6 +9,7 @@ import { PrintableAgendaSheet } from './components/PrintableAgendaSheet';
 import { SettingsCard } from './components/SettingsCard';
 import { SlotObservationModal } from './components/SlotObservationModal';
 import { StatisticsTab } from './components/StatisticsTab';
+import { ClientsTab } from './components/ClientsTab';
 import { TableView } from './components/TableView';
 import { TideHeaderCard } from './components/TideHeaderCard';
 import { WindguruTable } from './components/WindguruTable';
@@ -88,6 +89,8 @@ export const App: React.FC = () => {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === '6') return 6;
+      if (tabParam === '5') return 5;
       if (tabParam === '4') return 4;
       if (tabParam === '3' || params.has('autoprint')) return 3;
       if (tabParam === '2') return 2;
@@ -628,8 +631,8 @@ export const App: React.FC = () => {
     <>
       <Header />
       <SyncStatusBar onLock={handleLock} />
-      <main className={activeTab === 3 || activeTab === 4 ? 'agenda-wide' : ''}>
-        {/* En-tête des marées en haut de page (masqué en onglet 3, 4 et 5 et à l'impression) */}
+      <main className={activeTab >= 3 && activeTab <= 5 ? 'agenda-wide' : ''}>
+        {/* En-tête des marées en haut de page (masqué en onglet 3, 4, 5 et 6 et à l'impression) */}
         {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
 
         {/* Navigation tabs */}
@@ -666,6 +669,13 @@ export const App: React.FC = () => {
             type="button"
             className={activeTab === 5 ? 'on' : ''}
             onClick={() => handleTabChange(5)}
+          >
+            👥 Répertoire Clients
+          </button>
+          <button
+            type="button"
+            className={activeTab === 6 ? 'on' : ''}
+            onClick={() => handleTabChange(6)}
           >
             💡 Hypothèses & Notes
           </button>
@@ -864,9 +874,16 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 5: Réglages validés, Hypothèses & Notes */}
+        {/* Tab 5: Base de données Clients & CRM */}
         {activeTab === 5 && (
           <div id="tab5">
+            <ClientsTab />
+          </div>
+        )}
+
+        {/* Tab 6: Réglages validés, Hypothèses & Notes */}
+        {activeTab === 6 && (
+          <div id="tab6">
             <div
               className="card nop"
               style={{

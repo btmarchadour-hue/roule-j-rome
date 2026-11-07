@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
 import {
+  ClientProfile,
   CustomSlotsMap,
   SlotObservation,
   ValidationsMap,
@@ -351,3 +352,98 @@ export const syncLocalDataWithFirestore = async () => {
 
 // Alias rétrocompatible
 export const seedLocalDataToFirestoreIfEmpty = syncLocalDataWithFirestore;
+
+/* -------------------------------------------------------------------------- */
+/* 6. BASE CLIENTS & CRM                                                      */
+/* -------------------------------------------------------------------------- */
+export const subscribeToClients = (
+  onData: (data: ClientProfile[]) => void,
+  onError?: (err: Error) => void
+) => {
+  const colRef = collection(db, 'clients');
+  return onSnapshot(
+    colRef,
+    snapshot => {
+      const list: ClientProfile[] = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+      });
+      // Tri alphabétique par nom puis prénom
+      list.sort((a, b) => (a.lastName || '').localeCompare(b.lastName || '', 'fr') || (a.firstName || '').localeCompare(b.firstName || '', 'fr'));
+      onData(list);
+    },
+    error => {
+      console.warn('Erreur synchro clients Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const saveClientToFirestore = async (client: ClientProfile): Promise<string> => {
+  try {
+    await ensureAuth();
+    const docId = client.id || `cli-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const docRef = doc(db, 'clients', docId);
+    const author = getActiveInstructor();
+    const payload = cleanForFirestore({
+      ...client,
+      id: docId,
+      author: client.author || author,
+      updatedAt: Date.now(),
+      createdAt: client.createdAt || Date.now(),
+    });
+    await setDoc(docRef, payload);
+    console.info(`✓ Client [${docId}] enregistré dans Firestore`);
+    notifySync(`✓ Client ${client.firstName || ''} ${client.lastName} enregistré`);
+    return docId;
+  } catch (error) {
+    console.error('Erreur enregistrement client Firestore:', error);
+    throw error;
+  }
+};
+
+export const deleteClientFromFirestore = async (clientId: string) => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'clients', clientId);
+    await deleteDoc(docRef);
+    console.info(`✓ Client [${clientId}] supprimé de Firestore`);
+    notifySync(`✓ Client retiré du répertoire`);
+  } catch (error) {
+    console.error('Erreur suppression client Firestore:', error);
+    throw error;
+  }
+};
+
+export const batchSaveClientsToFirestore = async (clients: ClientProfile[]): Promise<number> => {
+  if (!clients || clients.length === 0) return 0;
+  await ensureAuth();
+
+  const author = getActiveInstructor();
+  const BATCH_SIZE = 400;
+  let totalSaved = 0;
+
+  for (let i = 0; i < clients.length; i += BATCH_SIZE) {
+    const chunk = clients.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    for (const c of chunk) {
+      const docId = c.id || `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const docRef = doc(db, 'clients', docId);
+      const payload = cleanForFirestore({
+        ...c,
+        id: docId,
+        author: c.author || author,
+        updatedAt: Date.now(),
+        createdAt: c.createdAt || Date.now(),
+      });
+      batch.set(docRef, payload, { merge: true });
+    }
+
+    await batch.commit();
+    totalSaved += chunk.length;
+  }
+
+  notifySync(`✓ ${totalSaved} fiches clients enregistrées dans le Cloud`);
+  return totalSaved;
+};

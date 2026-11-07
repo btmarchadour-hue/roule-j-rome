@@ -78,6 +78,33 @@
         "clubPassword": { "type": "string", "description": "Mot de passe partagé (rétrocompatibilité)." },
         "updatedAt": { "type": "number", "description": "Timestamp de modification." }
       }
+    },
+    "ClientProfile": {
+      "title": "ClientProfile",
+      "description": "Fiche client centralisée (CRM) avec coordonnées, historique de séances et préférences.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identifiant unique du client." },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "city": { "type": "string" },
+        "postalCode": { "type": "string" },
+        "level": { "type": "string" },
+        "preferredGear": { "type": "string" },
+        "totalSessions": { "type": "number" },
+        "lastSessionDate": { "type": "string" },
+        "totalSpent": { "type": "number" },
+        "hasGiftVoucher": { "type": "boolean" },
+        "giftVoucherBalance": { "type": "number" },
+        "notes": { "type": "string" },
+        "tags": { "type": "array" },
+        "author": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["lastName", "phone"]
     }
   },
   "firestore": {
@@ -96,6 +123,10 @@
     "/reservations/{reservationKey}": {
       "schema": "ReservationDoc",
       "description": "Inscriptions clients et émargement de séance."
+    },
+    "/clients/{clientId}": {
+      "schema": "ClientProfile",
+      "description": "Fiches clients centralisées de l'école (CRM)."
     },
     "/app_config/{configId}": {
       "schema": "SecurityConfig",

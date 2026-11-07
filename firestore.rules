@@ -17,8 +17,13 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Émargement et inscriptions clients
+    // Émargement et inscriptions clients par créneau
     match /reservations/{reservationKey} {
+      allow read, write: if true;
+    }
+
+    // Répertoire centralisé et base de données clients (CRM)
+    match /clients/{clientId} {
       allow read, write: if true;
     }
 

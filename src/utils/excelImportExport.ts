@@ -1,5 +1,11 @@
 import * as XLSX from 'xlsx';
-import { CancellationReason, SlotObservation } from '../types';
+import {
+  CancellationReason,
+  ClientPreferredGear,
+  ClientProfile,
+  ClientSkillLevel,
+  SlotObservation,
+} from '../types';
 import { CANCELLATION_REASONS_INFO } from './statisticsEngine';
 
 /**
@@ -588,4 +594,315 @@ export async function parseLogbookFile(file: File): Promise<ImportResult> {
     errorCount,
     items,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* IMPORT & EXPORT CLIENTS (CRM & FICHIER STAGIAIRES)                        */
+/* -------------------------------------------------------------------------- */
+
+export interface ParsedClientItem {
+  rowNumber: number;
+  raw: any;
+  client?: ClientProfile;
+  isValid: boolean;
+  warnings: string[];
+  error?: string;
+}
+
+export interface ParsedClientsResult {
+  totalRows: number;
+  validCount: number;
+  errorCount: number;
+  items: ParsedClientItem[];
+}
+
+/**
+ * Nettoie et standardise un numéro de téléphone français
+ */
+export function normalizePhone(raw: any): string {
+  if (!raw) return '';
+  let s = String(raw).replace(/[\s\.\-\(\)]/g, '').trim();
+  // Format international +33 -> 0
+  if (s.startsWith('+33')) {
+    s = '0' + s.slice(3);
+  } else if (s.startsWith('0033')) {
+    s = '0' + s.slice(4);
+  }
+  // Formatage 2 par 2 pour la lisibilité
+  if (/^0[1-9]\d{8}$/.test(s)) {
+    return s.replace(/(\d{2})(?=\d)/g, '$1 ').trim();
+  }
+  return s;
+}
+
+/**
+ * Génère et télécharge le fichier modèle Excel pour l'import de clients
+ */
+export function downloadClientExcelTemplate() {
+  const wb = XLSX.utils.book_new();
+
+  const dataClients = [
+    {
+      'Nom': 'Dupont',
+      'Prénom': 'Marc',
+      'Téléphone': '06 12 34 56 78',
+      'Email': 'marc.dupont@email.fr',
+      'Ville': 'Plomodiern',
+      'Code Postal': '29550',
+      'Niveau': 'Initié',
+      'Matériel Préféré': 'Monoplace',
+      'Total Séances': 3,
+      'Notes & Préférences': 'Vient souvent en famille, mesure 1m82.',
+      'Tags': 'Famille, Local',
+    },
+    {
+      'Nom': 'Le Gall',
+      'Prénom': 'Sophie',
+      'Téléphone': '07 89 01 23 45',
+      'Email': 'sophie.legall@gmail.com',
+      'Ville': 'Douarnenez',
+      'Code Postal': '29100',
+      'Niveau': 'Débutant',
+      'Matériel Préféré': 'Biplace',
+      'Total Séances': 1,
+      'Notes & Préférences': 'Roule avec sa fille de 10 ans.',
+      'Tags': 'Biplace, Vacances',
+    },
+    {
+      'Nom': 'Martin',
+      'Prénom': 'Alexandre',
+      'Téléphone': '06 55 44 33 22',
+      'Email': 'alex.martin@orange.fr',
+      'Ville': 'Crozon',
+      'Code Postal': '29160',
+      'Niveau': 'Autonome',
+      'Matériel Préféré': 'Standart',
+      'Total Séances': 8,
+      'Notes & Préférences': 'Pratique régulièrement les jours de bon vent (> 18 nds).',
+      'Tags': 'Autonome, Habitué',
+    },
+  ];
+
+  const wsClients = XLSX.utils.json_to_sheet(dataClients);
+  wsClients['!cols'] = [
+    { wch: 16 }, // Nom
+    { wch: 14 }, // Prénom
+    { wch: 18 }, // Téléphone
+    { wch: 26 }, // Email
+    { wch: 16 }, // Ville
+    { wch: 12 }, // CP
+    { wch: 14 }, // Niveau
+    { wch: 18 }, // Matériel
+    { wch: 14 }, // Total Séances
+    { wch: 38 }, // Notes
+    { wch: 22 }, // Tags
+  ];
+  XLSX.utils.book_append_sheet(wb, wsClients, 'Clients_Import');
+
+  const guideData = [
+    { 'Colonne': 'Nom', 'Obligatoire': 'OUI', 'Format attendu': 'Texte (ex: Dupont)', 'Conseil': 'Nom de famille du contact ou de la famille.' },
+    { 'Colonne': 'Prénom', 'Obligatoire': 'Non', 'Format attendu': 'Texte (ex: Marc)', 'Conseil': 'Prénom du stagiaire principal.' },
+    { 'Colonne': 'Téléphone', 'Obligatoire': 'OUI (Recommandé)', 'Format attendu': '06 / 07 / +33...', 'Conseil': 'Essentiel pour les alertes météo SMS par Jérôme.' },
+    { 'Colonne': 'Email', 'Obligatoire': 'Non', 'Format attendu': 'Adresse email valide', 'Conseil': 'Pour confirmation et bons cadeaux.' },
+    { 'Colonne': 'Ville / CP', 'Obligatoire': 'Non', 'Format attendu': 'Nom de commune / Code postal', 'Conseil': 'Permet de distinguer les locaux des vacanciers.' },
+    { 'Colonne': 'Niveau', 'Obligatoire': 'Non', 'Format attendu': 'Débutant / Initié / Perfectionnement / Autonome', 'Conseil': 'Niveau de pratique.' },
+    { 'Colonne': 'Matériel Préféré', 'Obligatoire': 'Non', 'Format attendu': 'Monoplace / Biplace / Standart / Promo', 'Conseil': 'Préférence de char.' },
+    { 'Colonne': 'Total Séances', 'Obligatoire': 'Non', 'Format attendu': 'Nombre entier', 'Conseil': 'Historique de séances déjà courues.' },
+    { 'Colonne': 'Notes & Préférences', 'Obligatoire': 'Non', 'Format attendu': 'Texte libre', 'Conseil': 'Taille, remarques médicales, accompagnateurs.' },
+    { 'Colonne': 'Tags', 'Obligatoire': 'Non', 'Format attendu': 'Mots-clés séparés par des virgules', 'Conseil': 'Ex: Famille, Habitué, Stage, PMR, BonCadeau.' },
+  ];
+  const wsGuide = XLSX.utils.json_to_sheet(guideData);
+  wsGuide['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 30 }, { wch: 45 }];
+  XLSX.utils.book_append_sheet(wb, wsGuide, 'Guide_Champs');
+
+  XLSX.writeFile(wb, 'modele_import_clients_lestrevet.xlsx');
+}
+
+/**
+ * Analyse et extrait les fiches clients depuis un fichier Excel ou CSV
+ */
+export async function parseClientsFile(file: File): Promise<ParsedClientsResult> {
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[firstSheetName];
+
+  const rawRows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+  const items: ParsedClientItem[] = [];
+
+  let validCount = 0;
+  let errorCount = 0;
+
+  rawRows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const warnings: string[] = [];
+
+    // Détection souple des colonnes
+    let rawNom: any = null;
+    let rawPrenom: any = null;
+    let rawPhone: any = null;
+    let rawEmail: any = null;
+    let rawVille: any = null;
+    let rawCp: any = null;
+    let rawNiveau: any = null;
+    let rawMateriel: any = null;
+    let rawTotal: any = null;
+    let rawNotes: any = null;
+    let rawTags: any = null;
+
+    Object.keys(row).forEach(key => {
+      const k = cleanStr(key);
+      if (k === 'nom' || k === 'lastname' || k === 'famille' || k === 'client') rawNom = row[key];
+      else if (k === 'prenom' || k === 'firstname') rawPrenom = row[key];
+      else if (k.includes('tel') || k.includes('phone') || k.includes('portable') || k.includes('mobile')) rawPhone = row[key];
+      else if (k.includes('mail')) rawEmail = row[key];
+      else if (k.includes('ville') || k.includes('commune') || k.includes('city')) rawVille = row[key];
+      else if (k.includes('postal') || k === 'cp') rawCp = row[key];
+      else if (k.includes('niveau') || k.includes('level') || k.includes('formule')) rawNiveau = row[key];
+      else if (k.includes('materiel') || k.includes('char') || k.includes('gear')) rawMateriel = row[key];
+      else if (k.includes('total') || k.includes('seance') || k.includes('nb')) rawTotal = row[key];
+      else if (k.includes('note') || k.includes('remarque') || k.includes('info')) rawNotes = row[key];
+      else if (k.includes('tag') || k.includes('label')) rawTags = row[key];
+    });
+
+    // Si la ligne contient un nom composé de "Prénom Nom"
+    let lastName = rawNom ? String(rawNom).trim() : '';
+    let firstName = rawPrenom ? String(rawPrenom).trim() : '';
+
+    if (!lastName && !firstName && !rawPhone && !rawEmail) {
+      return; // Ligne vide, ignorer
+    }
+
+    if (!lastName && firstName) {
+      lastName = firstName;
+      firstName = '';
+    }
+
+    if (!lastName) {
+      errorCount++;
+      items.push({
+        rowNumber,
+        raw: row,
+        isValid: false,
+        warnings: [],
+        error: 'Nom obligatoire manquant.',
+      });
+      return;
+    }
+
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+      warnings.push('Numéro de téléphone non renseigné ou non reconnu.');
+    }
+
+    // Normalisation du niveau
+    let level: ClientSkillLevel | undefined;
+    const nStr = cleanStr(rawNiveau);
+    if (nStr.includes('deb') || nStr.includes('initiat')) level = 'debutant';
+    else if (nStr.includes('init') || nStr.includes('moyen')) level = 'initie';
+    else if (nStr.includes('perf')) level = 'perfectionnement';
+    else if (nStr.includes('auto') || nStr.includes('expert')) level = 'autonome';
+
+    // Normalisation du matériel
+    let preferredGear: ClientPreferredGear | undefined;
+    const mStr = cleanStr(rawMateriel);
+    if (mStr.includes('bi')) preferredGear = 'biplace';
+    else if (mStr.includes('mono')) preferredGear = 'monoplace';
+    else if (mStr.includes('stan')) preferredGear = 'standart';
+    else if (mStr.includes('prom')) preferredGear = 'promo';
+
+    // Normalisation des tags
+    let tags: string[] = [];
+    if (rawTags) {
+      tags = String(rawTags)
+        .split(/[,;\/]/)
+        .map(t => t.trim())
+        .filter(Boolean);
+    }
+
+    const totalSessions = rawTotal != null && !isNaN(Number(rawTotal)) ? Math.max(0, Number(rawTotal)) : 1;
+
+    const client: ClientProfile = {
+      id: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      firstName,
+      lastName,
+      phone,
+      email: rawEmail ? String(rawEmail).trim().toLowerCase() : undefined,
+      city: rawVille ? String(rawVille).trim() : undefined,
+      postalCode: rawCp ? String(rawCp).trim() : undefined,
+      level,
+      preferredGear,
+      totalSessions,
+      notes: rawNotes ? String(rawNotes).trim() : undefined,
+      tags: tags.length ? tags : undefined,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    validCount++;
+    items.push({
+      rowNumber,
+      raw: row,
+      client,
+      isValid: true,
+      warnings,
+    });
+  });
+
+  return {
+    totalRows: rawRows.length,
+    validCount,
+    errorCount,
+    items,
+  };
+}
+
+/**
+ * Exporte l'ensemble des fiches clients en CSV avec encodage UTF-8 avec BOM (compatible Excel)
+ */
+export function exportClientsToCsv(clients: ClientProfile[]) {
+  const headers = [
+    'Nom',
+    'Prénom',
+    'Téléphone',
+    'Email',
+    'Ville',
+    'Code Postal',
+    'Niveau',
+    'Matériel Préféré',
+    'Total Séances',
+    'Dernière Séance',
+    'Notes',
+    'Tags',
+  ];
+
+  const rows = clients.map(c => [
+    c.lastName || '',
+    c.firstName || '',
+    c.phone || '',
+    c.email || '',
+    c.city || '',
+    c.postalCode || '',
+    c.level || '',
+    c.preferredGear || '',
+    c.totalSessions || 0,
+    c.lastSessionDate || '',
+    (c.notes || '').replace(/[\r\n]+/g, ' '),
+    (c.tags || []).join(', '),
+  ]);
+
+  const csvContent =
+    '\uFEFF' +
+    [headers.join(';'), ...rows.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(';'))].join('\r\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const today = new Date().toISOString().slice(0, 10);
+  a.download = `clients_char_a_voile_lestrevet_${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

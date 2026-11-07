@@ -207,3 +207,41 @@ export interface SlotObservation {
   createdAt: number;
 }
 
+// -----------------------------------------------------------------------------
+// MODULE BASE DE DONNÉES CLIENTS & CRM (ÉCOLE DE CHAR À VOILE)
+// -----------------------------------------------------------------------------
+
+export type ClientSkillLevel = 'debutant' | 'initie' | 'perfectionnement' | 'autonome';
+export type ClientPreferredGear = 'monoplace' | 'biplace' | 'standart' | 'promo' | 'indifferent';
+
+export interface ClientBookingHistoryItem {
+  date: string;
+  slotTime: string;
+  formula?: string;
+  chars?: string;
+  payment?: string;
+  status: 'valid' | 'pending' | 'signed';
+}
+
+export interface ClientProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email?: string;
+  city?: string;
+  postalCode?: string;
+  level?: ClientSkillLevel;
+  preferredGear?: ClientPreferredGear;
+  totalSessions: number;
+  lastSessionDate?: string;
+  totalSpent?: number;
+  hasGiftVoucher?: boolean;
+  giftVoucherBalance?: number;
+  notes?: string;
+  tags?: string[];
+  author?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
