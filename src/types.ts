@@ -245,3 +245,31 @@ export interface ClientProfile {
   updatedAt: number;
 }
 
+// -----------------------------------------------------------------------------
+// MODULE GESTION DES PROFILS & UTILISATEURS (AUTHENTIFICATION INDIVIDUELLE)
+// -----------------------------------------------------------------------------
+
+export type UserRole = 'admin' | 'moniteur';
+
+export interface AppUser {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  passwordHash: string;
+  isReadOnly: boolean;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+  lastLoginAt?: number;
+}
+
+export interface ActiveUserSession {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  isReadOnly: boolean;
+  loginTime: number;
+}
+

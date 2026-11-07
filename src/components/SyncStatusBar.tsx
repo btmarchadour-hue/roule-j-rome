@@ -1,21 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { getActiveInstructor, setActiveInstructor, syncLocalDataWithFirestore } from '../utils/firebaseSync';
+import { ActiveUserSession } from '../types';
+import { getActiveUser } from '../utils/authUtils';
+import { syncLocalDataWithFirestore } from '../utils/firebaseSync';
 
 interface SyncStatusBarProps {
   isOnline?: boolean;
+  currentUser?: ActiveUserSession | null;
   onLock?: () => void;
 }
 
-export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, onLock }) => {
-  const [currentInstructor, setCurrentInstructor] = useState<string>(() => getActiveInstructor());
-  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
-  const [customNameInput, setCustomNameInput] = useState<string>('');
+export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({
+  isOnline = true,
+  currentUser: propUser,
+  onLock,
+}) => {
+  const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(
+    () => propUser || getActiveUser()
+  );
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<string>('');
 
   useEffect(() => {
-    const active = getActiveInstructor();
-    setCurrentInstructor(active);
+    if (propUser) {
+      setCurrentUser(propUser);
+    } else {
+      setCurrentUser(getActiveUser());
+    }
 
     const handleSyncEvent = (e: any) => {
       if (e.detail?.msg) {
@@ -25,7 +35,7 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
     };
     window.addEventListener('cv_sync_status', handleSyncEvent);
     return () => window.removeEventListener('cv_sync_status', handleSyncEvent);
-  }, []);
+  }, [propUser]);
 
   const handleManualSync = async () => {
     setIsSyncing(true);
@@ -42,26 +52,16 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
     }
   };
 
-  const handleSelectInstructor = (name: string) => {
-    setCurrentInstructor(name);
-    setActiveInstructor(name);
-    setIsCustomMode(false);
-  };
-
-  const handleSaveCustom = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (customNameInput.trim()) {
-      handleSelectInstructor(customNameInput.trim());
-      setCustomNameInput('');
-    }
-  };
+  const username = currentUser?.username || 'Jérôme';
+  const role = currentUser?.role || 'admin';
+  const isReadOnly = Boolean(currentUser?.isReadOnly);
 
   return (
     <div
       className="noprint"
       style={{
-        background: '#f8fafc',
-        borderBottom: '1px solid var(--bd, #e2e8f0)',
+        background: isReadOnly ? '#fffbeb' : '#f8fafc',
+        borderBottom: isReadOnly ? '1px solid #fde68a' : '1px solid var(--bd, #e2e8f0)',
         padding: '6px 16px',
         display: 'flex',
         justifyContent: 'space-between',
@@ -69,6 +69,7 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
         flexWrap: 'wrap',
         gap: '8px',
         fontSize: '0.74rem',
+        transition: 'background-color 0.2s ease',
       }}
     >
       {/* Statut de synchronisation Cloud Firestore */}
@@ -123,149 +124,88 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
         </button>
 
         {syncFeedback && (
-          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: syncFeedback.startsWith('✓') ? '#166534' : '#b91c1c' }}>
+          <span
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              color: syncFeedback.startsWith('✓') ? '#166534' : '#b91c1c',
+            }}
+          >
             {syncFeedback}
           </span>
         )}
 
         <span style={{ color: 'var(--mu, #64748b)', fontSize: '0.72rem' }}>
-          Données partagées téléphone & ordinateur (Jérôme & Benoît)
+          Spot : Plage de Lestrevet · Plomodiern
         </span>
       </div>
 
-      {/* Sélecteur de profil moniteur */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span style={{ fontWeight: 800, color: 'var(--tx, #1e293b)', fontSize: '0.72rem' }}>
-          👤 Saisie active :
-        </span>
+      {/* Profil connecté & changement de compte */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: '#ffffff',
+            padding: '3px 10px',
+            borderRadius: '8px',
+            border: isReadOnly ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          }}
+        >
+          <span style={{ fontSize: '0.85rem' }}>
+            {username.toLowerCase().includes('jérôme') || username.toLowerCase().includes('jerome')
+              ? '⛵'
+              : username.toLowerCase().includes('benoît') || username.toLowerCase().includes('benoit')
+              ? '👁️'
+              : '👤'}
+          </span>
 
-        <div style={{ display: 'inline-flex', background: '#fff', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '2px', gap: '2px' }}>
-          <button
-            type="button"
-            onClick={() => handleSelectInstructor('Jérôme')}
+          <span style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.74rem' }}>
+            {username}
+          </span>
+
+          <span
             style={{
-              border: 'none',
-              background: currentInstructor === 'Jérôme' ? '#0284c7' : 'transparent',
-              color: currentInstructor === 'Jérôme' ? '#fff' : '#475569',
-              padding: '3px 9px',
+              fontSize: '0.64rem',
+              fontWeight: 700,
+              padding: '1px 6px',
               borderRadius: '4px',
-              fontWeight: currentInstructor === 'Jérôme' ? 800 : 600,
-              fontSize: '0.70rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
+              background: role === 'admin' ? '#e0f2fe' : '#f1f5f9',
+              color: role === 'admin' ? '#0369a1' : '#475569',
             }}
           >
-            Jérôme (par défaut)
-          </button>
+            {role === 'admin' ? '⭐ Admin' : 'Moniteur'}
+          </span>
 
-          <button
-            type="button"
-            onClick={() => handleSelectInstructor('Benoît')}
-            style={{
-              border: 'none',
-              background: currentInstructor === 'Benoît' ? '#0284c7' : 'transparent',
-              color: currentInstructor === 'Benoît' ? '#fff' : '#475569',
-              padding: '3px 9px',
-              borderRadius: '4px',
-              fontWeight: currentInstructor === 'Benoît' ? 800 : 600,
-              fontSize: '0.70rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            Benoît
-          </button>
-
-          {currentInstructor !== 'Jérôme' && currentInstructor !== 'Benoît' && (
+          {isReadOnly && (
             <span
               style={{
-                background: '#0284c7',
-                color: '#fff',
-                padding: '3px 8px',
-                borderRadius: '4px',
+                fontSize: '0.64rem',
                 fontWeight: 800,
-                fontSize: '0.70rem',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                background: '#fef3c7',
+                color: '#92400e',
+                border: '1px solid #fde68a',
               }}
+              title="Version verrouillée en écriture : vous pouvez consulter toutes les données en toute sécurité sans risque d'erreur"
             >
-              {currentInstructor}
+              🔒 Mode Contrôle (Lecture seule)
             </span>
           )}
         </div>
-
-        {isCustomMode ? (
-          <form onSubmit={handleSaveCustom} style={{ display: 'inline-flex', gap: '4px' }}>
-            <input
-              type="text"
-              placeholder="Prénom..."
-              value={customNameInput}
-              onChange={e => setCustomNameInput(e.target.value)}
-              style={{
-                padding: '2px 6px',
-                fontSize: '0.70rem',
-                borderRadius: '4px',
-                border: '1px solid #94a3b8',
-                width: '80px',
-              }}
-              autoFocus
-            />
-            <button
-              type="submit"
-              style={{
-                padding: '2px 6px',
-                fontSize: '0.68rem',
-                background: '#0284c7',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
-            >
-              OK
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsCustomMode(false)}
-              style={{
-                padding: '2px 4px',
-                fontSize: '0.68rem',
-                background: '#e2e8f0',
-                color: '#475569',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
-            >
-              ✕
-            </button>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsCustomMode(true)}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: '#64748b',
-              fontSize: '0.68rem',
-              cursor: 'pointer',
-              padding: '2px 4px',
-              textDecoration: 'underline',
-            }}
-            title="Saisir un autre nom de moniteur"
-          >
-            Autre
-          </button>
-        )}
 
         {onLock && (
           <button
             type="button"
             onClick={onLock}
             style={{
-              background: '#fff',
+              background: '#ffffff',
               border: '1px solid #cbd5e1',
               borderRadius: '6px',
-              padding: '3px 8px',
+              padding: '3px 9px',
               fontSize: '0.68rem',
               fontWeight: 700,
               color: '#475569',
@@ -273,12 +213,11 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({ isOnline = true, o
               display: 'inline-flex',
               alignItems: 'center',
               gap: '4px',
-              marginLeft: '4px',
             }}
-            title="Verrouiller l'accès"
+            title="Changer d'utilisateur ou verrouiller la session"
           >
             <span>🔒</span>
-            <span>Verrouiller</span>
+            <span>Changer de profil</span>
           </button>
         )}
       </div>

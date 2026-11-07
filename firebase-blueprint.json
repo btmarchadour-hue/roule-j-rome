@@ -105,6 +105,24 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["lastName", "phone"]
+    },
+    "AppUser": {
+      "title": "AppUser",
+      "description": "Profil utilisateur avec rôle, mot de passe haché et permissions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "moniteur"] },
+        "passwordHash": { "type": "string" },
+        "isReadOnly": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "lastLoginAt": { "type": "number" }
+      },
+      "required": ["username", "role", "passwordHash"]
     }
   },
   "firestore": {
@@ -131,6 +149,10 @@
     "/app_config/{configId}": {
       "schema": "SecurityConfig",
       "description": "Paramètres globaux et mot de passe d'accès moniteurs."
+    },
+    "/app_users/{userId}": {
+      "schema": "AppUser",
+      "description": "Comptes utilisateurs avec rôle et mot de passe individuel."
     }
   }
 }

@@ -9,11 +9,13 @@ import {
 } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
 import {
+  AppUser,
   ClientProfile,
   CustomSlotsMap,
   SlotObservation,
   ValidationsMap,
 } from '../types';
+import { DEFAULT_USERS } from './authUtils';
 
 export interface AgendaBookingItem {
   id: string;
@@ -446,4 +448,102 @@ export const batchSaveClientsToFirestore = async (clients: ClientProfile[]): Pro
 
   notifySync(`✓ ${totalSaved} fiches clients enregistrées dans le Cloud`);
   return totalSaved;
+};
+
+/* -------------------------------------------------------------------------- */
+/* 6. GESTION DES UTILISATEURS & PROFILS (AUTHENTIFICATION INDIVIDUELLE)      */
+/* -------------------------------------------------------------------------- */
+export const subscribeToUsers = (
+  onData: (users: AppUser[]) => void,
+  onError?: (err: Error) => void
+) => {
+  const colRef = collection(db, 'app_users');
+  return onSnapshot(
+    colRef,
+    async snapshot => {
+      if (snapshot.empty) {
+        // Initialiser automatiquement avec Jérôme et Benoît si la collection est vide
+        try {
+          await seedDefaultUsersIfEmpty();
+        } catch (e) {
+          console.warn('Initialisation des utilisateurs par défaut différée:', e);
+        }
+        onData(DEFAULT_USERS);
+        return;
+      }
+      const list: AppUser[] = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+      });
+      // Trier : Admin en premier, puis ordre alphabétique
+      list.sort((a, b) => {
+        if (a.role !== b.role) return a.role === 'admin' ? -1 : 1;
+        return a.username.localeCompare(b.username);
+      });
+      onData(list);
+    },
+    error => {
+      console.warn('Erreur abonnement utilisateurs Firestore:', error);
+      onError?.(error);
+      // Fallback sur les utilisateurs par défaut en local
+      onData(DEFAULT_USERS);
+    }
+  );
+};
+
+export const seedDefaultUsersIfEmpty = async (): Promise<AppUser[]> => {
+  try {
+    await ensureAuth();
+    const colRef = collection(db, 'app_users');
+    const snap = await getDocs(colRef);
+    if (!snap.empty) {
+      const list: AppUser[] = [];
+      snap.forEach(d => list.push({ id: d.id, ...(d.data() as any) }));
+      return list;
+    }
+
+    const batch = writeBatch(db);
+    for (const u of DEFAULT_USERS) {
+      const docRef = doc(db, 'app_users', u.id);
+      batch.set(docRef, cleanForFirestore(u));
+    }
+    await batch.commit();
+    console.info('✓ Utilisateurs initiaux (Jérôme & Benoît) initialisés dans Firestore');
+    return DEFAULT_USERS;
+  } catch (err) {
+    console.warn('Erreur seed default users:', err);
+    return DEFAULT_USERS;
+  }
+};
+
+export const saveUserToFirestore = async (user: AppUser): Promise<string> => {
+  try {
+    await ensureAuth();
+    const docId = user.id || `usr_${user.username.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '_')}`;
+    const docRef = doc(db, 'app_users', docId);
+    const payload = cleanForFirestore({
+      ...user,
+      id: docId,
+      updatedAt: Date.now(),
+      createdAt: user.createdAt || Date.now(),
+    });
+    await setDoc(docRef, payload, { merge: true });
+    notifySync(`✓ Profil de ${user.username} mis à jour`);
+    return docId;
+  } catch (error) {
+    console.error('Erreur enregistrement utilisateur Firestore:', error);
+    throw error;
+  }
+};
+
+export const deleteUserFromFirestore = async (userId: string): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'app_users', userId);
+    await deleteDoc(docRef);
+    notifySync('✓ Utilisateur supprimé');
+  } catch (error) {
+    console.error('Erreur suppression utilisateur Firestore:', error);
+    throw error;
+  }
 };

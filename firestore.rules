@@ -32,6 +32,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Profils et comptes moniteurs/administrateurs
+    match /app_users/{userId} {
+      allow read, write: if true;
+    }
+
     // Test de connectivité
     match /test/{docId} {
       allow read, write: if true;

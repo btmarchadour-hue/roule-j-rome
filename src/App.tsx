@@ -25,6 +25,7 @@ import {
   syncLocalDataWithFirestore,
 } from './utils/firebaseSync';
 import {
+  ActiveUserSession,
   AppSettings,
   CustomSlot,
   CustomSlotsMap,
@@ -35,6 +36,7 @@ import {
   ValidationsMap,
   WindPoint,
 } from './types';
+import { getActiveUser, clearActiveUser } from './utils/authUtils';
 import {
   build,
   kOf,
@@ -252,24 +254,28 @@ export const App: React.FC = () => {
     setActiveTab(tab);
   };
 
+  const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(() => getActiveUser());
+
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
-      return (
+      const session = getActiveUser();
+      const flag =
         localStorage.getItem('cv_app_unlocked') === 'true' ||
-        sessionStorage.getItem('cv_app_unlocked') === 'true'
-      );
+        sessionStorage.getItem('cv_app_unlocked') === 'true';
+      return Boolean(flag && session);
     } catch {
       return false;
     }
   });
 
+  const handleUnlock = useCallback((session: ActiveUserSession) => {
+    setCurrentUser(session);
+    setIsUnlocked(true);
+  }, []);
+
   const handleLock = useCallback(() => {
-    try {
-      localStorage.removeItem('cv_app_unlocked');
-      sessionStorage.removeItem('cv_app_unlocked');
-    } catch {
-      // ignore
-    }
+    clearActiveUser();
+    setCurrentUser(null);
     setIsUnlocked(false);
   }, []);
 
@@ -624,13 +630,13 @@ export const App: React.FC = () => {
   const last = EX[EX.length - 1]?.t ?? 0;
 
   if (!isUnlocked) {
-    return <AppLockScreen onUnlock={() => setIsUnlocked(true)} />;
+    return <AppLockScreen onUnlock={handleUnlock} />;
   }
 
   return (
     <>
       <Header />
-      <SyncStatusBar onLock={handleLock} />
+      <SyncStatusBar isOnline={true} currentUser={currentUser} onLock={handleLock} />
       <main className={activeTab >= 3 && activeTab <= 5 ? 'agenda-wide' : ''}>
         {/* En-tête des marées en haut de page (masqué en onglet 3, 4, 5 et 6 et à l'impression) */}
         {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
