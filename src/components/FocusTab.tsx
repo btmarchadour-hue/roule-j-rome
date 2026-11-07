@@ -97,15 +97,63 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   };
 
   const renderSessRow = (f: DayFocusData, x: SessionItem, key: string) => {
-    const t = `${lc(x.a, f.y, f.m, f.d)} - ${lc(x.b, f.y, f.m, f.d)}`;
+    const startTimeStr = lc(x.a, f.y, f.m, f.d);
+    const endTimeStr = lc(x.b, f.y, f.m, f.d);
+    const t = `${startTimeStr} - ${endTimeStr}`;
     const slotKey = kOf(x);
     const valRecord = validations[f.ds];
-    const valItem = valRecord?.items?.find(item => item.k === slotKey);
+
+    // Recherche multi-niveaux pour synchronisation absolue avec l'archive
+    let valItem = valRecord?.items?.find(item => item.k === slotKey);
+    if (!valItem && valRecord?.items) {
+      valItem = valRecord.items.find(item => item.s === startTimeStr && item.e === endTimeStr);
+    }
+    if (!valItem && valRecord?.items) {
+      valItem = valRecord.items.find(item => item.s === startTimeStr);
+    }
+    if (!valItem && valRecord?.items) {
+      const [sh, sm] = startTimeStr.replace('h', ':').split(':').map(Number);
+      const slotMin = sh * 60 + sm;
+      let closest: (typeof valRecord.items)[0] | null = null;
+      let minDiff = 45;
+      for (const item of valRecord.items) {
+        if (!item.s) continue;
+        const [ih, im] = item.s.replace('h', ':').split(':').map(Number);
+        const diff = Math.abs(slotMin - (ih * 60 + im));
+        if (diff <= minDiff) {
+          minDiff = diff;
+          closest = item;
+        }
+      }
+      if (closest) valItem = closest;
+    }
+
     const decision: 'valid' | 'rejected' | 'pending' = valItem
       ? valItem.status === 'rejected'
         ? 'rejected'
         : 'valid'
       : 'pending';
+
+    const cardBg =
+      decision === 'valid'
+        ? '#f0fdf4'
+        : decision === 'rejected'
+        ? '#fef2f2'
+        : '#ffffff';
+
+    const cardBorder =
+      decision === 'valid'
+        ? '2px solid #22c55e'
+        : decision === 'rejected'
+        ? '2px solid #ef4444'
+        : '2px dashed #cbd5e1';
+
+    const cardBarColor =
+      decision === 'valid'
+        ? '#16a34a'
+        : decision === 'rejected'
+        ? '#dc2626'
+        : '#94a3b8';
 
     let chip = <span className="fchip">VENT ?</span>;
     if (x.isCustom) {
@@ -130,41 +178,124 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         } au ${x.side} · à ta discrétion`
       : x.txt || '';
 
-    const rowClass = [
-      'fs',
-      x.opt ? 'fo' : '',
-      x.past ? 'fp' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-
     return (
       <div
         key={key}
-        className={rowClass}
         style={{
-          opacity: decision === 'rejected' ? 0.7 : 1,
-          background: decision === 'rejected' ? '#fafafa' : undefined,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          padding: '12px 16px',
+          borderRadius: '10px',
+          marginBottom: '10px',
+          backgroundColor: cardBg,
+          border: cardBorder,
+          borderLeft: `6px solid ${cardBarColor}`,
+          boxShadow:
+            decision === 'valid'
+              ? '0 2px 8px rgba(22, 163, 74, 0.12)'
+              : decision === 'rejected'
+              ? '0 2px 6px rgba(220, 38, 38, 0.08)'
+              : '0 1px 3px rgba(0,0,0,0.04)',
+          transition: 'all 0.15s ease',
         }}
       >
-        <div>
-          <b style={{ textDecoration: decision === 'rejected' ? 'line-through' : 'none' }}>{t}</b>
-          <small>{sub + (x.past ? ' · passée' : '')}</small>
-        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {decision === 'valid' && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: '#16a34a',
+                color: '#ffffff',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontWeight: 900,
+                fontSize: '0.78rem',
+                letterSpacing: '0.03em',
+                boxShadow: '0 1px 2px rgba(22, 163, 74, 0.3)',
+              }}
+            >
+              <span>✓</span>
+              <span>SÉANCE VALIDÉE</span>
+            </span>
+          )}
+
+          {decision === 'rejected' && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: '#dc2626',
+                color: '#ffffff',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontWeight: 900,
+                fontSize: '0.78rem',
+                letterSpacing: '0.03em',
+                boxShadow: '0 1px 2px rgba(220, 38, 38, 0.3)',
+              }}
+            >
+              <span>✕</span>
+              <span>SÉANCE REFUSÉE</span>
+              {valItem?.rejectReason && (
+                <span style={{ fontSize: '0.72rem', opacity: 0.9 }}>· {valItem.rejectReason}</span>
+              )}
+            </span>
+          )}
+
+          {decision === 'pending' && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #cbd5e1',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                fontWeight: 800,
+                fontSize: '0.74rem',
+              }}
+            >
+              <span>⏳</span>
+              <span>À VALIDER</span>
+            </span>
+          )}
+
           {chip}
 
+          {sub && (
+            <small style={{ color: '#64748b', fontSize: '0.72rem' }}>
+              {sub + (x.past ? ' · passée' : '')}
+            </small>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           {onSetSlotDecision ? (
             <div className="slot-decision-group" onClick={e => e.stopPropagation()}>
               {decision === 'valid' && (
                 <>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#16a34a', background: '#dcfce7', padding: '3px 7px', borderRadius: '4px' }}>
-                    ✓ VALIDÉ
-                  </span>
                   <button
                     type="button"
-                    className="slot-toggle-btn"
-                    style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '5px 9px',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: '#dc2626',
+                      background: '#fff',
+                      border: '1px solid #fca5a5',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
                     title="Refuser / annuler ce créneau"
                   >
@@ -172,7 +303,18 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   </button>
                   <button
                     type="button"
-                    className="slot-toggle-btn neutral"
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '5px 8px',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: '#64748b',
+                      background: '#fff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'pending')}
                     title="Remettre en attente"
                   >
@@ -183,21 +325,39 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
               {decision === 'rejected' && (
                 <>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#dc2626', background: '#fee2e2', padding: '3px 7px', borderRadius: '4px' }}>
-                    ✕ REFUSÉ {valItem?.rejectReason ? `· ${valItem.rejectReason}` : ''}
-                  </span>
                   <button
                     type="button"
-                    className="slot-toggle-btn"
-                    style={{ color: '#16a34a', borderColor: '#86efac' }}
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '5px 9px',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: '#16a34a',
+                      background: '#fff',
+                      border: '1px solid #86efac',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'valid')}
                     title="Valider et maintenir ce créneau"
                   >
-                    ✓ Valider
+                    ✓ Re-valider
                   </button>
                   <button
                     type="button"
-                    className="slot-toggle-btn neutral"
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '5px 8px',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: '#64748b',
+                      background: '#fff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'pending')}
                     title="Remettre en attente"
                   >
@@ -210,21 +370,50 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 <>
                   <button
                     type="button"
-                    className="slot-toggle-btn"
-                    style={{ background: '#f0fdf4', color: '#15803d', borderColor: '#86efac' }}
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '6px 12px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      color: '#fff',
+                      background: '#16a34a',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'valid')}
                     title="Valider ce créneau"
                   >
-                    ✓ Valider
+                    <span>✓</span>
+                    <span>Valider</span>
                   </button>
                   <button
                     type="button"
-                    className="slot-toggle-btn"
-                    style={{ background: '#fef2f2', color: '#b91c1c', borderColor: '#fca5a5' }}
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      padding: '6px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      color: '#dc2626',
+                      background: '#fff',
+                      border: '1px solid #fca5a5',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
                     onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
                     title="Refuser ce créneau"
                   >
-                    ✕ Refuser
+                    <span>✕</span>
+                    <span>Refuser</span>
                   </button>
                 </>
               )}
@@ -232,40 +421,70 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               {onOpenObservationModal && (
                 <button
                   type="button"
-                  className="slot-toggle-btn"
-                  style={{ color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
+                  className="fbtn"
+                  style={{
+                    margin: 0,
+                    padding: '5px 8px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    color: '#0369a1',
+                    background: '#f0f9ff',
+                    border: '1px solid #bae6fd',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenObservationModal({
                       dateStr: currentDs,
                       slotKey,
-                      slotStart: lc(x.a, f.y, f.m, f.d),
-                      slotEnd: lc(x.b, f.y, f.m, f.d),
+                      slotStart: startTimeStr,
+                      slotEnd: endTimeStr,
                       isCustom: x.isCustom,
                       customTitle: x.customTitle,
                     });
                   }}
                   title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
                 >
-                  📝 Relevé
+                  <span>📝</span>
+                  <span>Relevé</span>
                 </button>
               )}
             </div>
-          ) : (
-            onToggleSlotValidation && (
-              <button
-                type="button"
-                className={`slot-toggle-btn ${decision === 'valid' ? 'val-on' : 'val-off'}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleSlotValidation(f, x);
-                }}
-                title={decision === 'valid' ? 'Cliquer pour retirer' : 'Cliquer pour valider'}
-              >
-                {decision === 'valid' ? '✓ Validé' : '+ Valider'}
-              </button>
-            )
-          )}
+          ) : onToggleSlotValidation ? (
+            <button
+              type="button"
+              className={`slot-toggle-btn ${decision === 'valid' ? 'val-on' : 'val-off'}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSlotValidation(f, x);
+              }}
+            >
+              {decision === 'valid' ? '✓ Validé' : '+ Valider'}
+            </button>
+          ) : null}
+
+          <div
+            style={{
+              fontSize: '1.2rem',
+              fontWeight: 900,
+              letterSpacing: '-0.02em',
+              color:
+                decision === 'valid'
+                  ? '#14532d'
+                  : decision === 'rejected'
+                  ? '#991b1b'
+                  : '#0f172a',
+              textDecoration: decision === 'rejected' ? 'line-through' : 'none',
+              minWidth: '125px',
+              textAlign: 'right',
+            }}
+          >
+            {t}
+          </div>
         </div>
       </div>
     );

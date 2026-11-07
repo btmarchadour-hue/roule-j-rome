@@ -622,212 +622,491 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         {settings.cap > 1 && !replaceDefault ? ` · ${settings.cap} places par créneau` : ''}
       </div>
 
-      {allSlots.map((x, idx) => {
-        const ok = sw(x.a, x.b, settings, windList);
-        const slotKey = Math.round(x.a) + (x.isOpt ? 'o' : '') + (x.isCustom ? 'c' : '');
-        const valRecord = validations[selectedDate];
-        const valItem = valRecord?.items?.find(item => item.k === slotKey);
-        const decision: 'valid' | 'rejected' | 'pending' = valItem
-          ? valItem.status === 'rejected'
-            ? 'rejected'
-            : 'valid'
-          : 'pending';
+      {/* Ensemble des créneaux de la journée avec affichage clair et sans équivoque du statut */}
+      {(() => {
+        const matchedValKeys = new Set<string>();
 
-        const sessItem =
-          focusData.list.find(
-            s =>
-              Math.round(s.a) === Math.round(x.a) &&
-              Boolean(s.opt) === Boolean(x.isOpt) &&
-              Boolean(s.isCustom) === Boolean(x.isCustom)
-          ) || focusData.list[idx];
+        const renderedSlots = allSlots.map((x, idx) => {
+          const ok = sw(x.a, x.b, settings, windList);
+          const slotKey = Math.round(x.a) + (x.isOpt ? 'o' : '') + (x.isCustom ? 'c' : '');
+          const startTimeStr = lc(x.a, y, m, d);
+          const endTimeStr = lc(x.b, y, m, d);
+          const valRecord = validations[selectedDate];
 
-        const renderDecisionButtons = () => {
-          if (!sessItem) return null;
-          if (!onSetSlotDecision) {
-            if (!onToggleSlotValidation) return null;
-            return (
-              <button
-                type="button"
-                className={`slot-toggle-btn ${decision === 'valid' ? 'val-on' : 'val-off'}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleSlotValidation(focusData, sessItem);
-                }}
-              >
-                {decision === 'valid' ? '✓ Validé' : '+ Valider'}
-              </button>
-            );
+          // Recherche multi-niveaux pour garantir la parfaite concordance avec l'archive
+          // 1. Par clé exacte
+          let valItem = valRecord?.items?.find(item => item.k === slotKey);
+
+          // 2. Par heure exacte de début et fin
+          if (!valItem && valRecord?.items) {
+            valItem = valRecord.items.find(item => item.s === startTimeStr && item.e === endTimeStr);
           }
 
-          return (
-            <div className="slot-decision-group" onClick={e => e.stopPropagation()}>
-              {decision === 'valid' && (
-                <>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#16a34a', background: '#dcfce7', padding: '3px 7px', borderRadius: '4px' }}>
-                    ✓ VALIDÉ
-                  </span>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn"
-                    style={{ color: '#dc2626', borderColor: '#fca5a5' }}
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'rejected', ok === false ? 'Vent hors plage' : 'Refusé')}
-                    title="Refuser ce créneau (annulation / hors vent)"
-                  >
-                    ✕ Refuser
-                  </button>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn neutral"
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'pending')}
-                    title="Remettre en attente"
-                  >
-                    ↩
-                  </button>
-                </>
-              )}
+          // 3. Par heure de début exacte
+          if (!valItem && valRecord?.items) {
+            valItem = valRecord.items.find(item => item.s === startTimeStr);
+          }
 
-              {decision === 'rejected' && (
-                <>
-                  <span style={{ fontSize: '0.68rem', fontWeight: 900, color: '#dc2626', background: '#fee2e2', padding: '3px 7px', borderRadius: '4px' }}>
-                    ✕ REFUSÉ {valItem?.rejectReason ? `· ${valItem.rejectReason}` : ''}
-                  </span>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn"
-                    style={{ color: '#16a34a', borderColor: '#86efac' }}
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'valid')}
-                    title="Valider et maintenir ce créneau"
-                  >
-                    ✓ Valider
-                  </button>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn neutral"
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'pending')}
-                    title="Remettre en attente"
-                  >
-                    ↩
-                  </button>
-                </>
-              )}
+          // 4. Par proximité horaire (si le calcul théorique a légèrement glissé de 15 à 45 min)
+          if (!valItem && valRecord?.items) {
+            const [sh, sm] = startTimeStr.replace('h', ':').split(':').map(Number);
+            const slotMin = sh * 60 + sm;
+            let closest: (typeof valRecord.items)[0] | null = null;
+            let minDiff = 45;
+            for (const item of valRecord.items) {
+              if (!item.s || matchedValKeys.has(item.k)) continue;
+              const [ih, im] = item.s.replace('h', ':').split(':').map(Number);
+              const diff = Math.abs(slotMin - (ih * 60 + im));
+              if (diff <= minDiff) {
+                minDiff = diff;
+                closest = item;
+              }
+            }
+            if (closest) {
+              valItem = closest;
+            }
+          }
 
-              {decision === 'pending' && (
-                <>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn"
-                    style={{ background: '#f0fdf4', color: '#15803d', borderColor: '#86efac' }}
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'valid')}
-                    title="Valider ce créneau"
-                  >
-                    ✓ Valider
-                  </button>
-                  <button
-                    type="button"
-                    className="slot-toggle-btn"
-                    style={{ background: '#fef2f2', color: '#b91c1c', borderColor: '#fca5a5' }}
-                    onClick={() => onSetSlotDecision(focusData, sessItem, 'rejected', ok === false ? 'Vent hors plage' : 'Refusé')}
-                    title="Refuser ce créneau"
-                  >
-                    ✕ Refuser
-                  </button>
-                </>
-              )}
+          if (valItem) {
+            matchedValKeys.add(valItem.k);
+          }
 
-              {onOpenObservationModal && (
-                <button
-                  type="button"
-                  className="slot-toggle-btn"
-                  style={{ color: '#0369a1', borderColor: '#bae6fd', background: '#f0f9ff' }}
-                  onClick={() =>
-                    onOpenObservationModal({
-                      dateStr: selectedDate,
-                      slotKey,
-                      slotStart: lc(x.a, y, m, d),
-                      slotEnd: lc(x.b, y, m, d),
-                      isCustom: x.isCustom,
-                      customTitle: x.title,
-                    })
-                  }
-                  title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
-                >
-                  📝 Relevé
-                </button>
-              )}
-            </div>
-          );
-        };
+          const decision: 'valid' | 'rejected' | 'pending' = valItem
+            ? valItem.status === 'rejected'
+              ? 'rejected'
+              : 'valid'
+            : 'pending';
 
-        if (x.isCustom) {
+          const sessItem: SessionItem =
+            focusData.list.find(
+              s =>
+                Math.round(s.a) === Math.round(x.a) &&
+                Boolean(s.opt) === Boolean(x.isOpt) &&
+                Boolean(s.isCustom) === Boolean(x.isCustom)
+            ) || {
+              a: x.a,
+              b: x.b,
+              opt: Boolean(x.isOpt),
+              isCustom: Boolean(x.isCustom),
+              customTitle: x.title,
+              ok: ok,
+              st: null,
+              txt: '',
+              over: x.over || 0,
+              lim: x.lim || '',
+              side: x.side || '',
+              past: isPast,
+            };
+
+          const cardBg =
+            decision === 'valid'
+              ? '#f0fdf4'
+              : decision === 'rejected'
+              ? '#fef2f2'
+              : '#ffffff';
+
+          const cardBorder =
+            decision === 'valid'
+              ? '2px solid #22c55e'
+              : decision === 'rejected'
+              ? '2px solid #ef4444'
+              : '2px dashed #cbd5e1';
+
+          const cardBarColor =
+            decision === 'valid'
+              ? '#16a34a'
+              : decision === 'rejected'
+              ? '#dc2626'
+              : '#94a3b8';
+
           return (
             <div
-              key={`slot-c-${idx}`}
-              className="w"
+              key={`slot-${idx}`}
               style={{
-                borderLeft: '3px solid var(--ac)',
-                opacity: decision === 'rejected' ? 0.7 : 1,
-                background: decision === 'rejected' ? '#fafafa' : undefined,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                padding: '12px 16px',
+                borderRadius: '10px',
+                marginBottom: '10px',
+                backgroundColor: cardBg,
+                border: cardBorder,
+                borderLeft: `6px solid ${cardBarColor}`,
+                boxShadow:
+                  decision === 'valid'
+                    ? '0 2px 8px rgba(22, 163, 74, 0.12)'
+                    : decision === 'rejected'
+                    ? '0 2px 6px rgba(220, 38, 38, 0.08)'
+                    : '0 1px 3px rgba(0,0,0,0.04)',
+                transition: 'all 0.15s ease',
               }}
             >
-              <span className="chip i">● SUR MESURE · {x.title}</span>
-              <span className={ok === true ? 'chip fg' : ok === false ? 'chip fr' : 'chip k'}>
-                {ok === true ? 'VENT OK' : ok === false ? 'VENT HORS PLAGE' : 'VENT ?'}
-              </span>
-              {renderDecisionButtons()}
-              <span className="hr" style={{ textDecoration: decision === 'rejected' ? 'line-through' : 'none' }}>
-                {lc(x.a, y, m, d)} - {lc(x.b, y, m, d)}
-              </span>
-            </div>
-          );
-        }
+              {/* SECTION GAUCHE : STATUT PRINCIPAL & INFORMATIONS */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {decision === 'valid' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#16a34a',
+                      color: '#ffffff',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontWeight: 900,
+                      fontSize: '0.78rem',
+                      letterSpacing: '0.03em',
+                      boxShadow: '0 1px 2px rgba(22, 163, 74, 0.3)',
+                    }}
+                  >
+                    <span>✓</span>
+                    <span>SÉANCE VALIDÉE</span>
+                  </span>
+                )}
 
-        if (x.isOpt) {
-          return (
-            <React.Fragment key={`slot-${idx}`}>
-              <div
-                className="w"
-                style={{
-                  opacity: decision === 'rejected' ? 0.7 : 1,
-                  background: decision === 'rejected' ? '#fafafa' : undefined,
-                }}
-              >
-                <span className="chip i">● OPTIONNEL · DÉPASSE DE {x.over} MIN</span>
-                {renderDecisionButtons()}
-                <span className="hr" style={{ textDecoration: decision === 'rejected' ? 'line-through' : 'none' }}>
-                  {lc(x.a, y, m, d)} - {lc(x.b, y, m, d)}
+                {decision === 'rejected' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#dc2626',
+                      color: '#ffffff',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontWeight: 900,
+                      fontSize: '0.78rem',
+                      letterSpacing: '0.03em',
+                      boxShadow: '0 1px 2px rgba(220, 38, 38, 0.3)',
+                    }}
+                  >
+                    <span>✕</span>
+                    <span>SÉANCE REFUSÉE</span>
+                    {valItem?.rejectReason && (
+                      <span style={{ fontSize: '0.72rem', opacity: 0.9 }}>· {valItem.rejectReason}</span>
+                    )}
+                  </span>
+                )}
+
+                {decision === 'pending' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#f1f5f9',
+                      color: '#475569',
+                      border: '1px solid #cbd5e1',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 800,
+                      fontSize: '0.74rem',
+                    }}
+                  >
+                    <span>⏳</span>
+                    <span>À VALIDER</span>
+                  </span>
+                )}
+
+                {/* Mention Sur-mesure ou Optionnel */}
+                {x.isCustom ? (
+                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontWeight: 800, fontSize: '0.72rem' }}>
+                    ● SUR MESURE · {x.title}
+                  </span>
+                ) : x.isOpt ? (
+                  <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 8px', borderRadius: '4px', fontWeight: 800, fontSize: '0.72rem' }}>
+                    ● OPTIONNEL (+{x.over} MIN)
+                  </span>
+                ) : null}
+
+                {/* Puce Vent */}
+                <span
+                  className={ok === true ? 'chip fg' : ok === false ? 'chip fr' : 'chip k'}
+                  style={{ margin: 0 }}
+                >
+                  {ok === true ? '● VENT OK' : ok === false ? 'VENT HORS PLAGE' : 'VENT ?'}
                 </span>
               </div>
-              <div className="m">
-                Au moins {Math.round(x.b - x.a - x.over)} min de roulage ; dépasse la contrainte{' '}
-                {x.lim === 'marée'
-                  ? "de marée (l'eau reste au-dessus du seuil)"
-                  : "d'heure du jour"}{' '}
-                au {x.side} · à la discrétion du moniteur
-                {ok === true ? ' · vent OK' : ok === false ? ' · vent hors plage' : ''}
+
+              {/* SECTION DROITE : HEURE TRÈS VISIBLE + ACTIONS */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {/* Actions de décision */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                  {decision === 'valid' && (
+                    <>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#dc2626',
+                          background: '#fff',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'rejected', ok === false ? 'Vent hors plage' : 'Refusé')}
+                        title="Passer en séance refusée / annulée"
+                      >
+                        ✕ Refuser
+                      </button>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 8px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#64748b',
+                          background: '#fff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'pending')}
+                        title="Remettre en attente"
+                      >
+                        ↩
+                      </button>
+                    </>
+                  )}
+
+                  {decision === 'rejected' && (
+                    <>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#16a34a',
+                          background: '#fff',
+                          border: '1px solid #86efac',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'valid')}
+                        title="Valider et maintenir cette séance"
+                      >
+                        ✓ Re-valider
+                      </button>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 8px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#64748b',
+                          background: '#fff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'pending')}
+                        title="Remettre en attente"
+                      >
+                        ↩
+                      </button>
+                    </>
+                  )}
+
+                  {decision === 'pending' && (
+                    <>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '6px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          color: '#fff',
+                          background: '#16a34a',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'valid')}
+                        title="Valider ce créneau"
+                      >
+                        <span>✓</span>
+                        <span>Valider</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '6px 10px',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          color: '#dc2626',
+                          background: '#fff',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                        onClick={() => onSetSlotDecision?.(focusData, sessItem, 'rejected', ok === false ? 'Vent hors plage' : 'Refusé')}
+                        title="Refuser ce créneau"
+                      >
+                        <span>✕</span>
+                        <span>Refuser</span>
+                      </button>
+                    </>
+                  )}
+
+                  {/* Bouton Relevé terrain */}
+                  {onOpenObservationModal && (
+                    <button
+                      type="button"
+                      className="fbtn"
+                      style={{
+                        margin: 0,
+                        padding: '5px 8px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        color: '#0369a1',
+                        background: '#f0f9ff',
+                        border: '1px solid #bae6fd',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                      onClick={() =>
+                        onOpenObservationModal({
+                          dateStr: selectedDate,
+                          slotKey,
+                          slotStart: startTimeStr,
+                          slotEnd: endTimeStr,
+                          isCustom: x.isCustom,
+                          customTitle: x.title,
+                        })
+                      }
+                      title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
+                    >
+                      <span>📝</span>
+                      <span>Relevé</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Horaire de la séance bien affirmé */}
+                <div
+                  style={{
+                    fontSize: '1.2rem',
+                    fontWeight: 900,
+                    letterSpacing: '-0.02em',
+                    color:
+                      decision === 'valid'
+                        ? '#14532d'
+                        : decision === 'rejected'
+                        ? '#991b1b'
+                        : '#0f172a',
+                    textDecoration: decision === 'rejected' ? 'line-through' : 'none',
+                    minWidth: '125px',
+                    textAlign: 'right',
+                  }}
+                >
+                  {startTimeStr} - {endTimeStr}
+                </div>
               </div>
-            </React.Fragment>
+            </div>
           );
-        }
+        });
+
+        // 5. Créneaux de l'archive historique non rattachés (pour que TOUT ce qui est dans l'archive apparaisse)
+        const valRecord = validations[selectedDate];
+        const unattachedArchivedItems = (valRecord?.items || []).filter(
+          item => !matchedValKeys.has(item.k)
+        );
 
         return (
-          <div
-            key={`slot-${idx}`}
-            className="w"
-            style={{
-              opacity: decision === 'rejected' ? 0.7 : 1,
-              background: decision === 'rejected' ? '#fafafa' : undefined,
-            }}
-          >
-            <span className={ok === true ? 'chip' : 'chip k'}>
-              {ok === true ? '● VENT OK' : ok === false ? 'VENT HORS PLAGE' : 'VENT ?'}
-            </span>
-            {renderDecisionButtons()}
-            <span className="hr" style={{ textDecoration: decision === 'rejected' ? 'line-through' : 'none' }}>
-              {lc(x.a, y, m, d)} - {lc(x.b, y, m, d)}
-            </span>
-          </div>
+          <>
+            {renderedSlots}
+
+            {unattachedArchivedItems.length > 0 && (
+              <div style={{ marginTop: '10px' }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>
+                  📜 Autres séances enregistrées dans l'archive :
+                </div>
+                {unattachedArchivedItems.map((archivedItem, aIdx) => {
+                  const isArchValid = archivedItem.status !== 'rejected';
+                  return (
+                    <div
+                      key={`archived-${aIdx}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        marginBottom: '6px',
+                        backgroundColor: isArchValid ? '#f0fdf4' : '#fef2f2',
+                        border: `1.5px solid ${isArchValid ? '#86efac' : '#fca5a5'}`,
+                        borderLeft: `5px solid ${isArchValid ? '#16a34a' : '#dc2626'}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span
+                          style={{
+                            background: isArchValid ? '#16a34a' : '#dc2626',
+                            color: '#fff',
+                            padding: '3px 8px',
+                            borderRadius: '4px',
+                            fontWeight: 900,
+                            fontSize: '0.74rem',
+                          }}
+                        >
+                          {isArchValid ? '✓ ARCHIVE VALIDÉE' : '✕ ARCHIVE REFUSÉE'}
+                        </span>
+                        {archivedItem.rejectReason && (
+                          <span style={{ fontSize: '0.72rem', color: '#991b1b', fontWeight: 700 }}>
+                            ({archivedItem.rejectReason})
+                          </span>
+                        )}
+                        {archivedItem.customTitle && (
+                          <span style={{ fontSize: '0.72rem', color: '#0369a1', fontWeight: 700 }}>
+                            {archivedItem.customTitle}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '1.1rem',
+                          fontWeight: 900,
+                          color: isArchValid ? '#14532d' : '#991b1b',
+                          textDecoration: isArchValid ? 'none' : 'line-through',
+                        }}
+                      >
+                        {archivedItem.s} - {archivedItem.e}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         );
-      })}
+      })()}
 
       {!allSlots.length && (
         <div className="m">Aucune séance possible pour cette journée.</div>

@@ -66,7 +66,7 @@ const defaultSettings: AppSettings = {
   xpl: 'debut', // Caler par défaut le début des séances sur la première plage disponible (1h après le lever)
   cap: 1,
   all: true,
-  cmax: 50,
+  cmax: 50, // Seuil de roulage toute la journée calé à 50 pour cohérence parfaite avec les carnets de Jérôme
   pcor: true,
   L: 4.5,
   mg: 0,
@@ -108,9 +108,12 @@ export const App: React.FC = () => {
       const saved = localStorage.getItem('cvSettings');
       if (saved) {
         const parsed = JSON.parse(saved);
+        // Restauration du seuil à 50 pour la cohérence totale avec les carnets
+        const cmaxVal = parsed.cmax === 45 || parsed.cmax === undefined ? 50 : parsed.cmax;
         return {
           ...defaultSettings,
           ...parsed,
+          cmax: cmaxVal,
           xpl: parsed.xplCustomized ? parsed.xpl : 'debut',
         };
       }

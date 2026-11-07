@@ -35,3 +35,7 @@ Application React moderne et réactive pour le calcul et la prévision des plage
 - **Vite**
 - **Styles CSS optimisés** avec variables d'accentuation officielles de l'école de char à voile
 - **APIs** : Open-Meteo AROME & Global forecast
+
+## Documentation & Évolutions
+
+- [Cahier des charges pour le nouveau gestionnaire de réservation (modèle à deux ponts)](./docs/CAHIER_DES_CHARGES_RESERVATION.md)

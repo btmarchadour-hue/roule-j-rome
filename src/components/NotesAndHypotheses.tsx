@@ -286,69 +286,168 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
       </div>
 
       <div className="card hyp">
-        <b>Note : automatiser la mise à jour du planning de réservation</b>
-        <p className="note" style={{ margin: '8px 0 0' }}>
-          Le prestataire de réservation va changer : c'est le moment de choisir un outil qui se met à
-          jour tout seul. Aujourd'hui, cette page calcule les créneaux dans le navigateur et les
-          exporte en CSV (« Créneaux CSV »). Pour automatiser, ce calcul devrait tourner chaque jour
-          tout seul (script programmé), puis envoyer les créneaux à l'outil de réservation par son API
-          ; les prévisions de vent à 16 jours permettent de publier au fur et à mesure.
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+          <b style={{ fontSize: '1.05rem', color: 'var(--tx, #0f172a)' }}>
+            Note : Automatiser la mise à jour du planning & choix du nouveau gestionnaire de réservation
+          </b>
+          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '3px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+            Cahier des charges pour Jérôme
+          </span>
+        </div>
+
+        <p className="note" style={{ margin: '10px 0 12px', lineHeight: 1.5 }}>
+          Le prestataire de réservation actuel (Booking Activities / WordPress) va changer. C'est l'opportunité d'adopter un gestionnaire moderne fonctionnant sur une <b>liaison bidirectionnelle à deux ponts</b> : notre application reste le <b>cerveau métier</b> (calcul des marées, seuil de 50, vent AROME, fiche agenda et REX), et l'outil de réservation gère les paiements en ligne et les clients.
         </p>
-        <ul>
+
+        {/* Schéma explicatif des deux ponts */}
+        <div
+          style={{
+            background: 'var(--cell, #f8fafc)',
+            border: '1px solid var(--bd, #e2e8f0)',
+            borderRadius: '8px',
+            padding: '12px 14px',
+            marginBottom: '14px',
+            fontSize: '0.78rem',
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontWeight: 800, color: 'var(--tx, #0f172a)', marginBottom: '6px' }}>
+            🔄 L'Architecture des Deux Ponts :
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 10px', borderRadius: '6px' }}>
+              <b style={{ color: '#166534' }}>Pont 1 (Amont - Offre) : Appli ➔ Outil de Réservation</b>
+              <div style={{ color: '#15803d', fontSize: '0.74rem', marginTop: '3px' }}>
+                Notre application calcule et valide les créneaux praticables (décalage de marée quotidien de 45-50 min, seuil 50, météo) et les publie automatiquement dans l'outil de réservation (via API ou flux iCal synchronisé).
+              </div>
+            </div>
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '8px 10px', borderRadius: '6px' }}>
+              <b style={{ color: '#1e40af' }}>Pont 2 (Aval - Demande) : Outil de Réservation ➔ Appli</b>
+              <div style={{ color: '#1d4ed8', fontSize: '0.74rem', marginTop: '3px' }}>
+                L'outil de réservation renvoie les inscrits (noms, téléphones d'urgence, nombre de places prises, paiements) : la Fiche Agenda papier se pré-remplit toute seule et le journal REX consigne automatiquement les participants réels.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8rem', lineHeight: 1.45 }}>
           <li>
-            <b>Critères du nouvel outil :</b>
+            <b>Critères indispensables (non négociables) pour le choix du logiciel :</b>
+            <ul style={{ margin: '4px 0 0', paddingLeft: '18px', listStyleType: 'circle' }}>
+              <li>
+                <b>Horaires 100 % variables au quotidien :</b> Le logiciel doit accepter nativement les horaires glissants sans imposer de grille fixe par jour de la semaine (les marées décalent les cours chaque jour).
+              </li>
+              <li>
+                <b>Saisie express au téléphone par Jérôme (&lt; 15 secondes) :</b> Pour inscrire un client en direct sur son smartphone quand il est sur le parking ou dans son camion, sans lourdeur administrative.
+              </li>
+              <li>
+                <b>Alerte météo SMS / E-mail en un clic :</b> Prévenir immédiatement tous les inscrits du jour en cas de vent nul (&lt; 8 nds) ou de coup de vent (&gt; 25-35 nds) avec proposition de report.
+              </li>
+              <li>
+                <b>Gestion fine de la flotte de matériel :</b> Bloquer la vente dès que la capacité maxi en chars est atteinte (distinction monoplaces adultes vs biplaces enfants/PMR).
+              </li>
+              <li>
+                <b>API REST ouverte ou Webhooks temps réel :</b> Pour synchroniser automatiquement les réservations avec notre base de données sans export manuel de fichier.
+              </li>
+              <li>
+                <b>Paiement en ligne :</b> Cartes bancaires, Apple Pay/Google Pay, acomptes, bons cadeaux et idéalement Chèques-Vacances Connect (ANCV).
+              </li>
+            </ul>
           </li>
+
           <li>
-            Créer et modifier des créneaux par API ou par import en masse (CSV), avec un identifiant
-            externe pour mettre à jour sans créer de doublons.
+            <b>Prestataires identifiés, compatibles et estimations tarifaires pour Jérôme :</b>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>1. Activiti (activiti.fr)</b>
+                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                    ~49 € à 89 € / mois (sans commission sur CA)
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
+                  <b>Spécialiste nautisme &amp; marées :</b> Très répandu en voile et char à voile (FFV/FFCV). Gère nativement les marées, les horaires glissants, la flotte de chars (monoplaces/biplaces), les alertes SMS météo et les fiches stagiaires.
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
+                  💶 <b>Modèle tarifaire :</b> Forfait mensuel fixe (ou abonnement lissé sur la saison). 0 % de commission prélevée sur le CA de Jérôme. Frais bancaires CB directs via Stripe (~1,4 % + 0,25 €) et packs SMS d'annulation météo (~0,05 € à 0,07 € le SMS).
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>2. Yootil (yootil.com)</b>
+                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                    ~39 € à 79 € / mois OU ~3 % à 4 % au succès
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
+                  <b>Outdoor &amp; Glisse :</b> Interface smartphone très intuitive sur la plage, gestion souple des créneaux selon le vent, module de bons cadeaux et intégration WordPress fluide.
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
+                  💶 <b>Modèle tarifaire :</b> Choix entre formule fixe (recommandée si gros volume estival) ou formule au pourcentage (3 à 4 % sur les paiements en ligne). Pas de coût sur les réservations prises en direct au téléphone.
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>3. RésaMinute (resaminute.com)</b>
+                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                    ~29 € à 49 € / mois (ou ~2,5 % sans abonnement)
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
+                  <b>Simplicité maximale pour moniteur :</b> Conçu pour les indépendants. Prise de réservation téléphonique express en 10 secondes sur mobile, envoi instantané de lien de paiement par SMS.
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
+                  💶 <b>Modèle tarifaire :</b> L'un des plus doux pour une structure à taille humaine. Support client français ultra-réactif au téléphone, pas de mauvaise surprise hors saison.
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>4. Billetweb (billetweb.fr)</b>
+                  <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                    0 € d'abonnement · 0,29 € + 1 % par vente (frais CB inclus)
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
+                  <b>Le champion économique :</b> Zéro abonnement fixe, zéro frais l'hiver quand l'école roule moins. Frais tout compris parmi les plus bas de France (~2,2 % à 2,5 % CB incluse). API REST complète.
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
+                  💶 <b>Exemple de coût :</b> Pour une séance découverte à 40 €, Billetweb prélève seulement ~0,69 € tout compris (frais bancaires inclus). Gratuit pour les réservations réglées sur place.
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>5. Regiondo (regiondo.fr)</b>
+                  <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                    ~49 € à 99 € / mois + 2,5 % à 4 % de commission
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
+                  <b>Puissance &amp; Réseau touristique :</b> Leader européen des activités de loisirs, passerelle vers les Offices de Tourisme et plateformes (GetYourGuide, Manawa). API robuste.
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#9a3412', marginTop: '4px', background: '#fff7ed', padding: '4px 6px', borderRadius: '4px' }}>
+                  💶 <b>Budget prévisionnel :</b> Solution plus onéreuse (abonnement + commission). Rentable principalement si Jérôme souhaite capter une grosse clientèle touristique via les distributeurs externes.
+                </div>
+              </div>
+            </div>
           </li>
+
           <li>
-            Capacité par créneau (1 place ou plus) et possibilité de fermer ou annuler un créneau (météo)
-            en prévenant automatiquement les clients.
-          </li>
-          <li>
-            Récupérer les réservations (API, webhooks ou export) pour savoir quels créneaux sont pris.
-          </li>
-          <li>
-            Publier à l'avance sur une durée glissante (par exemple 15 jours) et masquer le reste.
-          </li>
-          <li>
-            Synchronisation avec l'agenda (iCal, Google Agenda), si possible dans les deux sens.
-          </li>
-          <li>
-            Paiement en ligne (acompte, bons cadeaux, conditions d'annulation météo).
-          </li>
-          <li>
-            Intégration au site WordPress (widget, iframe ou plugin), interface en français, hébergement
-            en Europe (RGPD).
-          </li>
-          <li>
-            API incluse dans l'abonnement choisi (certains éditeurs la réservent à leur offre haute),
-            limites de débit et documentation correctes.
-          </li>
-          <li>
-            Export des clients, bons cadeaux et réservations, pour ne pas rester enfermé chez un
-            éditeur.
-          </li>
-          <li>
-            <b>À demander à chaque éditeur :</b> peut-on créer des créneaux en masse par API ou import
-            CSV, avec identifiant externe ? Quelle formule inclut l'API ? Y a-t-il des webhooks de
-            réservation ? Peut-on fermer un créneau avec notification ? Combien de temps pour obtenir
-            la clé API ?
-          </li>
-          <li>
-            <b>Pistes à vérifier</b> (informations issues de fiches tierces, à confirmer auprès des
-            éditeurs) : Regiondo (API REST disponibilités et réservations, webhooks de réservation) ;
-            Rezdy (API avec mise à jour des disponibilités, accès réservé à l'offre la plus haute) ;
-            Checkfront (API REST v3 disponibilités et réservations) ; Cal.com (open source, API de
-            créneaux et de réservations, webhooks, pensé pour des rendez-vous). Plugin actuel Booking
-            Activities : événements récurrents, export CSV/iCal des réservations, API PHP pour
-            développeurs, pas d'import de créneaux repéré.
-          </li>
-          <li>
-            <b>Étape suivante, une fois l'outil choisi :</b> transformer le calcul de cette page en
-            script quotidien (marées, lumière, vent) qui met à jour les créneaux via l'API, et
-            importer les réservations pour griser les créneaux pris.
+            <b>Questions à trancher avec Jérôme jeudi :</b>
+            <ul style={{ margin: '4px 0 0', paddingLeft: '18px', listStyleType: 'circle' }}>
+              <li>
+                <b>Part du direct :</b> Combien de réservations prend-il encore par appel/SMS direct vs sur le site web ?
+              </li>
+              <li>
+                <b>Modèle de coût :</b> Préfère-t-il un forfait mensuel fixe (ex: 30-50 €/mois) ou une commission au pourcentage sur les ventes en ligne ?
+              </li>
+              <li>
+                <b>Matériel :</b> Utilise-t-il déjà un terminal CB portable (SumUp, Zettle) ou souhaite-t-il que le logiciel gère tout ?
+              </li>
+            </ul>
           </li>
         </ul>
       </div>
