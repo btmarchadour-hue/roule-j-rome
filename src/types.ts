@@ -273,3 +273,64 @@ export interface ActiveUserSession {
   loginTime: number;
 }
 
+// -----------------------------------------------------------------------------
+// MODULE 7 : ESPACE D'ÉCHANGE BEN ↔ JÉRÔME (CARNET DE LIAISON PARTAGÉ)
+// -----------------------------------------------------------------------------
+
+export type TeamNoteCategory = 'terrain' | 'technique' | 'organisation' | 'autre';
+
+export interface TeamNote {
+  id: string;
+  author: string; // 'Jérôme' | 'Benoît'
+  category: TeamNoteCategory;
+  content: string;
+  createdAt: number;
+  isResolved?: boolean;
+  resolvedAt?: number;
+  resolvedBy?: string;
+}
+
+// -----------------------------------------------------------------------------
+// MODULE ÉTALONNAGE GPS LIMITE BASSE DE ROULAGE (OBSERVATOIRE HYDRODYNAMIQUE)
+// -----------------------------------------------------------------------------
+
+export interface GpsWaterlineLog {
+  id: string;                  // Identifiant unique (ex: "gps-1794246800000")
+  timestamp: number;           // Millisecondes UTC au moment du clic
+  dateStr: string;             // YYYY-MM-DD
+  timeStr: string;             // HH:MM (ex: "14:27")
+  author: string;              // "Jérôme" | "Benoît"
+
+  // Coordonnées GPS réelles du smartphone
+  latitude: number;            // Ex: 48.18731
+  longitude: number;           // Ex: -4.37542
+  altitude?: number | null;    // Altitude en mètres si disponible
+  accuracyM: number;           // Précision en mètres (ex: 3.5 m)
+  accuracyQuality: 'high' | 'medium' | 'low'; // high (<= 5m), medium (6-15m), low (> 15m)
+
+  // Météo instantanée capturée au moment du relevé
+  weatherSnapshot: {
+    windSpeedKts: number;      // Vitesse vent moyen (nds)
+    windGustKts: number;       // Rafales (nds)
+    windDirectionDeg: number;  // Direction en degrés (0-360)
+    windDirectionComp: string; // Direction boussole (ex: "OSO")
+    pressureHpa: number;       // Pression atmosphérique (hPa)
+    waveHeightM?: number;      // Hauteur de houle (m)
+    wavePeriodS?: number;      // Période de houle (s)
+  };
+
+  // Modèles hydrodynamiques à cet instant T
+  theoreticalWaterHeightM: number; // Modèle SHOM pur sans correction barométrique/vent (m)
+  correctedWaterHeightM: number;   // Modèle corrigé école (avec surcote barométrique +1cm/hPa et vent) (m)
+  schoolThresholdM: number;        // Seuil de roulage de l'école (ex: 4.50 m)
+
+  // Écarts mesurés vs modèles
+  rawSurcoteCm: number;            // Surcote constatée vs modèle brut SHOM (cm)
+  correctedSurcoteCm: number;      // Écart résiduel vs modèle corrigé école (cm)
+
+  // Notes de terrain
+  beachState?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
+  note?: string;
+  createdAt: number;
+}
+

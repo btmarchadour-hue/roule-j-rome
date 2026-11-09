@@ -11,6 +11,7 @@ interface CustomSlotsManagerProps {
   defaultSlots?: { start: string; end: string; title?: string }[];
   isOpenControlled?: boolean;
   onToggleOpen?: () => void;
+  isReadOnly?: boolean;
 }
 
 export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
@@ -18,11 +19,16 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   settings,
   windList,
   customSlotsMap,
-  onUpdateCustomSlots,
+  onUpdateCustomSlots: rawOnUpdateCustomSlots,
   defaultSlots = [],
   isOpenControlled,
   onToggleOpen,
+  isReadOnly = false,
 }) => {
+  const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
+    if (isReadOnly) return;
+    rawOnUpdateCustomSlots(ds, rep, slots);
+  };
   const [internalIsOpen, setInternalIsOpen] = useState<boolean>(false);
   const isOpen = isOpenControlled !== undefined ? isOpenControlled : internalIsOpen;
   const toggleOpen = onToggleOpen || (() => setInternalIsOpen(!internalIsOpen));
@@ -317,40 +323,42 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(cs)}
-                          style={{
-                            background: '#f1f5f9',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '4px',
-                            padding: '3px 8px',
-                            fontSize: '0.70rem',
-                            fontWeight: 700,
-                            color: '#334155',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✏️ Modifier
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteSlot(cs.id)}
-                          style={{
-                            background: '#fee2e2',
-                            border: '1px solid #fca5a5',
-                            color: '#b91c1c',
-                            borderRadius: '4px',
-                            padding: '3px 8px',
-                            fontSize: '0.70rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✕ Supprimer
-                        </button>
-                      </div>
+                      {!isReadOnly && (
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(cs)}
+                            style={{
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '4px',
+                              padding: '3px 8px',
+                              fontSize: '0.70rem',
+                              fontWeight: 700,
+                              color: '#334155',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✏️ Modifier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSlot(cs.id)}
+                            style={{
+                              background: '#fee2e2',
+                              border: '1px solid #fca5a5',
+                              color: '#b91c1c',
+                              borderRadius: '4px',
+                              padding: '3px 8px',
+                              fontSize: '0.70rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✕ Supprimer
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -358,7 +366,26 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
             </div>
           )}
 
-          {/* Form to add or edit a slot */}
+          {/* Form to add or edit a slot or read-only indicator */}
+          {isReadOnly ? (
+            <div
+              style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                color: '#92400e',
+                fontSize: '0.74rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span>🔒</span>
+              <span>Mode Contrôle actif (Benoît) : La création et la modification de créneaux sur mesure sont verrouillées en lecture seule.</span>
+            </div>
+          ) : (
           <form
             onSubmit={handleSaveSlot}
             style={{
@@ -470,6 +497,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
               )}
             </div>
           </form>
+          )}
         </div>
       )}
     </div>

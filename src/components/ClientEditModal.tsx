@@ -9,6 +9,7 @@ interface ClientEditModalProps {
   onClose: () => void;
   onSaved?: (client: ClientProfile) => void;
   onDeleted?: (clientId: string) => void;
+  isReadOnly?: boolean;
 }
 
 export const ClientEditModal: React.FC<ClientEditModalProps> = ({
@@ -17,6 +18,7 @@ export const ClientEditModal: React.FC<ClientEditModalProps> = ({
   onClose,
   onSaved,
   onDeleted,
+  isReadOnly = false,
 }) => {
   const [lastName, setLastName] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -366,7 +368,7 @@ export const ClientEditModal: React.FC<ClientEditModalProps> = ({
               justifyContent: 'space-between',
             }}
           >
-            {client?.id ? (
+            {!isReadOnly && client?.id ? (
               <button
                 type="button"
                 className="fbtn"
@@ -378,18 +380,25 @@ export const ClientEditModal: React.FC<ClientEditModalProps> = ({
               </button>
             ) : <div />}
 
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {isReadOnly && (
+                <span style={{ fontSize: '0.72rem', color: '#92400e', background: '#fef3c7', padding: '4px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                  🔒 Mode Contrôle (Lecture seule)
+                </span>
+              )}
               <button type="button" className="fbtn" onClick={onClose} disabled={isSaving}>
-                Annuler
+                {isReadOnly ? 'Fermer' : 'Annuler'}
               </button>
-              <button
-                type="submit"
-                className="fbtn fbtn-primary"
-                style={{ background: '#16a34a', color: '#fff', fontWeight: 800 }}
-                disabled={isSaving}
-              >
-                {isSaving ? 'Enregistrement...' : '✓ Enregistrer le Client'}
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="submit"
+                  className="fbtn fbtn-primary"
+                  style={{ background: '#16a34a', color: '#fff', fontWeight: 800 }}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Enregistrement...' : '✓ Enregistrer le Client'}
+                </button>
+              )}
             </div>
           </div>
         </form>

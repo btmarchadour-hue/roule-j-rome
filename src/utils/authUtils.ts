@@ -15,7 +15,7 @@ export async function verifyPassword(plainText: string, expectedHash: string): P
   return hash.toLowerCase() === expectedHash.toLowerCase();
 }
 
-// Profils par défaut de l'école de char à voile (Jérôme & Benoît)
+// Profils par défaut de l'école de char à voile (Jérôme, Benoît, et Moniteur d'été)
 export const DEFAULT_USERS: AppUser[] = [
   {
     id: 'usr_jerome',
@@ -31,9 +31,20 @@ export const DEFAULT_USERS: AppUser[] = [
   {
     id: 'usr_benoit',
     username: 'Benoît',
-    displayName: 'Benoît (Supervision & Contrôle)',
+    displayName: 'Benoît (Administrateur & DevOps)',
     role: 'admin',
     passwordHash: 'adce9053b3b6b52dc4a7bb0b963351c77cb09477d1ee87bdc4fdd8ff8c3d04d3', // mdp: Maya2103
+    isReadOnly: false,
+    isActive: true,
+    createdAt: 1730000000000,
+    updatedAt: 1730000000000,
+  },
+  {
+    id: 'usr_moniteur',
+    username: 'Moniteur',
+    displayName: 'Moniteur École (Saison)',
+    role: 'moniteur',
+    passwordHash: '96f82c7d491f5cce1185b7ac8c3bdfbeb2267c3fa6236136975617c383e17c24', // mdp: moniteur
     isReadOnly: true,
     isActive: true,
     createdAt: 1730000000000,
@@ -89,4 +100,14 @@ export function clearActiveUser(): void {
 export function isCurrentUserReadOnly(): boolean {
   const current = getActiveUser();
   return Boolean(current?.isReadOnly);
+}
+
+export function isCurrentUserAdmin(): boolean {
+  const current = getActiveUser();
+  return current?.role === 'admin' && !current?.isReadOnly;
+}
+
+export function canCurrentUserEditSettings(): boolean {
+  const current = getActiveUser();
+  return current?.role === 'admin' && !current?.isReadOnly;
 }

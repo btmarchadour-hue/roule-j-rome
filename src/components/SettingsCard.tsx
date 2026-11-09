@@ -1,21 +1,41 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppSettings } from '../types';
 
 interface SettingsCardProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
+  onResetToDefaults: () => void;
+  canUndoReset?: boolean;
+  onUndoReset?: () => void;
   windStatusText: string;
   onRefreshWind: () => void;
   isLoadingWind: boolean;
+  isReadOnly?: boolean;
+  userRole?: 'admin' | 'moniteur';
+  userName?: string;
 }
 
 export const SettingsCard: React.FC<SettingsCardProps> = ({
   settings,
-  onUpdateSettings,
+  onUpdateSettings: rawOnUpdateSettings,
+  onResetToDefaults,
+  canUndoReset = false,
+  onUndoReset,
   windStatusText,
   onRefreshWind,
   isLoadingWind,
+  isReadOnly = false,
+  userRole = 'admin',
+  userName = 'Jérôme',
 }) => {
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const isLocked = isReadOnly || userRole === 'moniteur';
+
+  const onUpdateSettings = (newSettings: Partial<AppSettings>) => {
+    if (isLocked) return;
+    rawOnUpdateSettings(newSettings);
+  };
+
   const parseNum = (val: string, fallback: number) => {
     const n = parseFloat(val.replace(',', '.'));
     return isNaN(n) ? fallback : n;
@@ -23,16 +43,104 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
 
   return (
     <>
-      <div className="card ctl nop">
-        <b style={{ gridColumn: '1/-1', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-          Séances
-        </b>
+      <div className="card ctl nop" style={{ opacity: isLocked ? 0.88 : 1 }}>
+        {isReadOnly || userRole === 'moniteur' ? (
+          <div
+            style={{
+              gridColumn: '1/-1',
+              background: '#f8fafc',
+              border: '1.5px solid #cbd5e1',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              color: '#334155',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              fontWeight: 600,
+              marginBottom: '6px',
+            }}
+          >
+            <span style={{ fontSize: '1.2rem' }}>🔒</span>
+            <div>
+              <strong style={{ color: '#0f172a' }}>Mode Moniteur (Consultation seule)</strong>
+              <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 400, marginTop: '2px' }}>
+                Les paramètres de l'école sont consultables pour votre travail sur la plage mais verrouillés en écriture pour préserver la configuration opérationnelle.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              gridColumn: '1/-1',
+              background: '#f0fdf4',
+              border: '1.5px solid #86efac',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              color: '#166534',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              fontWeight: 600,
+              marginBottom: '6px',
+            }}
+          >
+            <span style={{ fontSize: '1.2rem' }}>👑</span>
+            <div>
+              <strong style={{ color: '#14532d' }}>Mode Administrateur ({userName})</strong>
+              <div style={{ fontSize: '0.74rem', color: '#15803d', fontWeight: 400, marginTop: '2px' }}>
+                Modifications en direct et réinitialisation autorisées pour l'école.
+              </div>
+            </div>
+          </div>
+        )}
 
-        <label>
+        <div
+          style={{
+            gridColumn: '1/-1',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '8px',
+            marginBottom: '2px',
+          }}
+        >
+          <b style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>
+            Séances
+          </b>
+
+          <span
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              color: '#0369a1',
+              background: '#e0f2fe',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              border: '1px solid #bae6fd',
+            }}
+            title="Toute modification apportée ici par un administrateur est transmise instantanément à tous les moniteurs connectés sans bouton Enregistrer"
+          >
+            <span>🔄</span>
+            <span>Synchro automatique Cloud en direct</span>
+          </span>
+        </div>
+
+        <div style={{ gridColumn: '1/-1', fontSize: '0.70rem', color: 'var(--mu, #64748b)', marginTop: '-4px', marginBottom: '8px' }}>
+          Les réglages modifiés ici s&apos;enregistrent automatiquement dans le Cloud et se propagent en temps réel sur les téléphones et ordinateurs de toute l&apos;équipe.
+        </div>
+
+        <label style={{ opacity: isLocked ? 0.8 : 1 }}>
           Durée d'une séance (min)
           <input
             type="text"
             inputMode="decimal"
+            disabled={isReadOnly}
             value={settings.sdur}
             onChange={e => onUpdateSettings({ sdur: parseNum(e.target.value, 60) })}
           />
@@ -183,7 +291,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
         </label>
       </div>
 
-      <div className="card ctl nop">
+      <div className="card ctl nop" style={{ opacity: isLocked ? 0.88 : 1 }}>
         <label>
           Seuil (m)
           <input
@@ -293,25 +401,316 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           {isLoadingWind ? 'Chargement…' : 'Actualiser le vent'}
         </button>
 
-        <a
-          className="note"
-          href="https://www.windguru.cz/48456"
-          target="_blank"
-          rel="noopener noreferrer"
+        {/* MODULE 6 : BALISE WINDS UP SPOT 66 & OBSERVATIONS */}
+        <div
+          style={{
+            gridColumn: '1/-1',
+            background: 'var(--cbg, #f8fafc)',
+            border: '1.5px solid #e2e8f0',
+            borderRadius: '10px',
+            padding: '12px 14px',
+            marginTop: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
         >
-          Windguru Pentrez
-        </a>
-        <a
-          className="note"
-          href="https://www.winds-up.com/spot/66"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Winds Up Pentrez (balise de la plage, en panne)
-        </a>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '1.2rem' }}>📡</span>
+              <div>
+                <b style={{ fontSize: '0.85rem', color: 'var(--tx, #0f172a)' }}>
+                  Balise Winds Up Pentrez (Spot 66)
+                </b>
+                <span
+                  style={{
+                    marginLeft: '8px',
+                    fontSize: '0.70rem',
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: '5px',
+                    background: '#fef3c7',
+                    color: '#92400e',
+                    border: '1px solid #fde68a',
+                  }}
+                >
+                  🛰️ Relais AROME HD actif
+                </span>
+              </div>
+            </div>
 
-        {windStatusText && <span className="note">{windStatusText}</span>}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <a
+                href="https://www.winds-up.com/spot/66"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 10px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                }}
+              >
+                <span>Winds Up Spot 66 ↗</span>
+              </a>
+              <a
+                href="https://www.windguru.cz/48456"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '5px 10px',
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                }}
+              >
+                <span>Windguru Pentrez ↗</span>
+              </a>
+            </div>
+          </div>
+
+          <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', lineHeight: 1.45 }}>
+            {windStatusText ? (
+              <span><strong>Flux météo en cours :</strong> {windStatusText}</span>
+            ) : (
+              <span>Modèle Météo-France AROME HD (maille 1,3 km) interpolé sur la plage de Lestrevet.</span>
+            )}
+          </div>
+        </div>
+
+        {/* MODULE 2 : ZONE RÉINITIALISATION AUX VALEURS PAR DÉFAUT */}
+        <div
+          style={{
+            gridColumn: '1/-1',
+            marginTop: '16px',
+            paddingTop: '16px',
+            borderTop: '1px solid #e2e8f0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}
+          >
+            <div>
+              <b style={{ fontSize: '0.86rem', color: '#334155', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                ⚙️ Réinitialisation
+              </b>
+              <p style={{ margin: '3px 0 0 0', fontSize: '0.74rem', color: '#64748b' }}>
+                Remet les 24 réglages (séances, seuils, marées, météo) aux valeurs d'origine de l'école.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowConfirmModal(true)}
+              disabled={isReadOnly}
+              style={{
+                padding: '8px 14px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                borderRadius: '6px',
+                border: '1.5px solid #cbd5e1',
+                background: isReadOnly ? '#f1f5f9' : '#fff',
+                color: isReadOnly ? '#94a3b8' : '#b91c1c',
+                cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: isReadOnly ? 'none' : '0 1px 2px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s ease',
+              }}
+              title={
+                isReadOnly
+                  ? 'Action réservée aux administrateurs (verrouillée pour les moniteurs)'
+                  : 'Remettre tous les réglages par défaut'
+              }
+            >
+              <span>{isReadOnly ? '🔒' : '↺'}</span>
+              <span>Revenir aux paramètres par défaut</span>
+            </button>
+          </div>
+
+          {canUndoReset && onUndoReset && (
+            <div
+              style={{
+                background: '#ecfdf5',
+                border: '1.5px solid #6ee7b7',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                boxShadow: '0 1px 3px rgba(16, 185, 129, 0.15)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: '#065f46' }}>
+                <span style={{ fontSize: '1rem' }}>✓</span>
+                <span>
+                  <strong>Tous les réglages ont été réinitialisés aux valeurs d'usine.</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onUndoReset}
+                style={{
+                  background: '#047857',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '6px 14px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                }}
+              >
+                <span>↩</span>
+                <span>Annuler / Restaurer mes réglages</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* MODALE DE CONFIRMATION AVANT RÉINITIALISATION */}
+      {showConfirmModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px',
+          }}
+          onClick={() => setShowConfirmModal(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '12px',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+              border: '1px solid #e2e8f0',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
+              <div
+                style={{
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.3rem',
+                  flexShrink: 0,
+                }}
+              >
+                ⚠️
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>
+                  Réinitialiser tous les paramètres ?
+                </h3>
+                <p style={{ margin: '8px 0 0 0', fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>
+                  Cette action va remettre <strong>l'ensemble des 24 réglages</strong> (durée des séances à 60 min, pauses à 15 min, seuil d'eau à 4m50, vent, horaires) à leurs valeurs d'origine de l'école.
+                </p>
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '8px 12px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    color: '#991b1b',
+                    fontWeight: 600,
+                  }}
+                >
+                  📢 Impact immédiat : la nouvelle configuration sera transmise instantanément à tous les moniteurs connectés.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#334155',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  onResetToDefaults();
+                }}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(220, 38, 38, 0.25)',
+                }}
+              >
+                Oui, réinitialiser tout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

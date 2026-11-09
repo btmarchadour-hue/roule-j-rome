@@ -61,6 +61,7 @@ interface DayDetailPanelProps {
     isCustom?: boolean;
     customTitle?: string;
   }) => void;
+  isReadOnly?: boolean;
 }
 
 export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
@@ -72,15 +73,24 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   last,
   windList,
   customSlotsMap,
-  onUpdateCustomSlots,
+  onUpdateCustomSlots: rawOnUpdateCustomSlots,
   validations = {},
-  onValidateDay,
-  onClearValidation,
-  onToggleSlotValidation,
-  onSetSlotDecision,
+  onValidateDay: rawOnValidateDay,
+  onClearValidation: rawOnClearValidation,
+  onToggleSlotValidation: rawOnToggleSlotValidation,
+  onSetSlotDecision: rawOnSetSlotDecision,
   onOpenPrintAgenda,
   onOpenObservationModal,
+  isReadOnly = false,
 }) => {
+  const onValidateDay = isReadOnly ? undefined : rawOnValidateDay;
+  const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
+  const onToggleSlotValidation = isReadOnly ? undefined : rawOnToggleSlotValidation;
+  const onSetSlotDecision = isReadOnly ? undefined : rawOnSetSlotDecision;
+  const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
+    if (isReadOnly) return;
+    rawOnUpdateCustomSlots(ds, rep, slots);
+  };
   const [y, m0, d] = selectedDate.split('-').map(Number);
   const m = m0 - 1;
 
@@ -465,6 +475,26 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           </div>
 
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {isReadOnly && (
+              <span
+                style={{
+                  background: '#fffbeb',
+                  border: '1.5px solid #fde68a',
+                  color: '#92400e',
+                  padding: '5px 11px',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>🔒</span>
+                <span>Mode Contrôle (Benoît) : Validations verrouillées</span>
+              </span>
+            )}
+
             {onValidateDay && (
               <>
                 <button
@@ -1122,6 +1152,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         defaultSlots={calculatedDefaultSlots}
         isOpenControlled={isCustomSlotsOpen}
         onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
+        isReadOnly={isReadOnly}
       />
 
       {/* Wind conditions */}

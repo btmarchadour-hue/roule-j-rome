@@ -19,6 +19,7 @@ interface SlotObservationModalProps {
   defaultWaveH?: number | null;
   initialObservation?: SlotObservation | null;
   onSaveSuccess: (updatedList: SlotObservation[]) => void;
+  isReadOnly?: boolean;
 }
 
 export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
@@ -37,6 +38,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   defaultWaveH,
   initialObservation,
   onSaveSuccess,
+  isReadOnly = false,
 }) => {
   if (!isOpen) return null;
 
@@ -598,7 +600,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
           {/* Boutons d'action */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }}>
-            {initialObservation ? (
+            {!isReadOnly && initialObservation ? (
               <button
                 type="button"
                 onClick={handleDelete}
@@ -619,7 +621,12 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               <div />
             )}
 
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {isReadOnly && (
+                <span style={{ fontSize: '0.74rem', color: '#92400e', background: '#fef3c7', padding: '4px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                  🔒 Mode Contrôle (Lecture seule)
+                </span>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -634,24 +641,26 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                Annuler
+                {isReadOnly ? 'Fermer' : 'Annuler'}
               </button>
-              <button
-                type="submit"
-                style={{
-                  padding: '7px 16px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#0284c7',
-                  color: '#fff',
-                  fontSize: '0.78rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
-                }}
-              >
-                💾 Enregistrer l'observation
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="submit"
+                  style={{
+                    padding: '7px 16px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#0284c7',
+                    color: '#fff',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
+                  }}
+                >
+                  💾 Enregistrer l'observation
+                </button>
+              )}
             </div>
           </div>
         </form>

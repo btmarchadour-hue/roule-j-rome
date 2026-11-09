@@ -380,6 +380,41 @@ export const WindPanel: React.FC<WindPanelProps> = ({
           </g>
         )}
       </svg>
+
+      <div
+        style={{
+          marginTop: '8px',
+          paddingTop: '6px',
+          borderTop: '1px dashed var(--bd, #e2e8f0)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+          fontSize: '0.72rem',
+          color: 'var(--mu, #64748b)',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+          <span>📡</span>
+          <span><strong>Balise Pentrez (Spot 66)</strong> · Relais automatique Météo-France AROME HD</span>
+        </span>
+        <a
+          href="https://www.winds-up.com/spot/66"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: '#0284c7',
+            fontWeight: 700,
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '3px',
+          }}
+        >
+          <span>Winds Up Spot 66 ↗</span>
+        </a>
+      </div>
     </div>
   );
 };

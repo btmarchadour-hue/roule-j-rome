@@ -452,6 +452,107 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         </ul>
       </div>
 
+      {/* MODULE 8 : ÉTUDE TECHNIQUE WINDS UP & CONDITIONS DU VENT EN DIRECT */}
+      <div
+        className="card hyp"
+        style={{
+          borderLeft: '4px solid #0284c7',
+          background: '#ffffff',
+          borderRadius: '12px',
+          padding: '18px 20px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          marginBottom: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase' }}>
+              <span>🌪️</span> Module 8 · Rapport Technique
+            </div>
+            <h3 style={{ margin: '6px 0 2px', fontSize: '1.12rem', fontWeight: 900, color: '#0f172a' }}>
+              Étude Technique Winds Up (Spot 66) & Vent Réel à Lestrevet
+            </h3>
+          </div>
+          <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 10px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 800 }}>
+            Analyse & Recommandations Ben ➔ Jérôme
+          </span>
+        </div>
+
+        <p className="note" style={{ margin: '0 0 14px', lineHeight: 1.5, color: '#334155', fontSize: '0.82rem' }}>
+          Ce rapport synthétise la faisabilité technique de branchement direct de la balise anémomètre de la plage de Pentrez / Lestrevet (Winds Up Spot 66) et présente les 3 options envisageables pour l'école.
+        </p>
+
+        {/* 1. Constat technique */}
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px', fontSize: '0.78rem', lineHeight: 1.5 }}>
+          <b style={{ color: '#0f172a', display: 'block', marginBottom: '6px' }}>
+            🔍 1. Ce qu'impose l'écosystème Winds Up (Sources vérifiées) :
+          </b>
+          <ul style={{ margin: 0, paddingLeft: '18px' }}>
+            <li style={{ marginBottom: '4px' }}>
+              <strong>Absence d'API publique ouverte :</strong> Winds Up ne met à disposition aucune API REST gratuite pour les applications tierces. Leurs données de vent sont réservées à leur écosystème commercial (modèle sur abonnement).
+            </li>
+            <li style={{ marginBottom: '4px' }}>
+              <strong>Blocage d'intégration par Iframe :</strong> Le serveur de Winds Up envoie l'en-tête de protection <code>X-Frame-Options: SAMEORIGIN</code>. Les navigateurs (Safari iOS, Chrome) bloquent catégoriquement l'incrustation directe de leur page à l'intérieur d'une autre application.
+            </li>
+            <li>
+              <strong>Sécurité CORS & Scraping :</strong> L'aspiration automatique (*scraping*) depuis le navigateur est bloquée par les sécurités inter-domaines (CORS). Passer par un serveur relais violerait leurs conditions d'utilisation avec un risque de bannissement d'adresse IP.
+            </li>
+          </ul>
+        </div>
+
+        {/* 2. Tableau comparatif des 3 solutions */}
+        <b style={{ color: '#0f172a', fontSize: '0.84rem', display: 'block', marginBottom: '8px' }}>
+          ⚖️ 2. Comparatif des 3 options pour l'école :
+        </b>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+          {/* Solution 1 : Hybride AROME HD (Actuelle) */}
+          <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1rem' }}>⭐</span>
+              <strong style={{ color: '#166534', fontSize: '0.80rem' }}>Option 1 : Hybride AROME HD (Actuelle)</strong>
+            </div>
+            <div style={{ fontSize: '0.74rem', color: '#15803d', lineHeight: 1.45 }}>
+              • <strong>Coût :</strong> 0 € (Open-Meteo & Météo-France).<br />
+              • <strong>Précision :</strong> Maille côtière ultra-fine 1,3 km actualisée 4 fois par jour.<br />
+              • <strong>Ergonomie :</strong> 1 tap sur le bouton officiel Winds Up pour le contrôle visuel.<br />
+              • <strong>Recommandée par Sheldon :</strong> solution la plus robuste et sans maintenance.
+            </div>
+          </div>
+
+          {/* Solution 2 : Winds Up Partenariat B2B */}
+          <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1rem' }}>💼</span>
+              <strong style={{ color: '#92400e', fontSize: '0.80rem' }}>Option 2 : Contrat Winds Up Pro</strong>
+            </div>
+            <div style={{ fontSize: '0.74rem', color: '#b45309', lineHeight: 1.45 }}>
+              • <strong>Coût :</strong> Abonnement annuel professionnel.<br />
+              • <strong>Avantage :</strong> Mesure temps réel directe toutes les 5 min.<br />
+              • <strong>Inconvénient :</strong> Dépendance à la réparation physique de la balise du spot 66 (souvent signalée en panne/aléatoire).
+            </div>
+          </div>
+
+          {/* Solution 3 : Balise Connectée Ouverte (Windbird) */}
+          <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '1rem' }}>📡</span>
+              <strong style={{ color: '#0f172a', fontSize: '0.80rem' }}>Option 3 : Balise Club (Windbird)</strong>
+            </div>
+            <div style={{ fontSize: '0.74rem', color: '#475569', lineHeight: 1.45 }}>
+              • <strong>Coût :</strong> ~180-200 € à l'achat (sans abonnement, réseau Sigfox).<br />
+              • <strong>Avantage :</strong> Installée directement sur la remorque du club à Lestrevet.<br />
+              • <strong>API Développeur :</strong> OpenWindMap offre une vraie API REST JSON ouverte et gratuite intégrable directement !
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Recommandation finale */}
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', fontSize: '0.78rem', color: '#1e40af', lineHeight: 1.5 }}>
+          <strong>💡 Décision proposée pour Jérôme :</strong> Nous conservons l'architecture actuelle (Option 1). Le calcul prévisionnel des créneaux repose sur le modèle officiel AROME HD Météo-France, et le bouton direct Winds Up permet le contrôle sur le terrain. Si Jérôme souhaite un jour mesurer son propre vent au centimètre près sur la plage, l'achat d'un capteur Windbird sur le réseau ouvert sera la solution idéale.
+        </div>
+      </div>
+
       <footer className="card nop ft">
         <b>Char à Voile du Bout du Monde</b>
         <br />

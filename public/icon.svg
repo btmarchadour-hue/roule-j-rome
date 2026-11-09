@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Dégradé océan & ciel de Lestrevet -->
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="60%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#fed7aa" />
+    </linearGradient>
+    <!-- Dégradé sable de Pentrez / Lestrevet -->
+    <linearGradient id="sandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d97706" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+    <!-- Dégradé voile -->
+    <linearGradient id="sailGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f8fafc" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="125%" height="125%">
+      <feDropShadow dx="2" dy="6" stdDeviation="6" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Fond avec coins arrondis pour icône mobile moderne -->
+  <rect width="512" height="512" rx="108" fill="url(#skyGrad)" />
+
+  <!-- Ligne de plage / estran de Lestrevet -->
+  <path d="M 0 380 Q 256 340 512 370 L 512 512 L 0 512 Z" fill="url(#sandGrad)" />
+  <path d="M 0 420 Q 256 390 512 410 L 512 512 L 0 512 Z" fill="#b45309" opacity="0.4" />
+
+  <!-- Vagues / écume de marée basse -->
+  <path d="M 0 380 Q 140 365 280 375 T 512 370" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.75" />
+
+  <!-- CHAR À VOILE DU BOUT DU MONDE (Stylisé) -->
+  <g filter="url(#shadow)" transform="translate(10, 0)">
+    <!-- Mât penché par le vent d'ouest -->
+    <line x1="260" y1="365" x2="310" y2="100" stroke="#0f172a" stroke-width="8" stroke-linecap="round" />
+
+    <!-- Voile principale déployée -->
+    <path d="M 310 105 L 170 330 Q 245 345 295 335 Z" fill="url(#sailGrad)" stroke="#0284c7" stroke-width="5" />
+    <!-- Lattes de voile sportives -->
+    <path d="M 285 145 L 200 280" stroke="#ef4444" stroke-width="4" stroke-linecap="round" />
+    <path d="M 295 195 L 225 315" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" />
+    <path d="M 302 245 L 255 330" stroke="#0284c7" stroke-width="4" stroke-linecap="round" />
+
+    <!-- Flèche / écoute -->
+    <line x1="170" y1="330" x2="260" y2="365" stroke="#334155" stroke-width="4" />
+
+    <!-- Châssis / Coque du char -->
+    <path d="M 190 385 Q 260 375 350 375" fill="none" stroke="#0f172a" stroke-width="9" stroke-linecap="round" />
+
+    <!-- Pilote casqué penché dans le char -->
+    <circle cx="280" cy="355" r="14" fill="#ef4444" stroke="#0f172a" stroke-width="3" />
+
+    <!-- Essieu arrière et roues -->
+    <circle cx="190" cy="395" r="22" fill="#1e293b" stroke="#ffffff" stroke-width="4" />
+    <circle cx="190" cy="395" r="8" fill="#e2e8f0" />
+
+    <!-- Roue avant -->
+    <circle cx="350" cy="385" r="18" fill="#1e293b" stroke="#ffffff" stroke-width="3" />
+    <circle cx="350" cy="385" r="6" fill="#e2e8f0" />
+  </g>
+
+  <!-- Texte discret en bas "ÇA ROULE ?" stylisé et net -->
+  <g transform="translate(256, 475)">
+    <rect x="-105" y="-22" width="210" height="34" rx="17" fill="#0f172a" opacity="0.85" />
+    <text text-anchor="middle" y="2" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="19" font-weight="900" letter-spacing="1.5">
+      ÇA ROULE ?
+    </text>
+  </g>
+</svg>

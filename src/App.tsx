@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarGrid } from './components/CalendarGrid';
 import { DayDetailPanel } from './components/DayDetailPanel';
 import { FocusTab } from './components/FocusTab';
@@ -10,11 +10,14 @@ import { SettingsCard } from './components/SettingsCard';
 import { SlotObservationModal } from './components/SlotObservationModal';
 import { StatisticsTab } from './components/StatisticsTab';
 import { ClientsTab } from './components/ClientsTab';
+import { GpsWaterlineTab } from './components/GpsWaterlineTab';
 import { TableView } from './components/TableView';
 import { TideHeaderCard } from './components/TideHeaderCard';
 import { WindguruTable } from './components/WindguruTable';
 import { SyncStatusBar } from './components/SyncStatusBar';
 import { AppLockScreen } from './components/AppLockScreen';
+import { UserManagementModal } from './components/UserManagementModal';
+import { TeamExchangeModal } from './components/TeamExchangeModal';
 import {
   subscribeToValidations,
   saveValidationToFirestore,
@@ -23,6 +26,11 @@ import {
   saveCustomSlotsToFirestore,
   seedLocalDataToFirestoreIfEmpty,
   syncLocalDataWithFirestore,
+  notifySync,
+  subscribeToSessionSettings,
+  saveSessionSettingsToFirestore,
+  resetAllSettingsToFirestore,
+  subscribeToTeamNotes,
 } from './utils/firebaseSync';
 import {
   ActiveUserSession,
@@ -31,6 +39,7 @@ import {
   CustomSlotsMap,
   DayFocusData,
   SessionItem,
+  TeamNote,
   TidePoint,
   ValidationItem,
   ValidationsMap,
@@ -211,50 +220,39 @@ export const App: React.FC = () => {
       }
     });
 
+    // 3. Écouter en temps réel les réglages partagés des séances
+    const unsubSessionSettings = subscribeToSessionSettings(cloudSettings => {
+      if (cloudSettings && Object.keys(cloudSettings).length > 0) {
+        setSettings(prev => {
+          const merged = { ...prev, ...cloudSettings };
+          try {
+            localStorage.setItem('cvSettings', JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
+    });
+
+    // 4. Écouter en temps réel les notes d'échange Ben ↔ Jérôme (Module 7)
+    const unsubTeamNotes = subscribeToTeamNotes(notes => {
+      setTeamNotes(notes);
+    });
+
     return () => {
       unsubValidations();
       unsubCustomSlots();
+      unsubSessionSettings();
+      unsubTeamNotes();
     };
   }, []);
 
-  const handleUpdateSettings = useCallback((newSettings: Partial<AppSettings>) => {
-    setSettings(prev => {
-      const updated = { ...prev, ...newSettings };
-      try {
-        localStorage.setItem('cvSettings', JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
-      return updated;
-    });
-  }, []);
-
-  const handleUpdateCustomSlots = useCallback(
-    (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => {
-      setCustomSlotsMap(prev => {
-        const updated = {
-          ...prev,
-          [dateStr]: { replaceDefault, slots },
-        };
-        try {
-          localStorage.setItem(CS_KEY, JSON.stringify(updated));
-        } catch {
-          // ignore
-        }
-        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
-          console.warn('Erreur Firestore custom slots:', err)
-        );
-        return updated;
-      });
-    },
-    []
-  );
-
-  const handleTabChange = (tab: number) => {
-    setActiveTab(tab);
-  };
+  const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
+  const [isExchangeModalOpen, setIsExchangeModalOpen] = useState<boolean>(false);
 
   const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(() => getActiveUser());
+  const isReadOnly = Boolean(currentUser?.isReadOnly);
 
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
@@ -279,6 +277,119 @@ export const App: React.FC = () => {
     setIsUnlocked(false);
   }, []);
 
+  const debounceSettingsRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleUpdateSettings = useCallback((newSettings: Partial<AppSettings>) => {
+    if (currentUser?.isReadOnly || currentUser?.role === 'moniteur') {
+      notifySync('🔒 Mode Moniteur : modifications réservées aux administrateurs');
+      return;
+    }
+    setSettings(prev => {
+      const updated = { ...prev, ...newSettings };
+      try {
+        localStorage.setItem('cvSettings', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+
+    // Sauvegarde automatique temps réel dans Firestore (délai de 600ms après la frappe)
+    if (debounceSettingsRef.current) {
+      clearTimeout(debounceSettingsRef.current);
+    }
+    debounceSettingsRef.current = setTimeout(() => {
+      saveSessionSettingsToFirestore(newSettings).catch(err => {
+        console.warn('Erreur sauvegarde automatique réglages séances:', err);
+      });
+    }, 600);
+  }, [currentUser]);
+
+  // Sauvegarde temporaire pour bouton Annuler / Retour arrière (Module 2)
+  const [backupSettings, setBackupSettings] = useState<AppSettings | null>(null);
+  const undoResetTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Remise à zéro de tous les 24 réglages vers les valeurs d'origine de l'école
+  const handleResetToDefaults = useCallback(() => {
+    if (currentUser?.isReadOnly || currentUser?.role !== 'admin') {
+      notifySync('🔒 Mode Moniteur : réinitialisation réservée aux administrateurs');
+      return;
+    }
+
+    // Mémoriser l'état actuel pour permettre le retour arrière immédiat
+    setBackupSettings(settings);
+    if (undoResetTimerRef.current) {
+      clearTimeout(undoResetTimerRef.current);
+    }
+    undoResetTimerRef.current = setTimeout(() => {
+      setBackupSettings(null);
+    }, 30000); // Disponible 30 secondes
+
+    // Application locale immédiate
+    setSettings(defaultSettings);
+    try {
+      localStorage.setItem('cvSettings', JSON.stringify(defaultSettings));
+    } catch {
+      // ignore
+    }
+
+    // Propagation Cloud vers tous les autres appareils
+    resetAllSettingsToFirestore().catch(err => {
+      console.warn('Erreur réinitialisation Firestore:', err);
+    });
+  }, [currentUser, settings]);
+
+  // Retour arrière : restauration immédiate des réglages précédents
+  const handleUndoReset = useCallback(() => {
+    if (!backupSettings) return;
+    const restored = backupSettings;
+    setBackupSettings(null);
+    if (undoResetTimerRef.current) {
+      clearTimeout(undoResetTimerRef.current);
+    }
+
+    setSettings(restored);
+    try {
+      localStorage.setItem('cvSettings', JSON.stringify(restored));
+    } catch {
+      // ignore
+    }
+
+    saveSessionSettingsToFirestore(restored).catch(err => {
+      console.warn('Erreur restauration Cloud:', err);
+    });
+    notifySync('✓ Vos réglages précédents ont été restaurés !');
+  }, [backupSettings]);
+
+  const handleUpdateCustomSlots = useCallback(
+    (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => {
+      if (currentUser?.isReadOnly) {
+        notifySync('🔒 Mode Contrôle : créneaux sur mesure verrouillés');
+        return;
+      }
+      setCustomSlotsMap(prev => {
+        const updated = {
+          ...prev,
+          [dateStr]: { replaceDefault, slots },
+        };
+        try {
+          localStorage.setItem(CS_KEY, JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
+          console.warn('Erreur Firestore custom slots:', err)
+        );
+        return updated;
+      });
+    },
+    [currentUser]
+  );
+
+  const handleTabChange = (tab: number) => {
+    setActiveTab(tab);
+  };
+
   const [activeObservationSlot, setActiveObservationSlot] = useState<{
     dateStr: string;
     slotKey: string;
@@ -287,6 +398,8 @@ export const App: React.FC = () => {
     isCustom?: boolean;
     customTitle?: string;
   } | null>(null);
+
+  const [isUserModalOpen, setIsUserModalOpen] = useState<boolean>(false);
 
   const handlePrevMonth = () => {
     const [minY, minM] = minDs.split('-').map(Number);
@@ -466,6 +579,10 @@ export const App: React.FC = () => {
     record: DayFocusData,
     mode: 'all' | 'wind_only' = 'all'
   ) => {
+    if (isReadOnly) {
+      notifySync('🔒 Mode Contrôle actif : validations verrouillées pour Benoît');
+      return;
+    }
     const updated: ValidationsMap = {
       ...validations,
       [ds]: {
@@ -502,6 +619,10 @@ export const App: React.FC = () => {
   };
 
   const handleClearValidation = useCallback((ds: string) => {
+    if (isReadOnly) {
+      notifySync('🔒 Mode Contrôle : réinitialisation verrouillée pour Benoît');
+      return;
+    }
     setValidations(prev => {
       const updated = { ...prev };
       delete updated[ds];
@@ -515,7 +636,7 @@ export const App: React.FC = () => {
       );
       return updated;
     });
-  }, []);
+  }, [isReadOnly]);
 
   const handleSetSlotDecision = useCallback(
     (
@@ -524,6 +645,10 @@ export const App: React.FC = () => {
       decision: 'valid' | 'rejected' | 'pending',
       reason?: string
     ) => {
+      if (isReadOnly) {
+        notifySync('🔒 Mode Contrôle : modifications de créneau verrouillées');
+        return;
+      }
       setValidations(prev => {
         const ds = record.ds;
         const existing = prev[ds];
@@ -635,10 +760,18 @@ export const App: React.FC = () => {
 
   return (
     <>
-      <Header />
-      <SyncStatusBar isOnline={true} currentUser={currentUser} onLock={handleLock} />
-      <main className={activeTab >= 3 && activeTab <= 5 ? 'agenda-wide' : ''}>
-        {/* En-tête des marées en haut de page (masqué en onglet 3, 4, 5 et 6 et à l'impression) */}
+      <Header
+        onOpenExchange={() => setIsExchangeModalOpen(true)}
+        unreadExchangeCount={teamNotes.filter(n => !n.isResolved).length}
+      />
+      <SyncStatusBar
+        isOnline={true}
+        currentUser={currentUser}
+        onLock={handleLock}
+        onOpenUserManagement={() => setIsUserModalOpen(true)}
+      />
+      <main className={activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
+        {/* En-tête des marées en haut de page (masqué en onglet 3, 4, 5, 6 et 7 et à l'impression) */}
         {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
 
         {/* Navigation tabs */}
@@ -670,6 +803,13 @@ export const App: React.FC = () => {
             onClick={() => handleTabChange(4)}
           >
             📊 Statistiques & Relevés
+          </button>
+          <button
+            type="button"
+            className={activeTab === 7 ? 'on' : ''}
+            onClick={() => handleTabChange(7)}
+          >
+            📍 Étalonnage GPS
           </button>
           <button
             type="button"
@@ -732,6 +872,7 @@ export const App: React.FC = () => {
               onSetSlotDecision={handleSetSlotDecision}
               onOpenPrintAgenda={() => handleTabChange(3)}
               onOpenObservationModal={slot => setActiveObservationSlot(slot)}
+              isReadOnly={isReadOnly}
             />
 
             <TableView
@@ -757,13 +898,19 @@ export const App: React.FC = () => {
               />
             </div>
 
-            {/* Formulaire des Réglages (Séances, seuils, vent, actualisation) */}
+            {/* Formulaire des Réglages (Séances, seuils, vent, actualisation, réinitialisation) */}
             <SettingsCard
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
+              onResetToDefaults={handleResetToDefaults}
+              canUndoReset={Boolean(backupSettings)}
+              onUndoReset={handleUndoReset}
               windStatusText={windStatus}
               onRefreshWind={fetchWind}
               isLoadingWind={isLoadingWind}
+              isReadOnly={isReadOnly}
+              userRole={currentUser?.role || (isReadOnly ? 'moniteur' : 'admin')}
+              userName={currentUser?.displayName || currentUser?.username || 'Jérôme'}
             />
 
             {/* Lien d'accès direct vers le nouvel onglet Hypothèses & Notes */}
@@ -843,6 +990,7 @@ export const App: React.FC = () => {
             onUpdateCustomSlots={handleUpdateCustomSlots}
             onOpenPrintAgenda={() => handleTabChange(3)}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
+            isReadOnly={isReadOnly}
           />
         )}
 
@@ -863,6 +1011,7 @@ export const App: React.FC = () => {
             onValidateDay={handleValidateDay}
             onToggleSlotValidation={handleToggleSlotValidation}
             onSetSlotDecision={handleSetSlotDecision}
+            isReadOnly={isReadOnly}
           />
         )}
 
@@ -880,10 +1029,23 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        {/* Tab 7: Observatoire & Étalonnage GPS Limite Basse de Roulage */}
+        {activeTab === 7 && (
+          <div id="tab7">
+            <GpsWaterlineTab
+              settings={settings}
+              EX={EX}
+              windList={windList}
+              selectedDate={selectedDate}
+              isReadOnly={isReadOnly}
+            />
+          </div>
+        )}
+
         {/* Tab 5: Base de données Clients & CRM */}
         {activeTab === 5 && (
           <div id="tab5">
-            <ClientsTab />
+            <ClientsTab isReadOnly={isReadOnly} />
           </div>
         )}
 
@@ -941,6 +1103,59 @@ export const App: React.FC = () => {
               </button>
             </div>
 
+            {/* Carte Administration Équipe & Utilisateurs (Réservée aux Administrateurs Jérôme & Benoît) */}
+            {currentUser?.role === 'admin' && (
+              <div
+                className="card nop"
+                style={{
+                  marginBottom: '16px',
+                  background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '1.5px solid #0284c7',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1.3rem' }}>👥</span>
+                    <strong style={{ fontSize: '1rem', color: '#0369a1' }}>
+                      Gestion de l&apos;Équipe & des Comptes Moniteurs (Accès Administrateur)
+                    </strong>
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: '#334155' }}>
+                    Ajoutez de nouveaux moniteurs, définissez leurs mots de passe individuels, attribuez les rôles Admin ou activez le mode contrôle en lecture seule.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsUserModalOpen(true)}
+                  style={{
+                    background: '#0284c7',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '8px 16px',
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.35)',
+                  }}
+                >
+                  <span>⚙️</span>
+                  <span>Ouvrir la gestion des utilisateurs</span>
+                </button>
+              </div>
+            )}
+
             <NotesAndHypotheses onLock={handleLock} />
           </div>
         )}
@@ -959,8 +1174,24 @@ export const App: React.FC = () => {
             onSaveSuccess={() => {
               setActiveObservationSlot(null);
             }}
+            isReadOnly={isReadOnly}
           />
         )}
+
+        {/* Modal d'administration des utilisateurs et de l'équipe */}
+        <UserManagementModal
+          isOpen={isUserModalOpen}
+          onClose={() => setIsUserModalOpen(false)}
+          currentUser={currentUser}
+        />
+
+        {/* Modal d'échange et carnet de liaison Ben ↔ Jérôme (Module 7) */}
+        <TeamExchangeModal
+          isOpen={isExchangeModalOpen}
+          onClose={() => setIsExchangeModalOpen(false)}
+          notes={teamNotes}
+          currentUserName={currentUser?.displayName || currentUser?.username}
+        />
       </main>
     </>
   );

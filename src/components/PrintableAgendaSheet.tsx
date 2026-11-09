@@ -50,6 +50,7 @@ interface PrintableAgendaSheetProps {
     decision: 'valid' | 'rejected' | 'pending',
     reason?: string
   ) => void;
+  isReadOnly?: boolean;
 }
 
 type RangeOption = 'selected' | '5days' | 'week' | 'month' | 'custom' | 'all';
@@ -165,6 +166,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   onValidateDay,
   onToggleSlotValidation,
   onSetSlotDecision,
+  isReadOnly = false,
 }) => {
   const todayStr = useMemo(() => tdy(), []);
   const allAvailableDates = useMemo(
@@ -343,6 +345,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   }, []);
 
   const saveBookingsMap = (next: Record<string, AgendaBookingItem[]>, updatedSlotKey?: string) => {
+    if (isReadOnly) return;
     setBookingsMap(next);
     try {
       localStorage.setItem('char_agenda_bookings_v3', JSON.stringify(next));
@@ -361,6 +364,7 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
   };
 
   const handleAddBooking = (slotKey: string) => {
+    if (isReadOnly) return;
     const list = getSlotBookings(slotKey);
     const newBooking: AgendaBookingItem = {
       id: `bk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,

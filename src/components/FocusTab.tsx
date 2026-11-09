@@ -54,26 +54,36 @@ interface FocusTabProps {
     isCustom?: boolean;
     customTitle?: string;
   }) => void;
+  isReadOnly?: boolean;
 }
 
 export const FocusTab: React.FC<FocusTabProps> = ({
   settings,
-  onUpdateSettings,
+  onUpdateSettings: rawOnUpdateSettings,
   EX,
   W: tideW,
   first,
   last,
   windList,
   validations,
-  onValidateDay,
-  onClearValidation,
-  onToggleSlotValidation,
-  onSetSlotDecision,
+  onValidateDay: rawOnValidateDay,
+  onClearValidation: rawOnClearValidation,
+  onToggleSlotValidation: rawOnToggleSlotValidation,
+  onSetSlotDecision: rawOnSetSlotDecision,
   onSelectDayInCalendar,
   customSlotsMap = {},
   onOpenPrintAgenda,
   onOpenObservationModal,
+  isReadOnly = false,
 }) => {
+  const onValidateDay = isReadOnly ? () => {} : rawOnValidateDay;
+  const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
+  const onToggleSlotValidation = isReadOnly ? undefined : rawOnToggleSlotValidation;
+  const onSetSlotDecision = isReadOnly ? undefined : rawOnSetSlotDecision;
+  const onUpdateSettings = (s: Partial<AppSettings>) => {
+    if (isReadOnly) return;
+    rawOnUpdateSettings(s);
+  };
   const tdRaw = tdy();
   const td = tdRaw < minDs ? minDs : tdRaw;
   const tomorrowDs = shf(td, 1);
@@ -586,7 +596,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   if (currentFocus.glob) {
     alerts.push("Le vent provient d'un modèle global (indicatif).");
   }
-  alerts.push('Balise Winds Up (spot 66) hors service : pas de mesure en temps réel du vent.');
+  alerts.push('📡 Balise Winds Up Pentrez (Spot 66) : relais AROME HD Météo-France (1,3 km) actif sur la plage.');
 
   return (
     <div id="tab2">

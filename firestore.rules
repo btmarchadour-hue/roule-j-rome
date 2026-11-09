@@ -27,13 +27,25 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Configuration et sécurité école et moniteurs
+    // Configuration et sécurité école et moniteurs (Module 3 : Verrouillage admin)
     match /app_config/{configId} {
-      allow read, write: if true;
+      allow read: if true;
+      // Seuls les administrateurs habilités (Jérôme, Benoît) peuvent modifier ou réinitialiser la configuration de l'école
+      allow write: if request.resource.data.updatedBy in ['Jérôme', 'Benoît', 'Admin', 'Jerome', 'Benoit'];
     }
 
     // Profils et comptes moniteurs/administrateurs
     match /app_users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Espace d'échange et carnet de liaison Ben ↔ Jérôme (Module 7)
+    match /team_notes/{noteId} {
+      allow read, write: if true;
+    }
+
+    // Relevés GPS de limite basse de roulage (Étalonnage terrain en direct)
+    match /waterline_gps_logs/{logId} {
       allow read, write: if true;
     }
 

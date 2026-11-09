@@ -9,10 +9,13 @@ import {
 } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
 import {
+  AppSettings,
   AppUser,
   ClientProfile,
   CustomSlotsMap,
+  GpsWaterlineLog,
   SlotObservation,
+  TeamNote,
   ValidationsMap,
 } from '../types';
 import { DEFAULT_USERS } from './authUtils';
@@ -547,3 +550,307 @@ export const deleteUserFromFirestore = async (userId: string): Promise<void> => 
     throw error;
   }
 };
+
+/* -------------------------------------------------------------------------- */
+/* 7. PARAMÈTRES DES SÉANCES PARTAGÉS EN TEMPS RÉEL (MODULE 1 & 2)            */
+/* -------------------------------------------------------------------------- */
+
+// Valeurs d'usine par défaut immuables (servira pour le bouton de remise à zéro du Module 2)
+export const DEFAULT_SESSION_SETTINGS = {
+  sdur: 60,       // Durée d'une séance (min)
+  gs: 15,         // Pause été (min)
+  gw: 30,         // Pause hors été (min)
+  s0: '07-01',    // Été : début (MM-JJ)
+  s1: '08-31',    // Été : fin (MM-JJ)
+  pre: 60,        // 1re séance : min. après le lever
+  post: 30,       // Fin de séance : min. avant le coucher
+  rnd: 15,        // Débuts arrondis à (min)
+  xon: true,      // Tolérer débordement
+  xtol: 20,       // Débordement toléré (min)
+  xpl: 'debut' as const, // Calage des créneaux
+  cap: 1,         // Chars par séance
+  all: true,      // Tout le jour si petit coef
+  cmax: 50,       // Seuil coef roulage continu
+  h0: 9,          // Pas avant 9h
+  h1: 24,         // Pas après 24h
+};
+
+// Configuration complète par défaut (Module 2 : Réinitialisation globale)
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  sdur: 60,       // Durée d'une séance (min)
+  gs: 15,         // Pause été (min)
+  gw: 30,         // Pause hors été (min)
+  s0: '07-01',    // Été : début (MM-JJ)
+  s1: '08-31',    // Été : fin (MM-JJ)
+  pre: 60,        // 1re séance : min. après le lever
+  post: 30,       // Fin de séance : min. avant le coucher
+  rnd: 15,        // Débuts arrondis à (min)
+  xon: true,      // Tolérer débordement
+  xtol: 20,       // Débordement toléré (min)
+  xpl: 'debut',   // Calage des créneaux
+  cap: 1,         // Chars par séance
+  all: true,      // Tout le jour si petit coef
+  cmax: 50,       // Seuil coef roulage continu
+  pcor: true,     // Correction pression
+  L: 4.5,         // Seuil hauteur d'eau L (m)
+  mg: 0,          // Marge marée (cm)
+  lum: -1.1,      // Seuil luminosité lum (deg)
+  lmg: 0,         // Marge luminosité (min)
+  h0: 9,          // Pas avant 9h
+  h1: 24,         // Pas après 24h
+  les: false,     // Heure stricte été/hiver
+  vmin: 8,        // Vent min (nœuds)
+  vmax: 25,       // Vent max (nœuds)
+  gmax: 35,       // Rafales max (nœuds)
+  fmin: 3,        // Force min Beaufort
+};
+
+export const subscribeToSessionSettings = (
+  onData: (cloudSettings: Partial<AppSettings>) => void,
+  onError?: (err: Error) => void
+) => {
+  const docRef = doc(db, 'app_config', 'session_settings');
+  return onSnapshot(
+    docRef,
+    snapshot => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data) {
+          // Filtrer les métadonnées et renvoyer les réglages
+          const { updatedAt, updatedBy, ...settings } = data;
+          onData(settings as Partial<AppSettings>);
+          notifySync('✓ Réglages séances synchronisés');
+        }
+      }
+    },
+    error => {
+      console.warn('Erreur écoute des réglages séances Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const saveSessionSettingsToFirestore = async (
+  newSettings: Partial<AppSettings>
+): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'app_config', 'session_settings');
+    const author = getActiveInstructor();
+    const payload = cleanForFirestore({
+      ...newSettings,
+      updatedBy: author,
+      updatedAt: Date.now(),
+    });
+    await setDoc(docRef, payload, { merge: true });
+    notifySync('✓ Réglages séances enregistrés dans le Cloud');
+  } catch (error) {
+    console.error('Erreur enregistrement réglages séances Firestore:', error);
+    notifySync('⚠️ Erreur de sauvegarde des réglages');
+    throw error;
+  }
+};
+
+/**
+ * Réinitialise tous les réglages partagés sur Firestore avec les valeurs d'origine de l'école (Module 2)
+ */
+export const resetAllSettingsToFirestore = async (): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'app_config', 'session_settings');
+    const author = getActiveInstructor();
+    const payload = cleanForFirestore({
+      ...DEFAULT_APP_SETTINGS,
+      updatedBy: author,
+      updatedAt: Date.now(),
+    });
+    await setDoc(docRef, payload);
+    notifySync('✓ Paramètres réinitialisés aux valeurs par défaut');
+  } catch (error) {
+    console.error('Erreur réinitialisation réglages Firestore:', error);
+    notifySync('⚠️ Erreur de réinitialisation des réglages');
+    throw error;
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* 8. ESPACE D'ÉCHANGE BEN ↔ JÉRÔME (MODULE 7)                                */
+/* -------------------------------------------------------------------------- */
+
+export const subscribeToTeamNotes = (
+  onNotes: (notes: TeamNote[]) => void,
+  onError?: (err: Error) => void
+) => {
+  const colRef = collection(db, 'team_notes');
+  return onSnapshot(
+    colRef,
+    snapshot => {
+      const list: TeamNote[] = [];
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          author: d.author || 'Benoît',
+          category: d.category || 'organisation',
+          content: d.content || '',
+          createdAt: d.createdAt || Date.now(),
+          isResolved: Boolean(d.isResolved),
+          resolvedAt: d.resolvedAt,
+          resolvedBy: d.resolvedBy,
+        });
+      });
+      // Trier par date décroissante (plus récent d'abord)
+      list.sort((a, b) => b.createdAt - a.createdAt);
+      onNotes(list);
+    },
+    error => {
+      console.warn('Erreur écoute des notes d\'équipe Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const addTeamNoteToFirestore = async (
+  note: Omit<TeamNote, 'id'>
+): Promise<string> => {
+  try {
+    await ensureAuth();
+    const cleanId = `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const docRef = doc(db, 'team_notes', cleanId);
+    const payload = cleanForFirestore({
+      ...note,
+      createdAt: note.createdAt || Date.now(),
+      isResolved: false,
+    });
+    await setDoc(docRef, payload);
+    notifySync('✓ Message envoyé dans l\'espace d\'échange');
+    return cleanId;
+  } catch (error) {
+    console.error('Erreur ajout note d\'équipe Firestore:', error);
+    notifySync('⚠️ Erreur d\'envoi du message');
+    throw error;
+  }
+};
+
+export const toggleTeamNoteResolvedInFirestore = async (
+  noteId: string,
+  isResolved: boolean,
+  resolvedBy?: string
+): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', noteId);
+    const payload = cleanForFirestore({
+      isResolved,
+      resolvedAt: isResolved ? Date.now() : null,
+      resolvedBy: isResolved ? resolvedBy || getActiveInstructor() : null,
+    });
+    await setDoc(docRef, payload, { merge: true });
+    notifySync(isResolved ? '✓ Note marquée comme traitée' : '✓ Note remise en cours');
+  } catch (error) {
+    console.error('Erreur mise à jour note Firestore:', error);
+    throw error;
+  }
+};
+
+export const deleteTeamNoteFromFirestore = async (noteId: string): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', noteId);
+    await deleteDoc(docRef);
+    notifySync('✓ Note supprimée');
+  } catch (error) {
+    console.error('Erreur suppression note Firestore:', error);
+    throw error;
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* 9. RELEVÉS GPS LIMITE BASSE DE ROULAGE (OBSERVATOIRE HYDRODYNAMIQUE)       */
+/* -------------------------------------------------------------------------- */
+
+export const subscribeToWaterlineGpsLogs = (
+  onLogs: (logs: GpsWaterlineLog[]) => void,
+  onError?: (err: Error) => void
+) => {
+  const colRef = collection(db, 'waterline_gps_logs');
+  return onSnapshot(
+    colRef,
+    snapshot => {
+      const list: GpsWaterlineLog[] = [];
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          timestamp: d.timestamp || Date.now(),
+          dateStr: d.dateStr || '',
+          timeStr: d.timeStr || '',
+          author: d.author || 'Jérôme',
+          latitude: Number(d.latitude) || 0,
+          longitude: Number(d.longitude) || 0,
+          altitude: d.altitude != null ? Number(d.altitude) : null,
+          accuracyM: Number(d.accuracyM) || 0,
+          accuracyQuality: d.accuracyQuality || 'medium',
+          weatherSnapshot: {
+            windSpeedKts: Number(d.weatherSnapshot?.windSpeedKts) || 0,
+            windGustKts: Number(d.weatherSnapshot?.windGustKts) || 0,
+            windDirectionDeg: Number(d.weatherSnapshot?.windDirectionDeg) || 0,
+            windDirectionComp: d.weatherSnapshot?.windDirectionComp || 'O',
+            pressureHpa: Number(d.weatherSnapshot?.pressureHpa) || 1013,
+            waveHeightM: d.weatherSnapshot?.waveHeightM != null ? Number(d.weatherSnapshot.waveHeightM) : undefined,
+            wavePeriodS: d.weatherSnapshot?.wavePeriodS != null ? Number(d.weatherSnapshot.wavePeriodS) : undefined,
+          },
+          theoreticalWaterHeightM: Number(d.theoreticalWaterHeightM) || 0,
+          correctedWaterHeightM: Number(d.correctedWaterHeightM) || 0,
+          schoolThresholdM: Number(d.schoolThresholdM) || 4.5,
+          rawSurcoteCm: Number(d.rawSurcoteCm) || 0,
+          correctedSurcoteCm: Number(d.correctedSurcoteCm) || 0,
+          beachState: d.beachState,
+          note: d.note,
+          createdAt: d.createdAt || Date.now(),
+        });
+      });
+      // Trier par date/heure décroissante (plus récent d'abord)
+      list.sort((a, b) => b.timestamp - a.timestamp);
+      onLogs(list);
+    },
+    error => {
+      console.warn('Erreur écoute relevés GPS Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const addWaterlineGpsLogToFirestore = async (
+  log: Omit<GpsWaterlineLog, 'id'>
+): Promise<string> => {
+  try {
+    await ensureAuth();
+    const cleanId = `gps_${log.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'waterline_gps_logs', cleanId);
+    const payload = cleanForFirestore({
+      ...log,
+      createdAt: log.createdAt || Date.now(),
+    });
+    await setDoc(docRef, payload);
+    notifySync('✓ Relevé GPS limite d\'eau enregistré');
+    return cleanId;
+  } catch (error) {
+    console.error('Erreur enregistrement relevé GPS Firestore:', error);
+    notifySync('⚠️ Erreur d\'enregistrement GPS');
+    throw error;
+  }
+};
+
+export const deleteWaterlineGpsLogFromFirestore = async (logId: string): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'waterline_gps_logs', logId);
+    await deleteDoc(docRef);
+    notifySync('✓ Relevé GPS supprimé');
+  } catch (error) {
+    console.error('Erreur suppression relevé GPS Firestore:', error);
+    throw error;
+  }
+};
+

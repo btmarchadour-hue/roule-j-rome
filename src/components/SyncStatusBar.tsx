@@ -7,12 +7,14 @@ interface SyncStatusBarProps {
   isOnline?: boolean;
   currentUser?: ActiveUserSession | null;
   onLock?: () => void;
+  onOpenUserManagement?: () => void;
 }
 
 export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({
   isOnline = true,
   currentUser: propUser,
   onLock,
+  onOpenUserManagement,
 }) => {
   const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(
     () => propUser || getActiveUser()
@@ -196,6 +198,31 @@ export const SyncStatusBar: React.FC<SyncStatusBarProps> = ({
             </span>
           )}
         </div>
+
+        {role === 'admin' && onOpenUserManagement && (
+          <button
+            type="button"
+            onClick={onOpenUserManagement}
+            style={{
+              background: '#0284c7',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '3px 9px',
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              color: '#ffffff',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)',
+            }}
+            title="Gérer l'équipe, ajouter des utilisateurs et modifier les mots de passe"
+          >
+            <span>👥</span>
+            <span>Équipe & Accès</span>
+          </button>
+        )}
 
         {onLock && (
           <button

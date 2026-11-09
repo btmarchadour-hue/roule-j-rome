@@ -13,7 +13,11 @@ import { db } from '../firebase';
 import { ClientEditModal } from './ClientEditModal';
 import { ImportClientsModal } from './ImportClientsModal';
 
-export const ClientsTab: React.FC = () => {
+interface ClientsTabProps {
+  isReadOnly?: boolean;
+}
+
+export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) => {
   const [clients, setClients] = useState<ClientProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -213,49 +217,73 @@ export const ClientsTab: React.FC = () => {
 
         {/* Boutons d'actions principales */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            type="button"
-            className="fbtn fbtn-primary"
-            style={{
-              margin: 0,
-              background: '#16a34a',
-              color: '#fff',
-              fontWeight: 800,
-              fontSize: '0.78rem',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            onClick={() => {
-              setEditingClient(null);
-              setIsEditModalOpen(true);
-            }}
-          >
-            <span>➕</span>
-            <span>Nouveau Client</span>
-          </button>
+          {isReadOnly && (
+            <span
+              style={{
+                background: '#fffbeb',
+                border: '1.5px solid #fde68a',
+                color: '#92400e',
+                padding: '7px 12px',
+                borderRadius: '6px',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>🔒</span>
+              <span>Mode Contrôle (Benoît) : Répertoire en lecture seule</span>
+            </span>
+          )}
 
-          <button
-            type="button"
-            className="fbtn"
-            style={{
-              margin: 0,
-              background: 'var(--cell, #f1f5f9)',
-              color: '#0369a1',
-              border: '1px solid #bae6fd',
-              fontWeight: 700,
-              fontSize: '0.76rem',
-              padding: '8px 12px',
-              borderRadius: '6px',
-            }}
-            onClick={() => setIsImportModalOpen(true)}
-            title="Importer une liste de clients depuis un fichier Excel ou CSV"
-          >
-            📤 Importer Fichier (Excel / CSV)
-          </button>
+          {!isReadOnly && (
+            <>
+              <button
+                type="button"
+                className="fbtn fbtn-primary"
+                style={{
+                  margin: 0,
+                  background: '#16a34a',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+                onClick={() => {
+                  setEditingClient(null);
+                  setIsEditModalOpen(true);
+                }}
+              >
+                <span>➕</span>
+                <span>Nouveau Client</span>
+              </button>
+
+              <button
+                type="button"
+                className="fbtn"
+                style={{
+                  margin: 0,
+                  background: 'var(--cell, #f1f5f9)',
+                  color: '#0369a1',
+                  border: '1px solid #bae6fd',
+                  fontWeight: 700,
+                  fontSize: '0.76rem',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                }}
+                onClick={() => setIsImportModalOpen(true)}
+                title="Importer une liste de clients depuis un fichier Excel ou CSV"
+              >
+                📤 Importer Fichier (Excel / CSV)
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -816,6 +844,7 @@ export const ClientsTab: React.FC = () => {
           setIsEditModalOpen(false);
           setEditingClient(null);
         }}
+        isReadOnly={isReadOnly}
       />
     </div>
   );
