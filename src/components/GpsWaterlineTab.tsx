@@ -5,12 +5,14 @@ import {
   addWaterlineGpsLogToFirestore,
   deleteWaterlineGpsLogFromFirestore,
   subscribeToWaterlineGpsLogs,
+  upsertWaterlineGpsLogToFirestore,
 } from '../utils/firebaseSync';
 import {
   buildWaterlineSnapshot,
   exportWaterlineLogsAsCsv,
+  findRecentDuplicateGpsLog,
   getStoredWaterlineLogs,
-  requestHighAccuracyGps,
+  requestSmoothedHighAccuracyGps,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
 
@@ -36,12 +38,61 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   
   // États de capture
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [sampleProgress, setSampleProgress] = useState<{ current: number; total: number; lastAcc: number } | null>(null);
   const [captureStatus, setCaptureStatus] = useState<string>('');
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [lastLoggedItem, setLastLoggedItem] = useState<GpsWaterlineLog | null>(null);
 
   // Filtre d'affichage
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
+
+  // Gamification Étape 2 : Objectif 300 mesures & Modèle Empirique
+  const TARGET_MEASURES = 300;
+  const [showCelebrationModal, setShowCelebrationModal] = useState<boolean>(false);
+  const [isDemoUnlocked, setIsDemoUnlocked] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const totalCount = logs.length;
+  const isRealModeUnlocked = totalCount >= TARGET_MEASURES || isDemoUnlocked;
+  const progressPercent = Math.min(100, Math.round((totalCount / TARGET_MEASURES) * 100));
+  const remainingCount = Math.max(0, TARGET_MEASURES - totalCount);
+
+  // Détection du cap des 300 mesures pour déclencher l'alerte festive
+  useEffect(() => {
+    if (totalCount >= TARGET_MEASURES) {
+      const alreadyShown = localStorage.getItem('cv_300_celebration_shown');
+      if (!alreadyShown) {
+        setShowCelebrationModal(true);
+      }
+    }
+  }, [totalCount]);
+
+  const handleDismissCelebration = () => {
+    setShowCelebrationModal(false);
+    try {
+      localStorage.setItem('cv_300_celebration_shown', 'true');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleToggleDemoUnlock = () => {
+    const next = !isDemoUnlocked;
+    setIsDemoUnlocked(next);
+    try {
+      localStorage.setItem('cv_demo_mode_reel_unlocked', String(next));
+    } catch {
+      // ignore
+    }
+    if (next) {
+      setShowCelebrationModal(true);
+    }
+  };
 
   // Synchronisation temps réel Firestore
   useEffect(() => {
@@ -57,7 +108,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Déclencheur du relevé terrain
+  // Déclencheur du relevé terrain avec moyennage GPS 4 mesures et filtrage 15m
   const handleCaptureNow = async () => {
     if (isReadOnly) {
       alert('Mode consultation active : vous ne pouvez pas enregistrer de relevé.');
@@ -66,11 +117,15 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
     setIsCapturing(true);
     setCaptureError(null);
-    setCaptureStatus('🛰️ Acquisition des signaux satellites GPS (haute précision en cours)...');
+    setSampleProgress({ current: 1, total: 4, lastAcc: 0 });
+    setCaptureStatus('🛰️ Stabilisation & lissage GPS en cours (4 lectures successives)...');
 
     try {
-      // 1. Capture haute précision
-      const gpsResult = await requestHighAccuracyGps();
+      // 1. Capture haute précision moyennée sur 4 lectures (filtre < 15m)
+      const gpsResult = await requestSmoothedHighAccuracyGps(4, 600, (curr, tot, acc) => {
+        setSampleProgress({ current: curr, total: tot, lastAcc: acc });
+        setCaptureStatus(`🛰️ Échantillonnage GPS : mesure ${curr} sur ${tot} (précision : ${acc} m)...`);
+      });
 
       setCaptureStatus('⚡ Capture instantanée des flux météo AROME & calcul hydrodynamique...');
 
@@ -85,23 +140,41 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         quickNote.trim() || undefined
       );
 
-      // 3. Enregistrement Firestore
-      const newId = await addWaterlineGpsLogToFirestore(snapshot);
+      // 3. Détection intelligente anti-doublon (même auteur, même endroit < 25m, il y a moins de 60s)
+      const recentDup = findRecentDuplicateGpsLog(
+        gpsResult.latitude,
+        gpsResult.longitude,
+        author,
+        logs,
+        60
+      );
+
+      // 4. Enregistrement Firestore (mise à jour si doublon immédiat, sinon nouveau document)
+      const { id: savedId, isUpdated } = await upsertWaterlineGpsLogToFirestore(
+        snapshot,
+        recentDup ? recentDup.id : undefined
+      );
+
       const fullLog: GpsWaterlineLog = {
         ...snapshot,
-        id: newId,
+        id: savedId,
       };
 
       setLastLoggedItem(fullLog);
       setQuickNote('');
-      setCaptureStatus('✓ Relevé GPS enregistré avec succès !');
-      setTimeout(() => setCaptureStatus(''), 4000);
+      if (isUpdated) {
+        setCaptureStatus(`🛡️ Relevé actualisé (anti-doublon 60s) · Précision lissée : ±${gpsResult.accuracyM} m`);
+      } else {
+        setCaptureStatus(`✓ Relevé fiabilisé enregistré (4 échantillons) · Précision : ±${gpsResult.accuracyM} m`);
+      }
+      setTimeout(() => setCaptureStatus(''), 6000);
     } catch (err: any) {
       console.error('Erreur capture GPS:', err);
       setCaptureError(err?.message || 'Erreur inattendue lors de la mesure GPS.');
       setCaptureStatus('');
     } finally {
       setIsCapturing(false);
+      setSampleProgress(null);
     }
   };
 
@@ -234,6 +307,80 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             Rends-toi physiquement à la <strong>limite basse de roulage</strong> (front de l'eau). Appuie sur le bouton ci-dessous : ton smartphone fige automatiquement la position GPS haute précision, la météo AROME du moment et l'écart avec les modèles théoriques.
           </p>
 
+          {/* ÉTAPE 2 : JAUGE DE PROGRESSION & GAMIFICATION (OBJECTIF 300 MESURES) */}
+          <div
+            style={{
+              background: isRealModeUnlocked ? '#f0fdf4' : '#f8fafc',
+              border: isRealModeUnlocked ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+              borderRadius: '12px',
+              padding: '12px 16px',
+              marginBottom: '18px',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '1rem' }}>{isRealModeUnlocked ? '🏆' : '🎯'}</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 900, textTransform: 'uppercase', color: isRealModeUnlocked ? '#15803d' : '#0369a1', letterSpacing: '0.03em' }}>
+                  Progression vers le Mode Réel (Modèle Empirique)
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
+                  {totalCount} / {TARGET_MEASURES} ({progressPercent}%)
+                </span>
+                <button
+                  type="button"
+                  onClick={handleToggleDemoUnlock}
+                  title="Simuler immédiatement le déblocage des 300 mesures pour tester l'alerte festive"
+                  style={{
+                    background: isDemoUnlocked ? '#fef3c7' : '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '4px',
+                    padding: '2px 6px',
+                    fontSize: '0.62rem',
+                    fontWeight: 700,
+                    color: isDemoUnlocked ? '#b45309' : '#64748b',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isDemoUnlocked ? '✓ Démo 300 active' : '⚡ Tester cap 300'}
+                </button>
+              </div>
+            </div>
+
+            {/* Barre de jauge horizontale */}
+            <div style={{ width: '100%', height: '10px', background: '#e2e8f0', borderRadius: '5px', overflow: 'hidden', position: 'relative' }}>
+              <div
+                style={{
+                  width: `${progressPercent}%`,
+                  height: '100%',
+                  background: isRealModeUnlocked
+                    ? 'linear-gradient(90deg, #16a34a 0%, #22c55e 100%)'
+                    : 'linear-gradient(90deg, #0284c7 0%, #38bdf8 100%)',
+                  borderRadius: '5px',
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+
+            {/* Légende et statut */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '0.70rem' }}>
+              {isRealModeUnlocked ? (
+                <span style={{ color: '#166534', fontWeight: 800 }}>
+                  ✨ <strong>Cap des 300 mesures franchi !</strong> L'option Mode Réel est déverrouillée.
+                </span>
+              ) : (
+                <span style={{ color: '#64748b' }}>
+                  🔒 <strong>Mode Théorique actif</strong> (seuil fixe ex: {settings.L} m) · Encore <strong>{remainingCount}</strong> relevés pour débloquer le Mode Réel.
+                </span>
+              )}
+              <span style={{ color: '#0369a1', fontWeight: 700 }}>
+                Objectif : 2 à 5 / jour
+              </span>
+            </div>
+          </div>
+
           {/* Options rapides avant mesure */}
           <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -313,8 +460,71 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             )}
           </button>
 
+          {/* Badge de réassurance anti-doublon */}
+          <div style={{ marginTop: '10px', fontSize: '0.68rem', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+            <span>🛡️</span>
+            <span>Sécurité anti-doublon active (60s) : actualise intelligemment la mesure si ré-appuyé au même endroit.</span>
+          </div>
+
+          {/* Jauge d'échantillonnage multi-mesures (Étape 1 Modèle Empirique) */}
+          {sampleProgress && (
+            <div
+              style={{
+                marginTop: '14px',
+                background: '#f0f9ff',
+                border: '1.5px solid #bae6fd',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                maxWidth: '480px',
+                margin: '14px auto 0',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1' }}>
+                  📡 Moyennage anti-flottement : {sampleProgress.current} / {sampleProgress.total}
+                </span>
+                {sampleProgress.lastAcc > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      background: sampleProgress.lastAcc <= 5 ? '#dcfce7' : sampleProgress.lastAcc <= 15 ? '#fef3c7' : '#fee2e2',
+                      color: sampleProgress.lastAcc <= 5 ? '#15803d' : sampleProgress.lastAcc <= 15 ? '#b45309' : '#b91c1c',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                    }}
+                  >
+                    Précision : ±{sampleProgress.lastAcc} m {sampleProgress.lastAcc <= 15 ? '✓' : '⚠️ >15m'}
+                  </span>
+                )}
+              </div>
+
+              {/* Barres d'échantillons */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                {[1, 2, 3, 4].map(idx => {
+                  const isDone = sampleProgress.current > idx || (sampleProgress.current === idx && sampleProgress.lastAcc > 0);
+                  const isCurrent = sampleProgress.current === idx;
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        height: '8px',
+                        borderRadius: '4px',
+                        background: isDone ? '#0284c7' : isCurrent ? '#7dd3fc' : '#e2e8f0',
+                        transition: 'all 0.3s ease',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '0.66rem', color: '#64748b', textAlign: 'left' }}>
+                3 à 5 lectures successives pour filtrer les décalages de satellites avant validation finale.
+              </div>
+            </div>
+          )}
+
           {/* Retour de statut */}
-          {captureStatus && (
+          {captureStatus && !sampleProgress && (
             <div style={{ marginTop: '12px', fontSize: '0.82rem', fontWeight: 800, color: captureStatus.startsWith('✓') ? '#166534' : '#0284c7' }}>
               {captureStatus}
             </div>
@@ -324,7 +534,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <div style={{ marginTop: '12px', padding: '10px 14px', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px', color: '#991b1b', fontSize: '0.80rem', textAlign: 'left' }}>
               ⚠️ <strong>Erreur GPS :</strong> {captureError}
               <div style={{ marginTop: '4px', fontSize: '0.72rem', color: '#b91c1c' }}>
-                Astuce : Assurez-vous d'avoir accordé l'autorisation de géolocalisation dans le navigateur de votre smartphone et que le service GPS est bien activé.
+                Astuce : Assurez-vous d'avoir accordé l'autorisation de géolocalisation dans le navigateur de votre smartphone et que le service GPS est bien activé face à la mer.
               </div>
             </div>
           )}
@@ -679,6 +889,103 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           </table>
         </div>
       </div>
+
+      {/* MODALE FESTIVE DE DÉBLOCAGE DES 300 MESURES (ÉTAPE 2) */}
+      {showCelebrationModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(5px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeIn 0.25s ease',
+          }}
+          onClick={handleDismissCelebration}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '30px 24px',
+              textAlign: 'center',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+              border: '3px solid #ffc40d',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Ruban décoratif fête */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '8px',
+                background: 'linear-gradient(90deg, #ffc40d 0%, #10b981 33%, #0284c7 66%, #f59e0b 100%)',
+              }}
+            />
+
+            <div style={{ fontSize: '3.5rem', marginBottom: '10px' }}>
+              🎉 🏆 🌊
+            </div>
+
+            <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 900, color: '#b45309', marginBottom: '4px' }}>
+              CAP DES 300 MESURES FRANCHI !
+            </div>
+
+            <h2 style={{ margin: '0 0 14px', fontSize: '1.45rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.25 }}>
+              Félicitations Jérôme & Benoît !
+            </h2>
+
+            <div
+              style={{
+                background: '#fef3c7',
+                border: '1.5px solid #fde68a',
+                borderRadius: '12px',
+                padding: '16px',
+                fontSize: '1rem',
+                fontWeight: 800,
+                color: '#92400e',
+                lineHeight: 1.45,
+                marginBottom: '18px',
+              }}
+            >
+              « Vous avez passé les 300 mesures ! Vous avez déverrouillé l'option Mode Réel !! Félicitations !!! »
+            </div>
+
+            <p style={{ fontSize: '0.82rem', color: '#475569', lineHeight: 1.5, margin: '0 0 20px' }}>
+              Grâce à vos relevés constants sur la plage de Pentrez / Lestrevet, le modèle mathématique dispose désormais de données statistiques réelles suffisantes pour corriger les heures et seuils théoriques avec une précision millimétrique.
+            </p>
+
+            <button
+              type="button"
+              onClick={handleDismissCelebration}
+              style={{
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '12px 28px',
+                fontSize: '0.95rem',
+                fontWeight: 900,
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+              }}
+            >
+              🚀 Activer le Mode Réel & Continuer
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

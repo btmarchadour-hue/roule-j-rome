@@ -26,6 +26,8 @@ export interface AppSettings {
   vmax: number;
   gmax: number;
   fmin: number;
+  calculationMode?: 'theorique' | 'reel';
+  empiricalOffsetCm?: number;
 }
 
 export interface TidePoint {
@@ -197,10 +199,13 @@ export interface SlotObservation {
   observedWaveH?: number;       // Hauteur de houle réelle (m)
   observedWavePeriod?: number;  // Période de houle (s)
   beachCondition?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
-  // Bilan participants
-  participantsCount?: number;
+  // Bilan participants (Séances réalisées ou annulées avec inscrits)
+  participantsCount?: number;           // Pilotes ayant effectivement roulé (si réalisée)
   monoCount?: number;
   biCount?: number;
+  bookedParticipantsCount?: number;     // Inscrits prévus sur ce créneau (si annulée)
+  rescheduledCount?: number;            // Dont personnes replacées / reportées sur une autre séance
+  lostCount?: number;                   // Dont personnes définitivement perdues / remboursées
   notes?: string;
   author?: string;
   updatedAt?: number;

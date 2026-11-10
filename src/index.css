@@ -580,11 +580,57 @@ td.n {
   font-size: .78rem;
   cursor: pointer;
   transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tabs button.on {
   background: var(--ac2, #111);
   color: var(--ac3, #ffc40d);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* ==========================================================================
+   OPTIMISATION ERGONOMIQUE MOBILE (ANDROID CHROME & IPHONE SAFARI)
+   Ruban de navigation horizontal fluide tactile (swipe au doigt)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    gap: 8px;
+    padding: 2px 4px 8px;
+    margin: 0 -4px 10px;
+    scroll-snap-type: x mandatory;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs button {
+    flex: 0 0 auto;
+    min-width: auto;
+    white-space: nowrap;
+    padding: 8px 14px;
+    font-size: 0.74rem;
+    border-radius: 9999px;
+    border: 1px solid var(--bd, #cbd5e1);
+    background: var(--card, #ffffff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    scroll-snap-align: start;
+  }
+
+  .tabs button.on {
+    background: #0f172a;
+    color: #ffc40d;
+    border-color: #0f172a;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
+  }
 }
 
 .vd {
@@ -741,16 +787,81 @@ td.n {
   grid-column: 1/-1;
 }
 
-@media (max-width: 430px) {
-  h1 {
-    font-size: .95rem;
+@media (max-width: 640px) {
+  main {
+    padding: 10px 8px;
   }
-  .nav b {
-    min-width: 84px;
-    font-size: .7rem;
+  .card {
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+  .brand {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .brand img {
+    height: 40px;
   }
   .brand .bt {
-    font-size: .82rem;
+    font-size: 0.82rem;
+    line-height: 1.15;
+  }
+  .brand .bs {
+    font-size: 0.62rem;
+  }
+  .cal {
+    padding: 10px 8px;
+  }
+  .c {
+    min-height: 44px;
+    font-size: 0.80rem;
+    padding: 3px 1px 2px 1px;
+  }
+  .c small {
+    font-size: 0.48rem;
+    right: 2px;
+    top: 1px;
+  }
+  .g {
+    gap: 3px;
+  }
+  .nav {
+    padding: 3px;
+  }
+  .nav button {
+    width: 30px;
+    height: 30px;
+    font-size: 0.85rem;
+  }
+  .nav b {
+    min-width: 78px;
+    font-size: 0.68rem;
+  }
+  h1 {
+    font-size: 0.92rem;
+  }
+  input, select, textarea {
+    font-size: 16px !important; /* Évite le zoom automatique intempestif d'iOS Safari sur focus */
+  }
+}
+
+@media (max-width: 520px) {
+  .header-btn-text {
+    display: none;
+  }
+}
+
+@media (max-width: 430px) {
+  h1 {
+    font-size: .88rem;
+  }
+  .nav b {
+    min-width: 72px;
+    font-size: .66rem;
+  }
+  .brand .bt {
+    font-size: .78rem;
   }
 }
 

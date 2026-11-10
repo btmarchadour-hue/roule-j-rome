@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
               }}
             >
               <span>💬</span>
-              <span>Ben ↔ Jérôme</span>
+              <span className="header-btn-text">Ben ↔ Jérôme</span>
               {unreadExchangeCount > 0 && (
                 <span
                   style={{
@@ -148,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
             }}
           >
             <span>📲</span>
-            <span>Raccourci</span>
+            <span className="header-btn-text">Raccourci</span>
           </button>
 
           <button

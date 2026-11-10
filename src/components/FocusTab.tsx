@@ -23,6 +23,7 @@ import {
   vstat,
 } from '../utils/tides';
 import { WindguruTable } from './WindguruTable';
+import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
 
 interface FocusTabProps {
   settings: AppSettings;
@@ -55,6 +56,8 @@ interface FocusTabProps {
     customTitle?: string;
   }) => void;
   isReadOnly?: boolean;
+  activeDay?: 'tomorrow' | 'today';
+  onActiveDayChange?: (day: 'tomorrow' | 'today') => void;
 }
 
 export const FocusTab: React.FC<FocusTabProps> = ({
@@ -75,6 +78,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onOpenPrintAgenda,
   onOpenObservationModal,
   isReadOnly = false,
+  activeDay: propActiveDay,
+  onActiveDayChange,
 }) => {
   const onValidateDay = isReadOnly ? () => {} : rawOnValidateDay;
   const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
@@ -87,7 +92,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const tdRaw = tdy();
   const td = tdRaw < minDs ? minDs : tdRaw;
   const tomorrowDs = shf(td, 1);
-  const [activeDay, setActiveDay] = useState<'tomorrow' | 'today'>('tomorrow');
+  const [internalActiveDay, setInternalActiveDay] = useState<'tomorrow' | 'today'>('tomorrow');
+  const activeDay = propActiveDay ?? internalActiveDay;
+
+  const handleDayChange = (day: 'tomorrow' | 'today') => {
+    setInternalActiveDay(day);
+    onActiveDayChange?.(day);
+  };
 
   const fTomorrow = dayFocus(tomorrowDs, settings, tideW, first, last, windList, customSlotsMap);
   const fToday = dayFocus(td, settings, tideW, first, last, windList, customSlotsMap);
@@ -606,50 +617,141 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         style={{
           borderLeft: '4px solid var(--ac)',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '10px',
+          flexDirection: 'column',
+          gap: '12px',
         }}
       >
-        <div>
-          <div className="fh" style={{ margin: 0, fontWeight: 900, fontSize: '0.9rem' }}>
-            {activeDay === 'tomorrow' ? 'Focus Lendemain (Demain)' : "Focus Aujourd'hui"}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <div className="fh" style={{ margin: 0, fontWeight: 900, fontSize: '0.9rem' }}>
+              {activeDay === 'tomorrow' ? 'Focus Lendemain (Demain)' : "Focus Aujourd'hui"}
+            </div>
+            <div style={{ fontSize: '1.05rem', fontWeight: 800, textTransform: 'capitalize' }}>
+              {formatWd(currentDs)}
+            </div>
           </div>
-          <div style={{ fontSize: '1.05rem', fontWeight: 800, textTransform: 'capitalize' }}>
-            {formatWd(currentDs)}
+
+          {/* View toggle (limited to tomorrow by default, option to view today) */}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                background: activeDay === 'tomorrow' ? 'var(--ac)' : 'var(--cell)',
+                color: activeDay === 'tomorrow' ? '#111' : 'var(--tx)',
+                border: '1px solid var(--bd)',
+                margin: 0,
+              }}
+              onClick={() => handleDayChange('tomorrow')}
+            >
+              Demain (recommandé)
+            </button>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                background: activeDay === 'today' ? 'var(--ac)' : 'var(--cell)',
+                color: activeDay === 'today' ? '#111' : 'var(--tx)',
+                border: '1px solid var(--bd)',
+                margin: 0,
+              }}
+              onClick={() => handleDayChange('today')}
+            >
+              Aujourd'hui
+            </button>
           </div>
         </div>
 
-        {/* View toggle (limited to tomorrow by default, option to view today) */}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button
-            type="button"
-            className="fbtn"
-            style={{
-              background: activeDay === 'tomorrow' ? 'var(--ac)' : 'var(--cell)',
-              color: activeDay === 'tomorrow' ? '#111' : 'var(--tx)',
-              border: '1px solid var(--bd)',
-              margin: 0,
-            }}
-            onClick={() => setActiveDay('tomorrow')}
-          >
-            Demain (recommandé)
-          </button>
-          <button
-            type="button"
-            className="fbtn"
-            style={{
-              background: activeDay === 'today' ? 'var(--ac)' : 'var(--cell)',
-              color: activeDay === 'today' ? '#111' : 'var(--tx)',
-              border: '1px solid var(--bd)',
-              margin: 0,
-            }}
-            onClick={() => setActiveDay('today')}
-          >
-            Aujourd'hui
-          </button>
-        </div>
+        {/* ÉTAPE 3 : SÉLECTEUR DE MODE DE PLANIFICATION (THÉORIQUE VS RÉEL) */}
+        {(() => {
+          const logsCount = getStoredWaterlineLogs().length;
+          const isDemo = typeof window !== 'undefined' && localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
+          const isUnlocked = logsCount >= 300 || isDemo;
+          const currentMode = settings.calculationMode || 'theorique';
+
+          return (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
+                paddingTop: '10px',
+                borderTop: '1px solid var(--bd)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--mu)', textTransform: 'uppercase' }}>
+                  Modèle de calcul :
+                </span>
+                <div style={{ display: 'inline-flex', background: 'var(--cell)', padding: '2px', borderRadius: '8px', border: '1px solid var(--bd)' }}>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ calculationMode: 'theorique' })}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: currentMode === 'theorique' ? '#0f172a' : 'transparent',
+                      color: currentMode === 'theorique' ? '#fff' : 'var(--tx)',
+                      fontSize: '0.72rem',
+                      fontWeight: currentMode === 'theorique' ? 800 : 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    📐 Mode Théorique (SHOM)
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!isUnlocked}
+                    onClick={() => {
+                      if (!isUnlocked) {
+                        alert(
+                          `🔒 Le Mode Réel est verrouillé (${logsCount}/300 mesures).\n\nEnregistrez 300 relevés GPS terrain dans l'onglet « Étalonnage GPS » pour débloquer le Modèle Empirique.`
+                        );
+                        return;
+                      }
+                      onUpdateSettings({ calculationMode: 'reel' });
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: currentMode === 'reel' ? '#16a34a' : 'transparent',
+                      color: !isUnlocked ? '#94a3b8' : currentMode === 'reel' ? '#fff' : 'var(--tx)',
+                      fontSize: '0.72rem',
+                      fontWeight: currentMode === 'reel' ? 800 : 600,
+                      cursor: isUnlocked ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.15s ease',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: isUnlocked ? 1 : 0.65,
+                    }}
+                    title={
+                      isUnlocked
+                        ? 'Activer le Mode Réel calibré sur la plage de Pentrez / Lestrevet'
+                        : `Verrouillé (${logsCount}/300 mesures GPS requises)`
+                    }
+                  >
+                    <span>{isUnlocked ? '✨' : '🔒'}</span>
+                    <span>Mode Réel {isUnlocked ? '(Empirique)' : `(bloqué ${logsCount}/300)`}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Statut descriptif du mode actif */}
+              <div style={{ fontSize: '0.68rem', color: currentMode === 'reel' ? '#15803d' : '#0369a1', fontWeight: 700 }}>
+                {currentMode === 'reel'
+                  ? `✨ Créneaux adaptés selon le modèle empirique (+${settings.empiricalOffsetCm ?? 15} cm de surcote constatée)`
+                  : `Seuil nominal SHOM : ${settings.L} m`}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Main Focus Verdict Card */}

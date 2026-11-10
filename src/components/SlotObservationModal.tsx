@@ -96,6 +96,16 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   const [biCount, setBiCount] = useState<number | ''>(
     initialObservation?.biCount ?? ''
   );
+  // Demande Jérôme : Inscrits sur séances annulées & replacés / perdus
+  const [bookedParticipantsCount, setBookedParticipantsCount] = useState<number | ''>(
+    initialObservation?.bookedParticipantsCount ?? ''
+  );
+  const [rescheduledCount, setRescheduledCount] = useState<number | ''>(
+    initialObservation?.rescheduledCount ?? ''
+  );
+  const [lostCount, setLostCount] = useState<number | ''>(
+    initialObservation?.lostCount ?? ''
+  );
   const [notes, setNotes] = useState<string>(initialObservation?.notes || '');
 
   // Calcul automatique de l'écart horaire quand l'utilisateur change l'heure réelle
@@ -127,6 +137,18 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       status,
       cancellationReason: status === 'cancelled' ? cancellationReason : undefined,
       cancellationNote: status === 'cancelled' ? cancellationNote : undefined,
+      bookedParticipantsCount:
+        status === 'cancelled' && bookedParticipantsCount !== ''
+          ? Number(bookedParticipantsCount)
+          : undefined,
+      rescheduledCount:
+        status === 'cancelled' && rescheduledCount !== ''
+          ? Number(rescheduledCount)
+          : undefined,
+      lostCount:
+        status === 'cancelled' && lostCount !== ''
+          ? Number(lostCount)
+          : undefined,
       actualPassableTime: status === 'realized' && actualPassableTime ? actualPassableTime : undefined,
       timeDeltaMin: status === 'realized' && timeDeltaMin !== '' ? Number(timeDeltaMin) : undefined,
       waterDeltaCm: status === 'realized' && waterDeltaCm !== '' ? Number(waterDeltaCm) : undefined,
@@ -341,6 +363,92 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     boxSizing: 'border-box',
                   }}
                 />
+              </div>
+
+              {/* DEMANDE DE JÉRÔME : IMPACT CLIENTS & SAUVETAGE COMMERCIAL */}
+              <div style={{ marginTop: '12px', background: '#fff', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span>👥</span>
+                    <span>Suivi des inscrits impactés (Demande Jérôme)</span>
+                  </div>
+                  {cancellationReason === 'no_clients' ? (
+                    <span style={{ fontSize: '0.65rem', background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                      Vie 1 · Sans réservation
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.65rem', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                      Vie 2 · Session engagée
+                    </span>
+                  )}
+                </div>
+
+                {cancellationReason === 'no_clients' ? (
+                  <div style={{ fontSize: '0.72rem', color: '#0369a1', background: '#f0f9ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bae6fd', lineHeight: '1.35' }}>
+                    ℹ️ <strong>Créneau fermé faute d'inscrits (Vie 1)</strong> : aucun client n'avait réservé sur ce créneau. Il n'est pas comptabilisé comme perte de clientèle.
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ margin: '0 0 8px', fontSize: '0.70rem', color: '#64748b' }}>
+                      Mesurez les personnes que vous n'avez pas pu faire rouler et celles que vous avez réussi à replacer :
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#991b1b', display: 'block', marginBottom: '2px' }}>
+                          Inscrits prévus
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={bookedParticipantsCount}
+                          onChange={e => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setBookedParticipantsCount(val);
+                            if (val !== '' && rescheduledCount !== '') {
+                              setLostCount(Math.max(0, val - Number(rescheduledCount)));
+                            }
+                          }}
+                          placeholder="ex: 8"
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '5px', border: '1.5px solid #f87171', fontSize: '0.82rem', fontWeight: 700, color: '#991b1b', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#15803d', display: 'block', marginBottom: '2px' }}>
+                          Dont replacés 🔄
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rescheduledCount}
+                          onChange={e => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setRescheduledCount(val);
+                            if (bookedParticipantsCount !== '' && val !== '') {
+                              setLostCount(Math.max(0, Number(bookedParticipantsCount) - val));
+                            }
+                          }}
+                          placeholder="ex: 6"
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '5px', border: '1.5px solid #86efac', fontSize: '0.82rem', fontWeight: 700, color: '#15803d', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#b91c1c', display: 'block', marginBottom: '2px' }}>
+                          Dont perdus ❌
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={lostCount}
+                          onChange={e => setLostCount(e.target.value === '' ? '' : Number(e.target.value))}
+                          placeholder="ex: 2"
+                          style={{ width: '100%', padding: '6px 8px', borderRadius: '5px', border: '1.5px solid #cbd5e1', fontSize: '0.82rem', fontWeight: 700, color: '#b91c1c', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

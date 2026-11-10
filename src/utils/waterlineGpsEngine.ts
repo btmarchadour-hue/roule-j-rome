@@ -32,7 +32,7 @@ export interface GpsCaptureResult {
 }
 
 /**
- * Capture la position GPS du smartphone avec contrainte de haute précision
+  * Capture la position GPS du smartphone avec contrainte de haute précision
  */
 export function requestHighAccuracyGps(): Promise<GpsCaptureResult> {
   return new Promise((resolve, reject) => {
@@ -71,6 +71,63 @@ export function requestHighAccuracyGps(): Promise<GpsCaptureResult> {
       }
     );
   });
+}
+
+/**
+ * Étape 1 du Modèle Empirique : Capture moyennée multi-échantillons (3 à 5 lectures successives)
+ * avec filtrage strict de précision (rejet/avertissement si accuracy > 15 m et suppression du flottement).
+ */
+export async function requestSmoothedHighAccuracyGps(
+  samplesCount: number = 4,
+  sampleDelayMs: number = 600,
+  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void
+): Promise<GpsCaptureResult> {
+  const readings: GpsCaptureResult[] = [];
+
+  for (let i = 0; i < samplesCount; i++) {
+    const single = await requestHighAccuracyGps();
+    readings.push(single);
+    onSampleProgress?.(i + 1, samplesCount, single.accuracyM);
+
+    if (i < samplesCount - 1) {
+      await new Promise(r => setTimeout(r, sampleDelayMs));
+    }
+  }
+
+  // Filtrage de précision : éliminer les lectures aberrantes (> 15m) si des lectures précises existent
+  const validReadings = readings.filter(r => r.accuracyM <= 15);
+
+  if (validReadings.length === 0) {
+    const bestAcc = Math.min(...readings.map(r => r.accuracyM));
+    throw new Error(
+      `Signal GPS insuffisant : la meilleure précision mesurée est de ${bestAcc} m (le seuil requis est inférieur à 15 m). Rapprochez-vous du front de mer à découvert pour une meilleure visibilité satellite.`
+    );
+  }
+
+  // Moyenne arithmétique sur les coordonnées fiabilisées
+  const sumLat = validReadings.reduce((sum, r) => sum + r.latitude, 0);
+  const sumLon = validReadings.reduce((sum, r) => sum + r.longitude, 0);
+  const sumAcc = validReadings.reduce((sum, r) => sum + r.accuracyM, 0);
+
+  const altitudes = validReadings.map(r => r.altitude).filter((a): a is number => a != null);
+  const avgAlt = altitudes.length > 0 ? Number((altitudes.reduce((sum, a) => sum + a, 0) / altitudes.length).toFixed(1)) : null;
+
+  const avgLat = Number((sumLat / validReadings.length).toFixed(6));
+  const avgLon = Number((sumLon / validReadings.length).toFixed(6));
+  const avgAcc = Number((sumAcc / validReadings.length).toFixed(1));
+
+  let quality: 'high' | 'medium' | 'low' = 'high';
+  if (avgAcc > 15) quality = 'low';
+  else if (avgAcc > 5) quality = 'medium';
+
+  return {
+    latitude: avgLat,
+    longitude: avgLon,
+    altitude: avgAlt,
+    accuracyM: avgAcc,
+    accuracyQuality: quality,
+    timestamp: Date.now(),
+  };
 }
 
 /**
@@ -199,4 +256,45 @@ export function exportWaterlineLogsAsCsv(logs: GpsWaterlineLog[]): string {
 
   const csvRows = [headers.join(';'), ...rows.map(r => r.join(';'))];
   return '\uFEFF' + csvRows.join('\r\n');
+}
+
+/**
+ * Calcule la distance approximative en mètres entre deux coordonnées géodésiques (formule de Haversine)
+ */
+export function calculateGpsDistanceM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // Rayon de la Terre en mètres
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lon2 - lon1) * toRad;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Recherche si un relevé très récent (< 60 secondes) a été effectué par le même auteur au même endroit (< 25 m)
+ */
+export function findRecentDuplicateGpsLog(
+  newLat: number,
+  newLon: number,
+  author: string,
+  existingLogs: GpsWaterlineLog[],
+  windowSeconds: number = 60
+): GpsWaterlineLog | null {
+  const now = Date.now();
+  for (const log of existingLogs) {
+    const elapsedSeconds = (now - log.timestamp) / 1000;
+    // Si la mesure a été prise il y a moins de X secondes par le même auteur
+    if (elapsedSeconds >= 0 && elapsedSeconds <= windowSeconds && log.author === author) {
+      const dist = calculateGpsDistanceM(newLat, newLon, log.latitude, log.longitude);
+      // À moins de 25 mètres sur la plage = c'est le même point
+      if (dist <= 25) {
+        return log;
+      }
+    }
+  }
+  return null;
 }

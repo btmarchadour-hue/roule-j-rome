@@ -791,14 +791,22 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               {periodStats.totalCancelledSlots}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#dc2626', fontWeight: 700 }}>
-              séance{periodStats.totalCancelledSlots > 1 ? 's' : ''}
+              créneau{periodStats.totalCancelledSlots > 1 ? 'x' : ''}
             </span>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            {periodStats.totalCancelledSlots > 0
-              ? `Soit ${Math.min(100, Math.round((periodStats.totalCancelledSlots / Math.max(1, periodStats.totalPossibleSlots)) * 1000) / 10)}% des créneaux de la période`
-              : 'Aucune annulation enregistrée sur la période'}
+
+          {/* Distinction Vie 1 (faute d'inscrits) vs Vie 2 (annulations météo / terrain) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '6px', fontSize: '0.70rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', background: '#f0f9ff', padding: '2px 6px', borderRadius: '4px' }}>
+              <span>• Faute d'inscrits (Vie 1) :</span>
+              <strong>{periodStats.unbookedSlotsCount}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#991b1b', background: '#fef2f2', padding: '2px 6px', borderRadius: '4px' }}>
+              <span>• Annulées météo / aléas (Vie 2) :</span>
+              <strong>{periodStats.weatherCancelledSlotsCount}</strong>
+            </div>
           </div>
+
           <div
             style={{
               fontSize: '0.67rem',
@@ -809,11 +817,11 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Créneaux non roulés (annulations météo, vent ou manque de réservations).</em>
+            ℹ️ <em>Dissocie les créneaux fermés sans réservation de ceux annulés alors qu'ils étaient programmés.</em>
           </div>
         </div>
 
-        {/* KPI 3 : Remplissage & Participants */}
+        {/* KPI 3 : Remplissage, Participants & Sauvetage Commercial */}
         <div
           className="card"
           style={{
@@ -827,19 +835,33 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           }}
         >
           <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#047857', letterSpacing: '0.04em' }}>
-            👥 Participants & Remplissage
+            👥 Pilotes & Sauvetage Commercial
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
             <span style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
-              {periodStats.totalParticipants}
+              {periodStats.totalRealizedParticipants}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 700 }}>
-              inscrits
+              ont roulé
             </span>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            Taux de remplissage : <strong>{periodStats.avgFillRate}%</strong> (base 12 places / séance)
+
+          {/* Détail spécifique demandé par Jérôme : Inscrits qui n'ont pas roulé, replacés vs perdus */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '6px', fontSize: '0.70rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b91c1c' }}>
+              <span>• Inscrits météo annulée :</span>
+              <strong>{periodStats.totalCancelledParticipants}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#15803d' }}>
+              <span>• Dont replacés (sauvés) :</span>
+              <strong>{periodStats.totalRescheduledParticipants} ({periodStats.rescheduledRate}%)</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+              <span>• Dont perdus / remboursés :</span>
+              <strong>{periodStats.totalLostParticipants}</strong>
+            </div>
           </div>
+
           <div
             style={{
               fontSize: '0.67rem',
@@ -850,7 +872,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Inscrits rapportés à la jauge max de sécurité (12 pilotes par séance réalisée).</em>
+            ℹ️ <em>Remplissage moyen : {periodStats.avgFillRate}% (base 12 pilotes max).</em>
           </div>
         </div>
 

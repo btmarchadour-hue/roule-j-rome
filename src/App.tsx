@@ -54,6 +54,7 @@ import {
   LNG,
   maxDs,
   minDs,
+  shf,
   sigOf,
   tdy,
   toU,
@@ -115,8 +116,14 @@ export const App: React.FC = () => {
   const [year, setYear] = useState<number>(2026);
   const [month, setMonth] = useState<number>(10); // 0-indexed: 10 = November
   const [selectedDate, setSelectedDate] = useState<string>('2026-11-01');
+  const [focusDay, setFocusDay] = useState<'tomorrow' | 'today'>('tomorrow');
 
-  // App settings
+  // Date active pour l'onglet Focus (demain par défaut, ou aujourd'hui)
+  const focusDate = useMemo(() => {
+    const tdRaw = tdy();
+    const td = tdRaw < minDs ? minDs : tdRaw;
+    return focusDay === 'tomorrow' ? shf(td, 1) : td;
+  }, [focusDay]);
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('cvSettings');
@@ -745,7 +752,10 @@ export const App: React.FC = () => {
     return build(settings.les, settings.pcor, windList);
   }, [settings.les, settings.pcor, windList]);
 
-  const effectiveThreshold = settings.L - (settings.mg || 0) / 100;
+  // ÉTAPE 3 : Ajustement selon le mode Théorique vs Mode Réel (Modèle Empirique)
+  const isRealMode = settings.calculationMode === 'reel';
+  const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
+  const effectiveThreshold = (settings.L + empiricalOffsetM) - (settings.mg || 0) / 100;
 
   const tideW = useMemo(() => {
     return win(EX, effectiveThreshold);
@@ -771,8 +781,9 @@ export const App: React.FC = () => {
         onOpenUserManagement={() => setIsUserModalOpen(true)}
       />
       <main className={activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
-        {/* En-tête des marées en haut de page (masqué en onglet 3, 4, 5, 6 et 7 et à l'impression) */}
-        {activeTab <= 2 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
+        {/* En-tête des marées : affiche la date du calendrier en tab 1, et la date du lendemain en tab 2 */}
+        {activeTab === 1 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
+        {activeTab === 2 && <TideHeaderCard selectedDate={focusDate} EX={EX} />}
 
         {/* Navigation tabs */}
         <nav className="tabs noprint">
@@ -991,6 +1002,8 @@ export const App: React.FC = () => {
             onOpenPrintAgenda={() => handleTabChange(3)}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
             isReadOnly={isReadOnly}
+            activeDay={focusDay}
+            onActiveDayChange={setFocusDay}
           />
         )}
 

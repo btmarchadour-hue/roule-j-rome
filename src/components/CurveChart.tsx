@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { AppSettings, TidePoint } from '../types';
-import { COEF, dayInfo, dayLight, hAt, lc, p2, plan, toU } from '../utils/tides';
+import { COEF, dayInfo, dayLight, hAt, lc, p2, plan, toU, build } from '../utils/tides';
 
 interface CurveChartProps {
   dateStr: string;
@@ -35,19 +35,32 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   const ph = H - mt - mb;
   const thr = settings.L - (settings.mg || 0) / 100;
 
+  const isRealMode = settings.calculationMode === 'reel';
+  const empiricalOffsetM = (settings.empiricalOffsetCm ?? 15) / 100;
+
+  // 1. Modèle théorique pur SHOM (sans aucune surcote météo)
+  const rawEX = useMemo(() => build(settings.les, false, []), [settings.les]);
+
   const X = (u: number) => ml + ((u - t0) / (t1 - t0)) * pw;
   const f1 = (v: number) => v.toFixed(1);
 
-  const pts: [number, number | null][] = [];
+  // 2. Échantillonnage synchrone des deux courbes (Théorique vs Réelle)
+  const pts: { u: number; hTheo: number | null; hReal: number | null }[] = [];
   for (let u = t0; u <= t1; u += 10) {
-    pts.push([u, hAt(u, EX)]);
+    const ht = hAt(u, rawEX);
+    const hr = hAt(u, EX);
+    // Si Mode Réel activé, on applique le décalage empirique sur la courbe réelle
+    const hAdjusted = hr != null ? (isRealMode ? hr + empiricalOffsetM : hr) : null;
+    pts.push({ u, hTheo: ht, hReal: hAdjusted });
   }
 
-  const hs = pts.map(p => p[1]).filter((v): v is number => v != null);
-  if (!hs.length) return null;
+  const allHeights = pts
+    .flatMap(p => [p.hTheo, p.hReal])
+    .filter((v): v is number => v != null);
+  if (!allHeights.length) return null;
 
-  const ymin = Math.floor(Math.min(...hs) - 0.3);
-  const ymax = Math.ceil(Math.max(Math.max(...hs), thr) + 0.4);
+  const ymin = Math.floor(Math.min(...allHeights) - 0.3);
+  const ymax = Math.ceil(Math.max(Math.max(...allHeights), thr) + 0.4);
   const Y = (h: number) => mt + ph - ((h - ymin) / (ymax - ymin)) * ph;
 
   // Daylight rectangle (Vert pour la journée, noir pour la nuit)
@@ -115,7 +128,38 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     );
   }
 
-  // Curve polylines
+  // =========================================================================
+  // ÉTAPE 4 : TRACÉ DOUBLE COURBE & ZONE DE DÉCALAGE (OFFSET / DELTA)
+  // =========================================================================
+
+  // 1. Courbe théorique SHOM (tracée en pointillés discrets)
+  const theoPointsStr = pts
+    .filter(p => p.hTheo != null)
+    .map(p => `${f1(X(p.u))},${f1(Y(p.hTheo!))}`)
+    .join(' ');
+
+  // 2. Surface ombrée du décalage (offset delta) entre Réel et Théorique
+  const validDeltaPts = pts.filter(p => p.hReal != null && p.hTheo != null);
+  let deltaPolygon = null;
+  const hasOffset = validDeltaPts.some(p => Math.abs(p.hReal! - p.hTheo!) >= 0.02);
+
+  if (hasOffset && validDeltaPts.length > 1) {
+    const forwardReal = validDeltaPts.map(p => `${f1(X(p.u))},${f1(Y(p.hReal!))}`);
+    const backwardTheo = [...validDeltaPts].reverse().map(p => `${f1(X(p.u))},${f1(Y(p.hTheo!))}`);
+    const polygonPoints = [...forwardReal, ...backwardTheo].join(' ');
+    deltaPolygon = (
+      <polygon
+        points={polygonPoints}
+        style={{
+          fill: '#f59e0b',
+          fillOpacity: 0.28,
+          stroke: 'none',
+        }}
+      />
+    );
+  }
+
+  // 3. Courbe réelle (corrigée par le modèle météo et empirique)
   const polylines: React.ReactNode[] = [];
   let run: string[] = [];
   let col: string | null = null;
@@ -127,7 +171,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           points={run.join(' ')}
           style={{
             fill: 'none',
-            stroke: col || '#1d4ed8',
+            stroke: col || '#38bdf8',
             strokeWidth: 2.6,
             strokeLinejoin: 'round',
           }}
@@ -138,14 +182,14 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   };
 
   let polyIdx = 0;
-  for (const [u, h] of pts) {
+  for (const p of pts) {
+    const h = p.hReal;
     if (h == null) {
       flush(polyIdx++);
       col = null;
       continue;
     }
-    // High contrast on green day & black night:
-    // Bright cyan/sky blue when under threshold, deep blue when above threshold
+    // Cyan sous le seuil de praticabilité, bleu au-dessus
     const c = h <= thr ? '#38bdf8' : '#60a5fa';
     if (c !== col) {
       const lastPt = run.length ? run[run.length - 1] : null;
@@ -153,7 +197,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       col = c;
       if (lastPt) run = [lastPt];
     }
-    run.push(f1(X(u)) + ',' + f1(Y(h)));
+    run.push(f1(X(p.u)) + ',' + f1(Y(h)));
   }
   flush(polyIdx++);
 
@@ -277,18 +321,22 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       return;
     }
     const u = t0 + ((fx - ml) / pw) * (t1 - t0);
-    const h = hAt(u, EX);
-    if (h == null) {
+    const ht = hAt(u, rawEX);
+    const hrRaw = hAt(u, EX);
+    const hr = hrRaw != null ? (isRealMode ? hrRaw + empiricalOffsetM : hrRaw) : null;
+    if (hr == null) {
       setCrosshair(prev => ({ ...prev, visible: false }));
       return;
     }
+    const deltaCm = ht != null ? Math.round((hr - ht) * 100) : 0;
+    const deltaLabel = deltaCm !== 0 ? ` · Δ ${deltaCm > 0 ? '+' : ''}${deltaCm} cm` : '';
     const px = X(u);
-    const text = `${lc(u, y, m, d)} · ${h.toFixed(2).replace('.', ',')} m${h <= thr ? ' · sous le seuil' : ''}`;
-    const textX = Math.min(W - mr - 70, Math.max(ml + 2, px + 6));
+    const text = `${lc(u, y, m, d)} · Réel: ${hr.toFixed(2).replace('.', ',')} m · Théo: ${ht != null ? ht.toFixed(2).replace('.', ',') : '-'} m${deltaLabel}${hr <= thr ? ' · sous seuil' : ''}`;
+    const textX = Math.min(W - mr - 90, Math.max(ml + 2, px + 6));
     setCrosshair({
       visible: true,
       x: px,
-      y: Y(h),
+      y: Y(hr),
       text,
       textX,
     });
@@ -351,7 +399,26 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           seuil {thr.toFixed(2).replace('.', ',')} m
         </text>
 
+        {/* ÉTAPE 4 : Surface du décalage (offset delta) entre Réel et Théorique */}
+        {deltaPolygon}
+
+        {/* ÉTAPE 4 : Courbe théorique SHOM (pointillés fins) */}
+        {theoPointsStr && (
+          <polyline
+            points={theoPointsStr}
+            style={{
+              fill: 'none',
+              stroke: '#f8fafc',
+              strokeWidth: 1.4,
+              strokeDasharray: '4 3',
+              strokeOpacity: 0.85,
+            }}
+          />
+        )}
+
+        {/* Courbe réelle continue (Cyan/Bleu selon seuil de praticabilité) */}
         {polylines}
+
         {pmBmMarks}
         {windowBars}
         {sessionBars}
@@ -390,8 +457,24 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           </g>
         )}
       </svg>
-      <div className="m" style={{ marginTop: '4px' }}>
-        Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> · <b>fond noir : nuit</b> · courbe cyan/bleu vif : sous le seuil · seuil jaune en pointillés · barre bleue : plage praticable · barres marine : séances. Touche ou survole la courbe pour lire l'heure et la hauteur.
+      <div className="m" style={{ marginTop: '6px', fontSize: '0.72rem', lineHeight: '1.4' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '12px', height: '3px', background: '#38bdf8', display: 'inline-block' }} />
+            <strong>Courbe réelle (modèle corrigé)</strong>
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #94a3b8', display: 'inline-block' }} />
+            <span>Courbe théorique SHOM</span>
+          </span>
+          {hasOffset && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: '10px', height: '10px', background: 'rgba(245, 158, 11, 0.45)', borderRadius: '2px', display: 'inline-block' }} />
+              <strong style={{ color: '#b45309' }}>Décalage / Delta constaté</strong>
+            </span>
+          )}
+        </div>
+        Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> · <b>fond noir : nuit</b> · barre bleue : plage praticable · barres marine : séances. Touche ou survole la courbe pour lire l'heure, la hauteur théorique et le delta réel.
         {mar != null && (
           <span>
             {' '}

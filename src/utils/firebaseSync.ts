@@ -821,25 +821,34 @@ export const subscribeToWaterlineGpsLogs = (
   );
 };
 
-export const addWaterlineGpsLogToFirestore = async (
-  log: Omit<GpsWaterlineLog, 'id'>
-): Promise<string> => {
+export const upsertWaterlineGpsLogToFirestore = async (
+  log: Omit<GpsWaterlineLog, 'id'>,
+  existingId?: string
+): Promise<{ id: string; isUpdated: boolean }> => {
   try {
     await ensureAuth();
-    const cleanId = `gps_${log.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const cleanId = existingId || `gps_${log.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const docRef = doc(db, 'waterline_gps_logs', cleanId);
     const payload = cleanForFirestore({
       ...log,
       createdAt: log.createdAt || Date.now(),
+      updatedAt: Date.now(),
     });
-    await setDoc(docRef, payload);
-    notifySync('✓ Relevé GPS limite d\'eau enregistré');
-    return cleanId;
+    await setDoc(docRef, payload, { merge: true });
+    notifySync(existingId ? '🛡️ Relevé GPS mis à jour (sécurité anti-doublon)' : '✓ Relevé GPS limite d\'eau enregistré');
+    return { id: cleanId, isUpdated: Boolean(existingId) };
   } catch (error) {
     console.error('Erreur enregistrement relevé GPS Firestore:', error);
     notifySync('⚠️ Erreur d\'enregistrement GPS');
     throw error;
   }
+};
+
+export const addWaterlineGpsLogToFirestore = async (
+  log: Omit<GpsWaterlineLog, 'id'>
+): Promise<string> => {
+  const res = await upsertWaterlineGpsLogToFirestore(log);
+  return res.id;
 };
 
 export const deleteWaterlineGpsLogFromFirestore = async (logId: string): Promise<void> => {

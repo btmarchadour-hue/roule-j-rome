@@ -157,6 +157,13 @@ export interface PeriodStatsResult {
     info: (typeof CANCELLATION_REASONS_INFO)[CancellationReason];
   }[];
   totalParticipants: number;
+  totalRealizedParticipants: number;    // Inscrits ayant roulé (séances réalisées)
+  totalCancelledParticipants: number;   // Inscrits impactés par des annulations météo/aléa
+  totalRescheduledParticipants: number; // Inscrits replacés avec succès sur une autre séance
+  totalLostParticipants: number;        // Inscrits définitivement perdus / remboursés
+  rescheduledRate: number;              // Taux de sauvetage commercial (% replacés)
+  unbookedSlotsCount: number;           // Créneaux fermés faute d'inscrits (Vie 1)
+  weatherCancelledSlotsCount: number;   // Créneaux annulés météo/aléa (Vie 2)
   totalMono: number;
   totalBi: number;
   avgFillRate: number; // en % (sur base de 12 places / séance réalisée)
@@ -201,6 +208,12 @@ export function computePeriodStats(
   let totalRealizedSlots = 0;
   let totalCancelledSlots = 0;
   let totalParticipants = 0;
+  let totalRealizedParticipants = 0;
+  let totalCancelledParticipants = 0;
+  let totalRescheduledParticipants = 0;
+  let totalLostParticipants = 0;
+  let unbookedSlotsCount = 0;
+  let weatherCancelledSlotsCount = 0;
   let totalMono = 0;
   let totalBi = 0;
 
@@ -268,22 +281,43 @@ export function computePeriodStats(
     if (dayVal && dayVal.items) {
       dayVal.items.forEach(item => {
         handledSlotKeys.add(item.k);
+        const matchedObs = dayObs.find(o => o.slotKey === item.k);
+
         if (item.status === 'valid') {
           totalRealizedSlots++;
+          if (matchedObs?.participantsCount) {
+            totalParticipants += matchedObs.participantsCount;
+            totalRealizedParticipants += matchedObs.participantsCount;
+          }
+          if (matchedObs?.monoCount) totalMono += matchedObs.monoCount;
+          if (matchedObs?.biCount) totalBi += matchedObs.biCount;
         } else if (item.status === 'rejected') {
           totalCancelledSlots++;
           // Recherche motif
-          const matchedObs = dayObs.find(o => o.slotKey === item.k);
+          let reason: CancellationReason = 'wind_low';
           if (matchedObs?.cancellationReason) {
-            reasonsCount[matchedObs.cancellationReason]++;
+            reason = matchedObs.cancellationReason;
           } else {
             // Déduction par défaut si note présente
             const note = item.rejectReason?.toLowerCase() || '';
-            if (note.includes('vent fort') || note.includes('rafale')) reasonsCount.wind_high++;
-            else if (note.includes('pétole') || note.includes('vent faible')) reasonsCount.wind_low++;
-            else if (note.includes('client') || note.includes('réserv')) reasonsCount.no_clients++;
-            else if (note.includes('bâche') || note.includes('plage')) reasonsCount.beach_state++;
-            else reasonsCount.wind_low++; // Motif le plus fréquent en école de voile
+            if (note.includes('vent fort') || note.includes('rafale')) reason = 'wind_high';
+            else if (note.includes('pétole') || note.includes('vent faible')) reason = 'wind_low';
+            else if (note.includes('client') || note.includes('réserv')) reason = 'no_clients';
+            else if (note.includes('bâche') || note.includes('plage')) reason = 'beach_state';
+          }
+          reasonsCount[reason]++;
+
+          // Distinction Vie 1 (faute d'inscrits) vs Vie 2 (annulé avec inscrits)
+          if (reason === 'no_clients') {
+            unbookedSlotsCount++;
+          } else {
+            weatherCancelledSlotsCount++;
+            const booked = matchedObs?.bookedParticipantsCount || 0;
+            const resched = matchedObs?.rescheduledCount || 0;
+            const lost = matchedObs?.lostCount != null ? matchedObs.lostCount : Math.max(0, booked - resched);
+            totalCancelledParticipants += booked;
+            totalRescheduledParticipants += resched;
+            totalLostParticipants += lost;
           }
         }
       });
@@ -292,24 +326,32 @@ export function computePeriodStats(
     // Prendre en compte les observations terrain (non encore saisies dans validations)
     dayObs.forEach(obs => {
       if (handledSlotKeys.has(obs.slotKey)) {
-        // Enregistrer participants si séance validée
-        if (obs.participantsCount) totalParticipants += obs.participantsCount;
-        if (obs.monoCount) totalMono += obs.monoCount;
-        if (obs.biCount) totalBi += obs.biCount;
         return;
       }
       handledSlotKeys.add(obs.slotKey);
 
       if (obs.status === 'cancelled') {
         totalCancelledSlots++;
-        if (obs.cancellationReason) {
-          reasonsCount[obs.cancellationReason]++;
+        const reason: CancellationReason = obs.cancellationReason || 'other';
+        reasonsCount[reason]++;
+
+        if (reason === 'no_clients') {
+          unbookedSlotsCount++;
         } else {
-          reasonsCount.other++;
+          weatherCancelledSlotsCount++;
+          const booked = obs.bookedParticipantsCount || 0;
+          const resched = obs.rescheduledCount || 0;
+          const lost = obs.lostCount != null ? obs.lostCount : Math.max(0, booked - resched);
+          totalCancelledParticipants += booked;
+          totalRescheduledParticipants += resched;
+          totalLostParticipants += lost;
         }
       } else if (obs.status === 'realized') {
         totalRealizedSlots++;
-        if (obs.participantsCount) totalParticipants += obs.participantsCount;
+        if (obs.participantsCount) {
+          totalParticipants += obs.participantsCount;
+          totalRealizedParticipants += obs.participantsCount;
+        }
         if (obs.monoCount) totalMono += obs.monoCount;
         if (obs.biCount) totalBi += obs.biCount;
       }
@@ -341,6 +383,11 @@ export function computePeriodStats(
   const avgFillRate =
     totalRealizedSlots > 0 ? Math.min(100, (totalParticipants / (totalRealizedSlots * 12)) * 100) : 0;
 
+  const rescheduledRate =
+    totalCancelledParticipants > 0
+      ? Math.round((totalRescheduledParticipants / totalCancelledParticipants) * 1000) / 10
+      : 0;
+
   return {
     periodLabel: `${startDateStr} au ${endDateStr}`,
     startDateStr,
@@ -352,6 +399,13 @@ export function computePeriodStats(
     realizationRate: Math.round(realizationRate * 10) / 10,
     cancellationReasonsBreakdown,
     totalParticipants,
+    totalRealizedParticipants,
+    totalCancelledParticipants,
+    totalRescheduledParticipants,
+    totalLostParticipants,
+    rescheduledRate,
+    unbookedSlotsCount,
+    weatherCancelledSlotsCount,
     totalMono,
     totalBi,
     avgFillRate: Math.round(avgFillRate * 10) / 10,
