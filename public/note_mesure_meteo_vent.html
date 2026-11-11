@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note Technique · Choix de la mesure météo & vent en direct · Char à Voile</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 14mm 12mm 14mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.45;
+      font-size: 11px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      margin: 15px auto;
+      padding: 14mm 16mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
+    .sub { color: #475569; font-size: 10px; }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 12px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.5px;
+    }
+    .section-box {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 9px 12px;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 900;
+      color: #0284c7;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 4px;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .opt-card {
+      border: 1.5px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #f8fafc;
+    }
+    .handwriting-box {
+      border: 1px solid #cbd5e1;
+      background: #fcfcfc;
+      border-radius: 4px;
+      padding: 6px;
+      height: 38px;
+      position: relative;
+    }
+    .handwriting-box .line {
+      border-bottom: 1px dotted #cbd5e1;
+      height: 14px;
+    }
+    .handwriting-label {
+      font-size: 8.5px;
+      color: #94a3b8;
+      font-style: italic;
+      position: absolute;
+      top: 3px;
+      left: 6px;
+    }
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+      font-size: 9px;
+      color: #64748b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      🌪️ Char à Voile du Bout du Monde · Note Technique Météo (Module 8)
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Module 8 · Architecture des Données Météo</span>
+            <h1>Choix de la Mesure Météo & Vent en Direct à Lestrevet</h1>
+            <div class="sub">Analyse technique des flux : Winds Up Spot 66 vs AROME Météo-France vs Balise Club</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
+        <div><strong>Auteur :</strong> Benoît & Sheldon</div>
+        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+      </div>
+
+      <!-- 1. Le constat technique Winds Up -->
+      <div class="section-box" style="background: #eff6ff; border-color: #bfdbfe;">
+        <div class="section-title" style="color: #1e40af;">
+          <span>🔍</span>
+          <span>1. Pourquoi la balise Winds Up (Spot 66) ne peut pas être injectée directement</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #1e3a8a; line-height: 1.45;">
+          Beaucoup de pratiquants consultent Winds Up sur leur téléphone. Benoît et moi avons étudié la faisabilité d'importer automatiquement leurs rafales dans le calcul de nos créneaux :
+        </p>
+        <ul style="margin: 0; padding-left: 16px; font-size: 9.5px; color: #1e3a8a; line-height: 1.4;">
+          <li><strong>Absence d'API publique :</strong> Winds Up est un service commercial fermé sans flux de données gratuit pour les applications tierces.</li>
+          <li><strong>Blocage strict par les navigateurs :</strong> Leurs serveurs envoient l'en-tête de sécurité <code>X-Frame-Options: SAMEORIGIN</code>. Tout navigateur moderne (Safari iPhone, Chrome) bloque catégoriquement son incrustation (iframe).</li>
+          <li><strong>Fiabilité matérielle de la balise 66 :</strong> L'anémomètre physique de Lestrevet est régulièrement signalé hors service ou en panne de transmission pendant plusieurs semaines consécutives.</li>
+        </ul>
+      </div>
+
+      <!-- 2. Comparatif des 3 options -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>⚖️</span>
+          <span>2. Comparatif des 3 Solutions pour l'École</span>
+        </div>
+
+        <div class="card-grid">
+          <!-- Option 1 : AROME HD (Actuelle) -->
+          <div class="opt-card" style="border-color: #86efac; background: #f0fdf4;">
+            <div style="font-weight: 900; color: #166534; font-size: 10.5px; margin-bottom: 4px;">
+              ⭐ Option 1 : Modèle AROME HD (Actuelle)
+            </div>
+            <div style="font-size: 9.5px; color: #15803d; line-height: 1.4;">
+              • <strong>Coût :</strong> 0 € (Open data Météo-France).<br>
+              • <strong>Maille :</strong> Ultra-fine 1,3 km actualisée 4 fois par jour.<br>
+              • <strong>Anticipation :</strong> Permet de calculer les créneaux à J-2 / J-1 pour prévenir les clients.<br>
+              • <strong>Ergonomie :</strong> 1 bouton direct sur l'app ouvre la page Winds Up en 1 tap.
+            </div>
+          </div>
+
+          <!-- Option 2 : Contrat Winds Up Pro -->
+          <div class="opt-card" style="border-color: #fde68a; background: #fffbeb;">
+            <div style="font-weight: 900; color: #92400e; font-size: 10.5px; margin-bottom: 4px;">
+              💼 Option 2 : Partenariat Winds Up Pro
+            </div>
+            <div style="font-size: 9.5px; color: #b45309; line-height: 1.4;">
+              • <strong>Coût :</strong> Abonnement annuel commercial B2B.<br>
+              • <strong>Avantage :</strong> Mesure temps réel directe.<br>
+              • <strong>Inconvénient :</strong> Dépendance totale à la réparation physique de leur capteur en cas de panne hivernale.
+            </div>
+          </div>
+
+          <!-- Option 3 : Balise Club Ouverte (Windbird) -->
+          <div class="opt-card" style="border-color: #cbd5e1; background: #f8fafc;">
+            <div style="font-weight: 900; color: #0f172a; font-size: 10.5px; margin-bottom: 4px;">
+              📡 Option 3 : Balise Club (Windbird)
+            </div>
+            <div style="font-size: 9.5px; color: #475569; line-height: 1.4;">
+              • <strong>Coût :</strong> ~180-200 € à l'achat (sans abonnement, réseau basse consommation Sigfox).<br>
+              • <strong>Autonomie :</strong> Fixée sur la remorque du club à Lestrevet.<br>
+              • <strong>API Ouverte :</strong> Le réseau OpenWindMap fournit une vraie API REST gratuite et ouverte !
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Recommandation & Questions pour Jérôme -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>✍️</span>
+          <span>3. Recommandation & Avis de Jérôme</span>
+        </div>
+
+        <p style="margin: 0 0 8px; font-size: 10px; color: #334155; line-height: 1.45;">
+          <strong>💡 Décision proposée par Sheldon & Benoît :</strong> Nous conservons l'architecture actuelle (Option 1). Le calcul prévisionnel des créneaux repose sur le modèle officiel AROME HD Météo-France, et le bouton direct Winds Up permet le contrôle sur le terrain. Si Jérôme souhaite un jour mesurer son propre vent au centimètre près sur la remorque, l'achat d'un capteur Windbird sur le réseau ouvert sera la solution idéale.
+        </p>
+
+        <div class="handwriting-box">
+          <span class="handwriting-label">Remarques & Décision arrêtée par Jérôme :</span>
+          <div class="line"></div>
+          <div class="line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Technique Interne</span>
+      <span>Échange Benoît & Jérôme · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          alert('✓ La note a été entièrement copiée dans votre presse-papiers !\n\nOuvrez Word ou votre boîte email et faites Coller (Ctrl+V ou Cmd+V).');
+        } else {
+          alert('Veuillez sélectionner le texte et faire Ctrl+C.');
+        }
+      } catch (err) {
+        alert('Impossible de copier automatiquement : utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>

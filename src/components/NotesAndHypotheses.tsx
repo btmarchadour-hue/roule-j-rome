@@ -1,19 +1,67 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
 import { APP_VERSION_INFO } from '../version';
+import {
+  getActiveInstructor,
+  ProcessedTechNotesMap,
+  setTechNoteProcessedInFirestore,
+  subscribeToProcessedTechNotes,
+} from '../utils/firebaseSync';
 
 interface NotesAndHypothesesProps {
   onLock?: () => void;
 }
+
+interface TechNoteItem {
+  id: string;
+  category: 'meteo' | 'topographie' | 'reservation' | 'marees' | 'reunion';
+  categoryLabel: string;
+  categoryColor: string;
+  icon: string;
+  title: string;
+  subtitle: string;
+  summary: string;
+  keyPoints: string[];
+  docUrl: string;
+  docBtnLabel: string;
+  statusBadge: {
+    label: string;
+    bg: string;
+    color: string;
+  };
+}
+
+const LOCAL_STORAGE_KEY = 'cv_processed_tech_notes_cache';
 
 export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }) => {
   const [customPassword, setCustomPassword] = useState('');
   const [currentCloudPassword, setCurrentCloudPassword] = useState<string | null>(null);
   const [isSavingPwd, setIsSavingPwd] = useState(false);
   const [pwdStatus, setPwdStatus] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Charger le mot de passe cloud actif s'il a été personnalisé
+  // Filtre d'état : 'active' (Actives uniquement), 'processed' (Traitées / Archivées), 'all' (Toutes)
+  const [statusFilter, setStatusFilter] = useState<'active' | 'processed' | 'all'>('active');
+
+  // Gestionnaire de statut traité / archivé (Synchronisé Firestore + fallback local)
+  const [processedMap, setProcessedMap] = useState<ProcessedTechNotesMap>(() => {
+    try {
+      const cached = localStorage.getItem(LOCAL_STORAGE_KEY);
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Modale de traitement d'une note
+  const [resolvingNote, setResolvingNote] = useState<TechNoteItem | null>(null);
+  const [resolvingAuthor, setResolvingAuthor] = useState<string>(() => getActiveInstructor());
+  const [resolutionNote, setResolutionNote] = useState<string>('');
+  const [isSubmittingResolution, setIsSubmittingResolution] = useState<boolean>(false);
+
+  // Charger le mot de passe cloud actif
   useEffect(() => {
     let isMounted = true;
     const loadCurrentPwd = async () => {
@@ -35,6 +83,19 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  // Écoute temps réel Firestore du statut des notes traitées
+  useEffect(() => {
+    const unsubscribe = subscribeToProcessedTechNotes(remoteMap => {
+      setProcessedMap(remoteMap);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remoteMap));
+      } catch {
+        // ignore
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleSavePassword = async (e: React.FormEvent) => {
@@ -61,30 +122,269 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
     }
   };
 
+  // Les 7 Notes Techniques et Documents Structurés par Thème
+  const notesList = useMemo<TechNoteItem[]>(() => {
+    return [
+      {
+        id: 'note-evolution-deux-temps',
+        category: 'reservation',
+        categoryLabel: 'Évolution Majeure',
+        categoryColor: '#dc2626',
+        icon: '🚀',
+        title: 'Note Stratégique : Les 2 Temps de l’École & Couplage Réservation',
+        subtitle: 'Séparation Anticipation Commerciale vs Pilotage Tactique Météo + Sauvetage SMS',
+        summary:
+          'Clarification majeure du fonctionnement de l’école : découpler la publication des créneaux lointains du pilotage d’urgence à J-1. Couplage avec les données clients pour automatiser les SMS d’alerte et proposer 5 créneaux de report avec % de réussite météo.',
+        keyPoints: [
+          'Temps 1 (Anticipation M-1 à J-7) : Créneaux théoriques stables publiés dans la résa sans bouger.',
+          'Temps 2 (Tactique J-2 à H+1) : Ajustement météo AROME / surcote en direct et décision d’annuler ou rouler.',
+          'Automatisation SMS Préventif J-1 : Alerte préventive à 18h pour réassurer les clients et éviter les appels anxiogènes.',
+          'Sauvetage Commercial en 1 clic : Lien SMS proposant 5 reports immédiats (taux de sauvetage 75-80% au lieu de perte sèche de CA).',
+          'Garde-fou Métier Inviolable : Interdiction formelle de valider une séance avec 0 participant (pilote). Les séances sans client sont classées en "Vie 1 : Faute de réservations".',
+        ],
+        docUrl: '/note_evolution_majeure_deux_temps.html',
+        docBtnLabel: '🚀 Ouvrir la Note Évolution Majeure (A4 / Word)',
+        statusBadge: {
+          label: 'Priorité Réunion Jeudi',
+          bg: '#fee2e2',
+          color: '#991b1b',
+        },
+      },
+      {
+        id: 'note-meteo-module8',
+        category: 'meteo',
+        categoryLabel: 'Météo & Vent',
+        categoryColor: '#0284c7',
+        icon: '🌪️',
+        title: 'Note Module 8 : Choix de la Mesure Météo & Vent en Direct',
+        subtitle: 'Étude technique Winds Up Spot 66 vs Modèle AROME HD vs Balise Club Windbird',
+        summary:
+          'Analyse technique approfondie des contraintes d’intégration du vent à Lestrevet. Pourquoi le scraping / iframe de Winds Up est bloqué et quelle est la meilleure architecture pour l’école.',
+        keyPoints: [
+          'Sécurités Winds Up vérifiées : Absence d’API publique, blocage navigateur X-Frame-Options.',
+          'Fiabilité matérielle : La balise 66 de Lestrevet est régulièrement hors service lors des coups de vent d’automne.',
+          'Décision validée : Modèle haute résolution AROME HD Météo-France pour le calcul des créneaux + bouton 1 tap direct pour le contrôle terrain.',
+          'Option future ouverte : Balise club Windbird (~180 €) fixée sur la remorque avec vraie API REST ouverte.',
+        ],
+        docUrl: '/note_mesure_meteo_vent.html',
+        docBtnLabel: '📄 Ouvrir la Note Météo (A4 / Word)',
+        statusBadge: {
+          label: 'Option 1 Validée',
+          bg: '#dcfce7',
+          color: '#166534',
+        },
+      },
+      {
+        id: 'note-cadrage-lestrevet',
+        category: 'topographie',
+        categoryLabel: 'Topographie & Piste',
+        categoryColor: '#16a34a',
+        icon: '🏖️',
+        title: 'Note Cadrage Lestrevet : Pente Litto3D & Piste Utile',
+        subtitle: 'Modèle Lidar IGN/SHOM, pente 1,15 % et les 3 questions de calage pour Jérôme',
+        summary:
+          'Utilisation des données altimétriques publiques de haute précision Litto3D Finistère (économie géomètre : ~4 000 €). Calcul en temps réel de la largeur de piste selon la hauteur d’eau et la surcote.',
+        keyPoints: [
+          'Pente réelle moyenne d’estran : 1,15 % (1 cm vertical d’eau = ~87 cm à 1 m de sable praticable mangé).',
+          'Question 1 : Ancrage du repère « Zéro » directement sur la remorque / cale de Lestrevet.',
+          'Question 2 : Marge haute de sable sec/mou (laisser libre le réglage entre 30 m et 60 m).',
+          'Question 3 : Hauteur d’eau minimale pour que les bâches d’eau résiduelles soient entièrement purgées.',
+        ],
+        docUrl: '/note_cadrage_lestrevet_jerome.html',
+        docBtnLabel: '📝 Ouvrir la Note Lestrevet (1 page A4)',
+        statusBadge: {
+          label: 'À arbitrer avec Jérôme',
+          bg: '#fef3c7',
+          color: '#92400e',
+        },
+      },
+      {
+        id: 'note-reservation-deux-ponts',
+        category: 'reservation',
+        categoryLabel: 'Réservation',
+        categoryColor: '#8b5cf6',
+        icon: '🛒',
+        title: 'Note Stratégique : Choix du Gestionnaire de Réservation',
+        subtitle: 'Remplacement de Booking Activities & Architecture des « Deux Ponts »',
+        summary:
+          'Notre application reste le cerveau métier exclusif (calcul des marées glissantes, règle de 50, AROME, Fiche Agenda). L’outil de vente externe assure la billetterie et le paiement sécurisé.',
+        keyPoints: [
+          'Pont 1 (Amont) : Publication automatique des bons créneaux calculés dans l’agenda de vente.',
+          'Pont 2 (Aval) : Rapatriement automatique des inscrits pour pré-remplir la Fiche Agenda papier.',
+          'Comparatif 4 solutions : Activiti.fr (spécialiste voile/marées), RésaMinute, Billetweb (0 € abonnement), Regiondo.',
+          'Question clé : Choix entre forfait fixe sans commission (Activiti) ou commission à la vente (Billetweb).',
+        ],
+        docUrl: '/note_reservation_deux_ponts.html',
+        docBtnLabel: '📄 Ouvrir la Note Réservation (A4 / Word)',
+        statusBadge: {
+          label: 'Cahier des charges prêt',
+          bg: '#e0e7ff',
+          color: '#3730a3',
+        },
+      },
+      {
+        id: 'note-regles-marees-surcote',
+        category: 'marees',
+        categoryLabel: 'Marées & Physique',
+        categoryColor: '#0369a1',
+        icon: '🌊',
+        title: 'Note Physique : Règles de Marée & Correcteur de Surcote',
+        subtitle: 'Règle de 9h00, seuil Coef ≤ 50 et formule du baromètre inverse (+1 cm/hPa)',
+        summary:
+          'Détail des règles mathématiques appliquées dans le moteur : pourquoi le baromètre inverse retarde la marée basse de 20 à 35 minutes lors des coups de vent et repousse la mer de 25 mètres.',
+        keyPoints: [
+          'Règle d’or 09h00 : Aucune séance automatique avant 9h du matin pour respecter le rythme de l’école.',
+          'Règle Coef ≤ 50 : Roulage continu toute la journée en mortes-eaux (la mer ne monte jamais trop haut).',
+          'Loi du baromètre inverse : +1 cm d’eau par hPa en dessous de 1013 hPa (+28 cm d’eau à 985 hPa).',
+          'Conseil d’usage : Désactiver pour les réservations lointaines (stabilité), activer à J-1 par dépression creuse.',
+        ],
+        docUrl: '/note_regles_marees_surcote.html',
+        docBtnLabel: '📄 Ouvrir la Note Marées (A4 / Word)',
+        statusBadge: {
+          label: 'Moteur Appliqué',
+          bg: '#dcfce7',
+          color: '#166534',
+        },
+      },
+      {
+        id: 'dossier-reunion-jerome',
+        category: 'reunion',
+        categoryLabel: 'Réunion & DevOps',
+        categoryColor: '#d97706',
+        icon: '📋',
+        title: 'Dossier d’Audit & Réunion de Travail (6 pages A4)',
+        subtitle: 'Support complet pour la réunion avec Jérôme · Maquettes fidèles & Relevé de décisions',
+        summary:
+          'Dossier complet relié au format A4 avec visuels précis de chaque écran, questions d’arbitrage Oui/Non/À ajuster, zones pour annotations manuscrites au crayon et page de signatures.',
+        keyPoints: [
+          'Page 1 : Calendrier des marées & règle des 45-50 min de décalage quotidien.',
+          'Page 2 : Écran Focus du Jour & calcul automatique des créneaux selon le vent.',
+          'Page 3 : Bilan de séance, distinction Vie 1 vs Vie 2 et suivi du sauvetage commercial.',
+          'Page 4 : Camemberts statistiques d’activité et taux de réussite des créneaux.',
+          'Page 5 : Étalonnage GPS terrain, marégramme double courbe et coupe Litto3D.',
+          'Page 6 : Relevé récapitulatif des 7 décisions arrêtées et signatures.',
+        ],
+        docUrl: '/support_reunion_jerome.html',
+        docBtnLabel: '📑 Ouvrir le Dossier 6 pages (A4 / PDF / Word)',
+        statusBadge: {
+          label: 'Prêt pour jeudi',
+          bg: '#fef3c7',
+          color: '#92400e',
+        },
+      },
+      {
+        id: 'guide-github-devops',
+        category: 'reunion',
+        categoryLabel: 'Réunion & DevOps',
+        categoryColor: '#475569',
+        icon: '🛡️',
+        title: 'Guide de Sécurisation GitHub & Workflow Dev (Point 1)',
+        subtitle: 'Verrouillage de la branche principale en « Écluse protégée » et travail sur « dev »',
+        summary:
+          'Procédure DevOps pas à pas pour protéger la version de production de l’application. Garantit que toute modification est testée sur dev avant d’être déployée.',
+        keyPoints: [
+          'Création et bascule de la branche par défaut sur dev sur GitHub.',
+          'Règle de protection Branch Protection Rule sur la branche principal.',
+          'Sécurisation des clés secrètes et absence totale de code sensible dans les dépôts publics.',
+        ],
+        docUrl: '/guide_securisation_github.html',
+        docBtnLabel: '📘 Ouvrir le Guide GitHub Pas à Pas',
+        statusBadge: {
+          label: 'Procédure Documentée',
+          bg: '#f1f5f9',
+          color: '#334155',
+        },
+      },
+    ];
+  }, []);
+
+  // Décompte
+  const totalNotesCount = notesList.length;
+  const processedNotesCount = useMemo(() => {
+    return Object.values(processedMap).filter(v => v.isProcessed).length;
+  }, [processedMap]);
+  const activeNotesCount = totalNotesCount - processedNotesCount;
+
+  // Filtrage des notes selon statut, catégorie et recherche
+  const filteredNotes = useMemo(() => {
+    return notesList.filter(note => {
+      const isProcessed = Boolean(processedMap[note.id]?.isProcessed);
+
+      // Filtre d'état
+      if (statusFilter === 'active' && isProcessed) return false;
+      if (statusFilter === 'processed' && !isProcessed) return false;
+
+      // Filtre catégorie
+      const matchCat = selectedCategory === 'all' || note.category === selectedCategory;
+
+      // Filtre recherche
+      const matchSearch =
+        searchQuery.trim() === '' ||
+        note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        note.subtitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        note.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        note.keyPoints.some(kp => kp.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      return matchCat && matchSearch;
+    });
+  }, [notesList, processedMap, statusFilter, selectedCategory, searchQuery]);
+
+  // Actions de traitement
+  const handleOpenResolveModal = (note: TechNoteItem) => {
+    setResolvingNote(note);
+    setResolutionNote('');
+  };
+
+  const handleConfirmResolve = async () => {
+    if (!resolvingNote) return;
+    setIsSubmittingResolution(true);
+    try {
+      await setTechNoteProcessedInFirestore(
+        resolvingNote.id,
+        true,
+        resolvingAuthor,
+        resolutionNote.trim() || undefined
+      );
+      setResolvingNote(null);
+    } catch (err) {
+      alert('Erreur lors de la mise à jour de la note : ' + (err as Error).message);
+    } finally {
+      setIsSubmittingResolution(false);
+    }
+  };
+
+  const handleRestoreNote = async (noteId: string) => {
+    try {
+      await setTechNoteProcessedInFirestore(noteId, false);
+    } catch (err) {
+      alert('Erreur lors de la réactivation de la note : ' + (err as Error).message);
+    }
+  };
+
   return (
-    <>
-      {/* 1. CARTE SÉCURITÉ & MOT DE PASSE D'OUVERTURE (MONITEURS) */}
+    <div style={{ maxWidth: '1240px', margin: '0 auto', paddingBottom: '60px' }}>
+      {/* 1. ZONE EN ÉCRITURE : MOT DE PASSE & CONTRÔLE D'ACCÈS CLOUD (CONSERVÉE 100%) */}
       <div
         className="card nop"
         style={{
-          marginBottom: '16px',
+          marginBottom: '20px',
           background: '#ffffff',
-          borderRadius: '12px',
+          borderRadius: '14px',
           border: '1.5px solid #0284c7',
           padding: '18px 20px',
-          boxShadow: '0 4px 12px rgba(2, 132, 199, 0.08)',
+          boxShadow: '0 4px 16px rgba(2, 132, 199, 0.08)',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase' }}>
-              <span>🔒</span> Sécurité de l'application
+              <span>🔒</span> Sécurité de l'application & Accès Cloud
             </div>
-            <h3 style={{ margin: '6px 0 2px', fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
-              Mot de Passe & Accès Moniteurs
+            <h3 style={{ margin: '6px 0 2px', fontSize: '1.20rem', fontWeight: 900, color: '#0f172a' }}>
+              Mot de Passe & Protection des Données École
             </h3>
             <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
-              Gestion de l'accès à l'application, protection des données clients et synchronisation cloud entre Benoît et Jérôme.
+              Gestion de l'accès sécurisé à l'application et synchronisation immédiate du mot de passe entre Benoît et Jérôme.
             </p>
           </div>
 
@@ -99,9 +399,9 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                 border: '1.5px solid #fecaca',
                 color: '#b91c1c',
                 fontWeight: 800,
-                padding: '7px 12px',
+                padding: '8px 14px',
                 borderRadius: '8px',
-                fontSize: '0.74rem',
+                fontSize: '0.76rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -194,366 +494,511 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         </div>
       </div>
 
-      <p className="note nop">
-        Le petit chiffre en haut à droite d'une case = nombre maximal de séances possibles ce jour-là.
-        Roulage = marée sous le seuil ET lumière du jour (lever/coucher du soleil calculés pour la
-        plage de Lestrevet, précision ≈ ±1 min). Lune : phases et heures de lever/coucher calculées
-        (théorie de Meeus, précision attendue ≈ ±3 min). Vent : modèle AROME de Météo-France (le même
-        que Windguru) via Open-Meteo.com (CC BY 4.0, gratuit en usage non commercial), valable environ
-        2 jours, puis modèle global indicatif jusqu'à 16 jours. Données : ton PDF « Horaires de
-        marées » (heures locales, hauteurs en m). Roulage = eau ≤ seuil − marge, entre les heures
-        choisies, interpolation sinusoïdale entre PM et BM (≈ 10-15 min de précision). « Décalage
-        Lestrevet » ajoute aux valeurs du PDF +12 min et +0,5 m (PM) / +0,2 m (BM), estimés sur 4
-        jours de ton premier fichier : à vérifier.
-      </p>
-
-      <div className="card hyp">
-        <b>Réglages validés et hypothèses</b>
-        <ul>
-          <li>
-            <b>Validé avec le moniteur :</b> séances de 1 h, pause de 15 min en juillet-août (du 1er
-            juillet au 31 août) et de 30 min le reste de l'année ; départs à :00, :15, :30 ou :45 ;
-            coefficient ≤ 50 (50 inclus) = roulage toute la journée ; un seul créneau à la fois (1
-            place).
-          </li>
-          <li>
-            <b>Réponses du moniteur appliquées :</b> dernière séance terminée 30 min avant le coucher du
-            soleil (réponse : « si on peut caler 30 minutes, c'est le top ») ; vent idéal de 8 à 25
-            nœuds, arrêt à 35 nœuds (appliqué aux rafales).
-          </li>
-          <li>
-            <b>Hypothèses encore ouvertes :</b> première séance calée par défaut 1 h après le lever du soleil ;
-            seuil de hauteur d'eau 4,50 m sans calage (il roule parfois dès 5 m selon la force et l'orientation du vent) ;
-            décalage Lestrevet estimé et désactivé par défaut ; sud-ouest = meilleur vent et vents de terre
-            d'est/nord-est = moins favorables (non confirmé).
-          </li>
-          <li>
-            <b>Fonctionnement et pertinence du correcteur de pression atmosphérique (surcote / décote) :</b>
-            <div style={{ marginTop: '6px', lineHeight: '1.5' }}>
-              <p style={{ margin: '0 0 6px' }}>
-                <b>1. Principe physique (loi du baromètre inverse) :</b> Les annuaires de marée (SHOM et PDF fourni) calculent les hauteurs d'eau pour une pression atmosphérique standard au niveau de la mer de <b>1013,25 hPa</b>. Lorsqu'une dépression atmosphérique s'installe, la colonne d'air pèse moins lourd sur la surface de l'océan : l'eau « monte » sous l'effet de cette aspiration hydrostatique à raison d'environ <b>+1 cm de hauteur d'eau par hPa en dessous de 1013 hPa</b> (ex. à 985 hPa lors d'un coup de vent, la surcote barométrique brute est de <b>+28 cm</b>). À l'inverse, un anticyclone lourd (ex. 1030 hPa) écrase le plan d'eau et génère une décote d'environ −17 cm.
-              </p>
-              <p style={{ margin: '0 0 6px' }}>
-                <b>2. Calcul appliqué dans l'outil :</b> Lorsque la case <i>« Correction de pression »</i> est cochée et que la prévision météo (AROME / GFS) est disponible, l'application lit la pression atmosphérique prévue à l'instant de la marée et applique la formule : <code>Hauteur d'eau réelle = Hauteur PDF + max(0, (1013 − Pression) / 100)</code>. Le seuil de roulage (4,50 m) est donc atteint plus tard à marée descendante et submergé plus tôt à marée montante.
-              </p>
-              <p style={{ margin: '0 0 6px' }}>
-                <b>3. Impact direct sur la plage de Lestrevet (Plomodiern) :</b>
-                Lestrevet présente un estran à pente très douce (≈ 1 % à 1,5 %). Une surcote de +25 cm d'eau ne se résume pas à une simple hauteur verticale : elle repousse le trait de côte de <b>15 à 25 mètres à l'horizontale</b> sur le banc de sable dur roulable. Sur le plan horaire, elle retarde le moment où l'eau redescend sous 4,50 m de <b>20 à 35 minutes</b>. Sans cette correction lors d'un fort coup de vent dépressionnaire, le planning risque de proposer une première séance alors que la zone d'évolution est encore sous l'eau ou détrempée.
-              </p>
-              <p style={{ margin: '0' }}>
-                <b>4. Pertinence et limites pour le moniteur :</b>
-                <br />
-                • <i>Pourquoi c'est pertinent :</i> En Bretagne, les vents forts favorables au char à voile (20 à 35 nœuds) coïncident presque toujours avec des dépressions d'automne/hiver creuses (980 à 1000 hPa). La surcote d'eau y est bien réelle et tangible sur le sable.
-                <br />
-                • <i>Les limites physiques :</i> La pression atmosphérique n'explique qu'environ la moitié de la surcote totale. Le reste provient de la <b>surcote dynamique</b> : le vent d'ouest qui pousse l'eau au fond de la baie de Douarnenez (effet d'entonnoir / <i>wind setup</i>) et le déferlement de la houle sur les barres de sable (<i>wave setup</i>), qui peuvent rajouter 10 à 30 cm d'eau en plus. À l'inverse, par vent de terre d'Est anticyclonique, l'eau se retire plus vite et plus loin que prévu.
-                <br />
-                • <i>Recommandation pratique :</i> Pour ouvrir des plannings de réservation plusieurs semaines à l'avance dans Booking Activities, désactiver le correcteur (ou utiliser une marge fixe de sécurité de +10 à +20 cm) garantit des horaires stables qui ne bougent pas au fil des sorties de modèles météo. En revanche, pour la décision opérationnelle du moniteur à J−2 / J−1 par gros temps, activer ce correcteur évite les surprises de début de séance les pieds dans l'eau.
-              </p>
+      {/* 2. HUB DES NOTES TECHNIQUES & SUPPORTS PAR THÈME */}
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.70rem', textTransform: 'uppercase', fontWeight: 900, color: '#0369a1', letterSpacing: '0.04em' }}>
+                Dossier d'Ingénierie & Cadrages de Terrain
+              </span>
+              <span style={{ fontSize: '0.66rem', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '12px', fontWeight: 800 }}>
+                {activeNotesCount} à traiter · {processedNotesCount} traitée{processedNotesCount > 1 ? 's' : ''}
+              </span>
             </div>
-          </li>
-          <li>
-            <b>Méthode de création des séances :</b> calage par défaut dès le début de plage praticable
-            (ou depuis la fin selon réglage), au plus tôt 1 h après le lever du soleil. <strong>Règle d'or horaire appliquée :</strong> aucune séance automatique n'est positionnée avant 09h00 du matin (les séances sur mesure créées manuellement restent possibles à toute heure selon vos besoins). Les séances s'enchaînent avec la pause
-            réglementaire (15 min en été, 30 min l'hiver) pour maximiser le nombre de créneaux réalisables.
-          </li>
-          <li>
-            <b>Créneau optionnel (à la discrétion du moniteur) :</b> une séance complète de 60 min qui
-            déborde de la plage d'au plus 20 min (réglable), proposée quand il y a au moins 40 min de
-            roulage dans la plage. Il est signalé avec le dépassement et la contrainte concernée (marée
-            ou heure du jour).
-          </li>
-          <li>
-            <b>Points à surveiller (effets de bord possibles) :</b> un dépassement côté marée veut dire
-            que l'eau est encore au-dessus de 4,50 m pendant ces minutes (précision de l'heure ≈ ±10-15
-            min ; le PDF est 6 à 12 cm plus bas que le SHOM) ; côté heure du jour, le créneau se
-            rapproche du coucher du soleil sans le dépasser ; un créneau optionnel peut apparaître ou
-            disparaître d'un rafraîchissement à l'autre quand la prévision de pression change ; une
-            souplesse supplémentaire pourra être ajoutée si besoin. Export après validation du moniteur
-            : à définir.
-          </li>
-          <li>
-            <b>Données :</b> hauteurs et heures de marée du PDF fourni (port non indiqué ; comparé aux
-            prédictions SHOM sur 18 jours d'octobre 2026 : heures à ±5 min de Douarnenez comme de
-            Morgat, hauteurs plus basses de 6 cm que Douarnenez et de 12 cm que Morgat) ; vent AROME
-            (Météo-France) sur ~2 jours puis modèle global indicatif. La balise Winds Up (spot 66) est
-            en panne : mesure en direct à brancher plus tard.
-          </li>
-          <li>
-            <b>Réservation :</b> le site utilise Booking Activities (WordPress). Cette page ne prend
-            pas de réservations : elle fournit la liste des créneaux (fichier « Créneaux CSV »).
-          </li>
-        </ul>
-      </div>
+            <h2 style={{ margin: '2px 0 0', fontSize: '1.30rem', fontWeight: 900, color: '#0f172a' }}>
+              Notes Techniques & Documents de Réunion par Thème
+            </h2>
+          </div>
 
-      <div className="card hyp">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-          <b style={{ fontSize: '1.05rem', color: 'var(--tx, #0f172a)' }}>
-            Note : Automatiser la mise à jour du planning & choix du nouveau gestionnaire de réservation
-          </b>
-          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '3px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-            Cahier des charges pour Jérôme
-          </span>
+          {/* Recherche rapide */}
+          <input
+            type="text"
+            placeholder="🔍 Filtrer les notes (ex: vent, Lestrevet, résa, baromètre)..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              fontSize: '0.76rem',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              width: '280px',
+              maxWidth: '100%',
+              background: '#fff',
+            }}
+          />
         </div>
 
-        <p className="note" style={{ margin: '10px 0 12px', lineHeight: 1.5 }}>
-          Le prestataire de réservation actuel (Booking Activities / WordPress) va changer. C'est l'opportunité d'adopter un gestionnaire moderne fonctionnant sur une <b>liaison bidirectionnelle à deux ponts</b> : notre application reste le <b>cerveau métier</b> (calcul des marées, seuil de 50, vent AROME, fiche agenda et REX), et l'outil de réservation gère les paiements en ligne et les clients.
-        </p>
+        {/* Barre de double filtrage : État (Actives vs Traitées) + Catégorie */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+          {/* 1. Sélecteur d'état (Actives vs Traitées) */}
+          <div style={{ display: 'inline-flex', background: '#e2e8f0', padding: '3px', borderRadius: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('active')}
+              style={{
+                border: 'none',
+                background: statusFilter === 'active' ? '#ffffff' : 'transparent',
+                color: statusFilter === 'active' ? '#0f172a' : '#64748b',
+                fontWeight: statusFilter === 'active' ? 900 : 700,
+                fontSize: '0.74rem',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: statusFilter === 'active' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              <span>📌</span>
+              <span>Notes Actives ({activeNotesCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('processed')}
+              style={{
+                border: 'none',
+                background: statusFilter === 'processed' ? '#ffffff' : 'transparent',
+                color: statusFilter === 'processed' ? '#166534' : '#64748b',
+                fontWeight: statusFilter === 'processed' ? 900 : 700,
+                fontSize: '0.74rem',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: statusFilter === 'processed' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              <span>✓</span>
+              <span>Traitées / Archivées ({processedNotesCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              style={{
+                border: 'none',
+                background: statusFilter === 'all' ? '#ffffff' : 'transparent',
+                color: statusFilter === 'all' ? '#0f172a' : '#64748b',
+                fontWeight: statusFilter === 'all' ? 900 : 700,
+                fontSize: '0.74rem',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                boxShadow: statusFilter === 'all' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              Toutes ({totalNotesCount})
+            </button>
+          </div>
 
-        {/* Schéma explicatif des deux ponts */}
+          {/* 2. Barre d'onglets par thème */}
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {[
+              { id: 'all', label: 'Tous les thèmes' },
+              { id: 'meteo', label: '🌪️ Météo' },
+              { id: 'topographie', label: '🏖️ Piste' },
+              { id: 'reservation', label: '🛒 Résa' },
+              { id: 'marees', label: '🌊 Marées' },
+              { id: 'reunion', label: '📋 Réunion' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSelectedCategory(tab.id)}
+                style={{
+                  border: selectedCategory === tab.id ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                  background: selectedCategory === tab.id ? '#0284c7' : '#ffffff',
+                  color: selectedCategory === tab.id ? '#ffffff' : '#475569',
+                  borderRadius: '6px',
+                  padding: '5px 10px',
+                  fontSize: '0.70rem',
+                  fontWeight: selectedCategory === tab.id ? 800 : 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. GRILLE DES FICHES DE NOTES TECHNIQUES */}
+      {filteredNotes.length === 0 ? (
+        <div className="card" style={{ padding: '40px 20px', textAlign: 'center', background: '#f8fafc', border: '1.5px dashed #cbd5e1', borderRadius: '12px' }}>
+          <div style={{ fontSize: '2rem', marginBottom: '8px' }}>
+            {statusFilter === 'processed' ? '🎉' : '🔍'}
+          </div>
+          <h4 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 900, color: '#0f172a' }}>
+            {statusFilter === 'processed' ? 'Aucune note archivée pour le moment' : 'Aucune note active ne correspond aux filtres'}
+          </h4>
+          <p style={{ margin: 0, fontSize: '0.76rem', color: '#64748b' }}>
+            {statusFilter === 'processed'
+              ? 'Dès qu’une note aura été traitée et validée avec Jérôme, elle apparaîtra ici avec sa date de résolution.'
+              : 'Clique sur "Toutes les Notes" ou réinitialise la recherche.'}
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px' }}>
+          {filteredNotes.map(note => {
+            const isProcessed = Boolean(processedMap[note.id]?.isProcessed);
+            const processedInfo = processedMap[note.id];
+
+            return (
+              <div
+                key={note.id}
+                className="card"
+                style={{
+                  background: isProcessed ? '#f8fafc' : '#ffffff',
+                  borderRadius: '12px',
+                  border: isProcessed ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  boxShadow: isProcessed ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                  opacity: isProcessed && statusFilter === 'all' ? 0.8 : 1,
+                  position: 'relative',
+                }}
+              >
+                <div>
+                  {/* Ruban traitée si archivée */}
+                  {isProcessed && (
+                    <div
+                      style={{
+                        background: '#dcfce7',
+                        border: '1px solid #86efac',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        marginBottom: '10px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '0.72rem',
+                        color: '#166534',
+                        fontWeight: 800,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>✓</span>
+                        <span>
+                          Traitée par <strong>{processedInfo?.processedBy || 'Jérôme'}</strong>
+                          {processedInfo?.processedAt && ` le ${new Date(processedInfo.processedAt).toLocaleDateString('fr-FR')}`}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreNote(note.id)}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #86efac',
+                          color: '#166534',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                        title="Remettre cette note dans les actives"
+                      >
+                        ↩️ Réactiver
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Résolution note si présente */}
+                  {isProcessed && processedInfo?.resolutionNote && (
+                    <div style={{ background: '#f0fdf4', borderLeft: '3px solid #16a34a', padding: '6px 10px', fontSize: '0.72rem', color: '#15803d', marginBottom: '10px', borderRadius: '0 4px 4px 0' }}>
+                      <strong>Décision arrêtée :</strong> « {processedInfo.resolutionNote} »
+                    </div>
+                  )}
+
+                  {/* En-tête de la carte */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
+                        color: note.categoryColor,
+                        background: `${note.categoryColor}15`,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: `1px solid ${note.categoryColor}30`,
+                      }}
+                    >
+                      <span>{note.icon}</span>
+                      <span>{note.categoryLabel}</span>
+                    </span>
+
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        background: isProcessed ? '#dcfce7' : note.statusBadge.bg,
+                        color: isProcessed ? '#166534' : note.statusBadge.color,
+                      }}
+                    >
+                      {isProcessed ? '✓ Traitée' : note.statusBadge.label}
+                    </span>
+                  </div>
+
+                  {/* Titre & Sous-titre */}
+                  <h3 style={{ margin: '0 0 2px', fontSize: '1.05rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.3 }}>
+                    {note.title}
+                  </h3>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, marginBottom: '10px' }}>
+                    {note.subtitle}
+                  </div>
+
+                  {/* Résumé exécutif */}
+                  <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: '#334155', lineHeight: 1.45 }}>
+                    {note.summary}
+                  </p>
+
+                  {/* Points clés */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px' }}>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569', marginBottom: '6px' }}>
+                      Points clés & Arbitrages :
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '0.72rem', color: '#475569', lineHeight: 1.45 }}>
+                      {note.keyPoints.map((kp, idx) => (
+                        <li key={idx} style={{ marginBottom: '3px' }}>
+                          {kp}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Barre d'action inférieure : Bouton A4 + Bouton Marquer comme traitée / Supprimer */}
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', alignItems: 'center' }}>
+                  <a
+                    href={note.docUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      flex: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      background: isProcessed ? '#64748b' : note.categoryColor,
+                      color: '#ffffff',
+                      textDecoration: 'none',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      fontSize: '0.76rem',
+                      fontWeight: 800,
+                      textAlign: 'center',
+                      boxShadow: isProcessed ? 'none' : `0 3px 10px ${note.categoryColor}30`,
+                      transition: 'opacity 0.15s ease',
+                    }}
+                  >
+                    <span>{note.docBtnLabel}</span>
+                    <span style={{ fontSize: '0.85rem' }}>➔</span>
+                  </a>
+
+                  {!isProcessed ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenResolveModal(note)}
+                      title="Marquer cette note comme traitée / décidée avec Jérôme"
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid #22c55e',
+                        color: '#15803d',
+                        borderRadius: '8px',
+                        padding: '9px 12px',
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>✓</span>
+                      <span>Traitée</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRestoreNote(note.id)}
+                      title="Remettre cette note dans la liste des actives"
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid #cbd5e1',
+                        color: '#475569',
+                        borderRadius: '8px',
+                        padding: '9px 12px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>↩️ Réactiver</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODALE DE VALIDATION / CLÔTURE D'UNE NOTE TRAITÉE */}
+      {resolvingNote && (
         <div
           style={{
-            background: 'var(--cell, #f8fafc)',
-            border: '1px solid var(--bd, #e2e8f0)',
-            borderRadius: '8px',
-            padding: '12px 14px',
-            marginBottom: '14px',
-            fontSize: '0.78rem',
-            lineHeight: 1.5,
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeIn 0.2s ease',
           }}
+          onClick={() => setResolvingNote(null)}
         >
-          <div style={{ fontWeight: 800, color: 'var(--tx, #0f172a)', marginBottom: '6px' }}>
-            🔄 L'Architecture des Deux Ponts :
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 10px', borderRadius: '6px' }}>
-              <b style={{ color: '#166534' }}>Pont 1 (Amont - Offre) : Appli ➔ Outil de Réservation</b>
-              <div style={{ color: '#15803d', fontSize: '0.74rem', marginTop: '3px' }}>
-                Notre application calcule et valide les créneaux praticables (décalage de marée quotidien de 45-50 min, seuil 50, météo) et les publie automatiquement dans l'outil de réservation (via API ou flux iCal synchronisé).
-              </div>
-            </div>
-            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '8px 10px', borderRadius: '6px' }}>
-              <b style={{ color: '#1e40af' }}>Pont 2 (Aval - Demande) : Outil de Réservation ➔ Appli</b>
-              <div style={{ color: '#1d4ed8', fontSize: '0.74rem', marginTop: '3px' }}>
-                L'outil de réservation renvoie les inscrits (noms, téléphones d'urgence, nombre de places prises, paiements) : la Fiche Agenda papier se pré-remplit toute seule et le journal REX consigne automatiquement les participants réels.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8rem', lineHeight: 1.45 }}>
-          <li>
-            <b>Critères indispensables (non négociables) pour le choix du logiciel :</b>
-            <ul style={{ margin: '4px 0 0', paddingLeft: '18px', listStyleType: 'circle' }}>
-              <li>
-                <b>Horaires 100 % variables au quotidien :</b> Le logiciel doit accepter nativement les horaires glissants sans imposer de grille fixe par jour de la semaine (les marées décalent les cours chaque jour).
-              </li>
-              <li>
-                <b>Saisie express au téléphone par Jérôme (&lt; 15 secondes) :</b> Pour inscrire un client en direct sur son smartphone quand il est sur le parking ou dans son camion, sans lourdeur administrative.
-              </li>
-              <li>
-                <b>Alerte météo SMS / E-mail en un clic :</b> Prévenir immédiatement tous les inscrits du jour en cas de vent nul (&lt; 8 nds) ou de coup de vent (&gt; 25-35 nds) avec proposition de report.
-              </li>
-              <li>
-                <b>Gestion fine de la flotte de matériel :</b> Bloquer la vente dès que la capacité maxi en chars est atteinte (distinction monoplaces adultes vs biplaces enfants/PMR).
-              </li>
-              <li>
-                <b>API REST ouverte ou Webhooks temps réel :</b> Pour synchroniser automatiquement les réservations avec notre base de données sans export manuel de fichier.
-              </li>
-              <li>
-                <b>Paiement en ligne :</b> Cartes bancaires, Apple Pay/Google Pay, acomptes, bons cadeaux et idéalement Chèques-Vacances Connect (ANCV).
-              </li>
-            </ul>
-          </li>
-
-          <li>
-            <b>Prestataires identifiés, compatibles et estimations tarifaires pour Jérôme :</b>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
-              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>1. Activiti (activiti.fr)</b>
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                    ~49 € à 89 € / mois (sans commission sur CA)
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
-                  <b>Spécialiste nautisme &amp; marées :</b> Très répandu en voile et char à voile (FFV/FFCV). Gère nativement les marées, les horaires glissants, la flotte de chars (monoplaces/biplaces), les alertes SMS météo et les fiches stagiaires.
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
-                  💶 <b>Modèle tarifaire :</b> Forfait mensuel fixe (ou abonnement lissé sur la saison). 0 % de commission prélevée sur le CA de Jérôme. Frais bancaires CB directs via Stripe (~1,4 % + 0,25 €) et packs SMS d'annulation météo (~0,05 € à 0,07 € le SMS).
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>2. Yootil (yootil.com)</b>
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                    ~39 € à 79 € / mois OU ~3 % à 4 % au succès
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
-                  <b>Outdoor &amp; Glisse :</b> Interface smartphone très intuitive sur la plage, gestion souple des créneaux selon le vent, module de bons cadeaux et intégration WordPress fluide.
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
-                  💶 <b>Modèle tarifaire :</b> Choix entre formule fixe (recommandée si gros volume estival) ou formule au pourcentage (3 à 4 % sur les paiements en ligne). Pas de coût sur les réservations prises en direct au téléphone.
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>3. RésaMinute (resaminute.com)</b>
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                    ~29 € à 49 € / mois (ou ~2,5 % sans abonnement)
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
-                  <b>Simplicité maximale pour moniteur :</b> Conçu pour les indépendants. Prise de réservation téléphonique express en 10 secondes sur mobile, envoi instantané de lien de paiement par SMS.
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
-                  💶 <b>Modèle tarifaire :</b> L'un des plus doux pour une structure à taille humaine. Support client français ultra-réactif au téléphone, pas de mauvaise surprise hors saison.
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>4. Billetweb (billetweb.fr)</b>
-                  <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                    0 € d'abonnement · 0,29 € + 1 % par vente (frais CB inclus)
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
-                  <b>Le champion économique :</b> Zéro abonnement fixe, zéro frais l'hiver quand l'école roule moins. Frais tout compris parmi les plus bas de France (~2,2 % à 2,5 % CB incluse). API REST complète.
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#0f766e', marginTop: '4px', background: '#f0fdfa', padding: '4px 6px', borderRadius: '4px' }}>
-                  💶 <b>Exemple de coût :</b> Pour une séance découverte à 40 €, Billetweb prélève seulement ~0,69 € tout compris (frais bancaires inclus). Gratuit pour les réservations réglées sur place.
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--cell, #fff)', border: '1px solid var(--bd, #e2e8f0)', padding: '10px 12px', borderRadius: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <b style={{ color: '#0369a1', fontSize: '0.85rem' }}>5. Regiondo (regiondo.fr)</b>
-                  <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                    ~49 € à 99 € / mois + 2,5 % à 4 % de commission
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--mu, #64748b)', marginTop: '4px' }}>
-                  <b>Puissance &amp; Réseau touristique :</b> Leader européen des activités de loisirs, passerelle vers les Offices de Tourisme et plateformes (GetYourGuide, Manawa). API robuste.
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#9a3412', marginTop: '4px', background: '#fff7ed', padding: '4px 6px', borderRadius: '4px' }}>
-                  💶 <b>Budget prévisionnel :</b> Solution plus onéreuse (abonnement + commission). Rentable principalement si Jérôme souhaite capter une grosse clientèle touristique via les distributeurs externes.
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+              border: '2px solid #22c55e',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '1.5rem' }}>✓</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
+                  Marquer la note comme traitée
+                </h3>
+                <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                  Elle sera archivée et masquée des notes actives.
                 </div>
               </div>
             </div>
-          </li>
 
-          <li>
-            <b>Questions à trancher avec Jérôme jeudi :</b>
-            <ul style={{ margin: '4px 0 0', paddingLeft: '18px', listStyleType: 'circle' }}>
-              <li>
-                <b>Part du direct :</b> Combien de réservations prend-il encore par appel/SMS direct vs sur le site web ?
-              </li>
-              <li>
-                <b>Modèle de coût :</b> Préfère-t-il un forfait mensuel fixe (ex: 30-50 €/mois) ou une commission au pourcentage sur les ventes en ligne ?
-              </li>
-              <li>
-                <b>Matériel :</b> Utilise-t-il déjà un terminal CB portable (SumUp, Zettle) ou souhaite-t-il que le logiciel gère tout ?
-              </li>
-            </ul>
-          </li>
-        </ul>
-      </div>
-
-      {/* MODULE 8 : ÉTUDE TECHNIQUE WINDS UP & CONDITIONS DU VENT EN DIRECT */}
-      <div
-        className="card hyp"
-        style={{
-          borderLeft: '4px solid #0284c7',
-          background: '#ffffff',
-          borderRadius: '12px',
-          padding: '18px 20px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-          marginBottom: '16px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-          <div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase' }}>
-              <span>🌪️</span> Module 8 · Rapport Technique
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', margin: '14px 0', fontSize: '0.80rem' }}>
+              <strong>Note sélectionnée :</strong>
+              <div style={{ color: '#0369a1', fontWeight: 800, marginTop: '2px' }}>
+                {resolvingNote.title}
+              </div>
             </div>
-            <h3 style={{ margin: '6px 0 2px', fontSize: '1.12rem', fontWeight: 900, color: '#0f172a' }}>
-              Étude Technique Winds Up (Spot 66) & Vent Réel à Lestrevet
-            </h3>
-          </div>
-          <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 10px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 800 }}>
-            Analyse & Recommandations Ben ➔ Jérôme
-          </span>
-        </div>
 
-        <p className="note" style={{ margin: '0 0 14px', lineHeight: 1.5, color: '#334155', fontSize: '0.82rem' }}>
-          Ce rapport synthétise la faisabilité technique de branchement direct de la balise anémomètre de la plage de Pentrez / Lestrevet (Winds Up Spot 66) et présente les 3 options envisageables pour l'école.
-        </p>
-
-        {/* 1. Constat technique */}
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px', fontSize: '0.78rem', lineHeight: 1.5 }}>
-          <b style={{ color: '#0f172a', display: 'block', marginBottom: '6px' }}>
-            🔍 1. Ce qu'impose l'écosystème Winds Up (Sources vérifiées) :
-          </b>
-          <ul style={{ margin: 0, paddingLeft: '18px' }}>
-            <li style={{ marginBottom: '4px' }}>
-              <strong>Absence d'API publique ouverte :</strong> Winds Up ne met à disposition aucune API REST gratuite pour les applications tierces. Leurs données de vent sont réservées à leur écosystème commercial (modèle sur abonnement).
-            </li>
-            <li style={{ marginBottom: '4px' }}>
-              <strong>Blocage d'intégration par Iframe :</strong> Le serveur de Winds Up envoie l'en-tête de protection <code>X-Frame-Options: SAMEORIGIN</code>. Les navigateurs (Safari iOS, Chrome) bloquent catégoriquement l'incrustation directe de leur page à l'intérieur d'une autre application.
-            </li>
-            <li>
-              <strong>Sécurité CORS & Scraping :</strong> L'aspiration automatique (*scraping*) depuis le navigateur est bloquée par les sécurités inter-domaines (CORS). Passer par un serveur relais violerait leurs conditions d'utilisation avec un risque de bannissement d'adresse IP.
-            </li>
-          </ul>
-        </div>
-
-        {/* 2. Tableau comparatif des 3 solutions */}
-        <b style={{ color: '#0f172a', fontSize: '0.84rem', display: 'block', marginBottom: '8px' }}>
-          ⚖️ 2. Comparatif des 3 options pour l'école :
-        </b>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
-          {/* Solution 1 : Hybride AROME HD (Actuelle) */}
-          <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '8px', padding: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-              <span style={{ fontSize: '1rem' }}>⭐</span>
-              <strong style={{ color: '#166534', fontSize: '0.80rem' }}>Option 1 : Hybride AROME HD (Actuelle)</strong>
+            {/* Qui valide ? */}
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
+                Validé par :
+              </label>
+              <select
+                value={resolvingAuthor}
+                onChange={e => setResolvingAuthor(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #cbd5e1',
+                  fontSize: '0.80rem',
+                  fontWeight: 800,
+                  background: '#fff',
+                }}
+              >
+                <option value="Jérôme">Jérôme (Moniteur)</option>
+                <option value="Benoît">Benoît</option>
+                <option value="Jérôme & Benoît">Jérôme & Benoît (En séance)</option>
+              </select>
             </div>
-            <div style={{ fontSize: '0.74rem', color: '#15803d', lineHeight: 1.45 }}>
-              • <strong>Coût :</strong> 0 € (Open-Meteo & Météo-France).<br />
-              • <strong>Précision :</strong> Maille côtière ultra-fine 1,3 km actualisée 4 fois par jour.<br />
-              • <strong>Ergonomie :</strong> 1 tap sur le bouton officiel Winds Up pour le contrôle visuel.<br />
-              • <strong>Recommandée par Sheldon :</strong> solution la plus robuste et sans maintenance.
-            </div>
-          </div>
 
-          {/* Solution 2 : Winds Up Partenariat B2B */}
-          <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '8px', padding: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-              <span style={{ fontSize: '1rem' }}>💼</span>
-              <strong style={{ color: '#92400e', fontSize: '0.80rem' }}>Option 2 : Contrat Winds Up Pro</strong>
+            {/* Décision arrêtée / commentaire optionnel */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: '#475569', textTransform: 'uppercase', marginBottom: '4px' }}>
+                Décision arrêtée ou commentaire de clôture (optionnel) :
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Option 1 validée · Accord sur le modèle barométrique..."
+                value={resolutionNote}
+                onChange={e => setResolutionNote(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #cbd5e1',
+                  fontSize: '0.80rem',
+                  outline: 'none',
+                }}
+              />
             </div>
-            <div style={{ fontSize: '0.74rem', color: '#b45309', lineHeight: 1.45 }}>
-              • <strong>Coût :</strong> Abonnement annuel professionnel.<br />
-              • <strong>Avantage :</strong> Mesure temps réel directe toutes les 5 min.<br />
-              • <strong>Inconvénient :</strong> Dépendance à la réparation physique de la balise du spot 66 (souvent signalée en panne/aléatoire).
-            </div>
-          </div>
 
-          {/* Solution 3 : Balise Connectée Ouverte (Windbird) */}
-          <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-              <span style={{ fontSize: '1rem' }}>📡</span>
-              <strong style={{ color: '#0f172a', fontSize: '0.80rem' }}>Option 3 : Balise Club (Windbird)</strong>
-            </div>
-            <div style={{ fontSize: '0.74rem', color: '#475569', lineHeight: 1.45 }}>
-              • <strong>Coût :</strong> ~180-200 € à l'achat (sans abonnement, réseau Sigfox).<br />
-              • <strong>Avantage :</strong> Installée directement sur la remorque du club à Lestrevet.<br />
-              • <strong>API Développeur :</strong> OpenWindMap offre une vraie API REST JSON ouverte et gratuite intégrable directement !
+            {/* Boutons d'action */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setResolvingNote(null)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#475569',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Annuler
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmittingResolution}
+                onClick={handleConfirmResolve}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#16a34a',
+                  color: '#ffffff',
+                  fontSize: '0.78rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)',
+                }}
+              >
+                <span>✓</span>
+                <span>{isSubmittingResolution ? 'Archivage…' : 'Confirmer et archiver'}</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
 
-        {/* 3. Recommandation finale */}
-        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', fontSize: '0.78rem', color: '#1e40af', lineHeight: 1.5 }}>
-          <strong>💡 Décision proposée pour Jérôme :</strong> Nous conservons l'architecture actuelle (Option 1). Le calcul prévisionnel des créneaux repose sur le modèle officiel AROME HD Météo-France, et le bouton direct Winds Up permet le contrôle sur le terrain. Si Jérôme souhaite un jour mesurer son propre vent au centimètre près sur la plage, l'achat d'un capteur Windbird sur le réseau ouvert sera la solution idéale.
-        </div>
-      </div>
-
-      <footer className="card nop ft">
+      {/* 4. PIED DE PAGE OFFICIEL */}
+      <footer className="card nop ft" style={{ marginTop: '24px' }}>
         <b>Char à Voile du Bout du Monde</b>
         <br />
         Plage de Lestrevet · 29550 Plomodiern
@@ -567,6 +1012,6 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
           {APP_VERSION_INFO.displayString} · Char à Voile Lestrevet
         </span>
       </footer>
-    </>
+    </div>
   );
 };

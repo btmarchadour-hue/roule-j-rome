@@ -41,7 +41,9 @@ interface FocusTabProps {
     record: DayFocusData,
     slot: SessionItem,
     decision: 'valid' | 'rejected' | 'pending',
-    reason?: string
+    reason?: string,
+    pilot?: string,
+    pilotsCount?: number
   ) => void;
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
@@ -225,7 +227,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           {decision === 'valid' && (
-            <span
+            <>
+              <span
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -243,7 +246,104 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               <span>✓</span>
               <span>SÉANCE VALIDÉE</span>
             </span>
-          )}
+
+            {/* BADGE MONITEUR ENCADRANT */}
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: '#dcfce7',
+                border: '1.5px solid #86efac',
+                color: '#166534',
+                padding: '3px 8px',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+              }}
+            >
+              <span>👨‍🏫 Moniteur :</span>
+              <strong style={{ color: '#0f172a' }}>{valItem?.instructor || valItem?.assignedPilot || 'Jérôme'}</strong>
+              {!isReadOnly && onSetSlotDecision && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    const currentInst = valItem?.instructor || valItem?.assignedPilot || 'Jérôme';
+                    const nextInst = currentInst === 'Jérôme' ? 'Benoît' : 'Jérôme';
+                    onSetSlotDecision(f, x, 'valid', undefined, nextInst, valItem?.pilotsCount || 8);
+                  }}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #86efac',
+                    borderRadius: '4px',
+                    padding: '1px 5px',
+                    fontSize: '0.64rem',
+                    fontWeight: 800,
+                    color: '#166534',
+                    cursor: 'pointer',
+                    marginLeft: '3px',
+                  }}
+                  title="Changer de moniteur encadrant (Jérôme ↔ Benoît)"
+                >
+                  ⇄ Alterner
+                </button>
+              )}
+            </span>
+
+            {/* BADGE PILOTES / PARTICIPANTS (GARDE-FOU MÉTIER MIN. 1) */}
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: valItem?.pilotsCount ? '#e0f2fe' : '#ffedd5',
+                border: valItem?.pilotsCount ? '1.5px solid #7dd3fc' : '1.5px solid #fdba74',
+                color: valItem?.pilotsCount ? '#0369a1' : '#c2410c',
+                padding: '3px 8px',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+              }}
+            >
+              <span>👥 Pilotes :</span>
+              <strong style={{ color: valItem?.pilotsCount ? '#0c4a6e' : '#9a3412' }}>
+                {valItem?.pilotsCount ? `${valItem.pilotsCount} inscrits` : '0 pilote !'}
+              </strong>
+              {!isReadOnly && onSetSlotDecision && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    const current = valItem?.pilotsCount || 8;
+                    const ans = window.prompt("Nombre de participants / pilotes inscrits :", String(current));
+                    if (ans === null) return;
+                    const parsed = parseInt(ans.trim(), 10);
+                    if (isNaN(parsed) || parsed <= 0) {
+                      window.alert("⛔ Règle métier : Une séance validée doit avoir au moins 1 pilote. S'il n'y a aucun inscrit, classez-le en 'Refusé / Faute d'inscrits'.");
+                      return;
+                    }
+                    onSetSlotDecision(f, x, 'valid', undefined, valItem?.instructor || valItem?.assignedPilot || 'Jérôme', parsed);
+                  }}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #7dd3fc',
+                    borderRadius: '4px',
+                    padding: '1px 5px',
+                    fontSize: '0.64rem',
+                    fontWeight: 800,
+                    color: '#0369a1',
+                    cursor: 'pointer',
+                    marginLeft: '3px',
+                  }}
+                  title="Modifier le nombre de pilotes inscrits"
+                >
+                  ✏️ Modifier
+                </button>
+              )}
+            </span>
+          </>
+        )}
 
           {decision === 'rejected' && (
             <span

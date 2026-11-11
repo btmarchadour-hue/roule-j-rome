@@ -48,7 +48,9 @@ interface PrintableAgendaSheetProps {
     record: DayFocusData,
     slot: SessionItem,
     decision: 'valid' | 'rejected' | 'pending',
-    reason?: string
+    reason?: string,
+    pilot?: string,
+    pilotsCount?: number
   ) => void;
   isReadOnly?: boolean;
 }

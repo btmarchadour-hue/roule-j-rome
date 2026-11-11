@@ -15,6 +15,7 @@ import {
   requestSmoothedHighAccuracyGps,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
+import { Litto3DBeachSection } from './Litto3DBeachSection';
 
 interface GpsWaterlineTabProps {
   settings: AppSettings;
@@ -690,6 +691,11 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             Écart moyen résiduel avec nos corrections (+1cm/hPa)
           </div>
         </div>
+      </div>
+
+      {/* MODULE LITTO3D FINISTÈRE (IGN / SHOM) : COUPE 2D & LARGEUR DE ROULAGE (POINT 8) */}
+      <div style={{ marginBottom: '20px' }}>
+        <Litto3DBeachSection settings={settings} EX={EX} logs={logs} />
       </div>
 
       {/* TABLEAU DES RELEVÉS GPS AVEC FILTRES ET EXPORT */}

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note Physique · Règles de Calcul des Marées & Surcote Barométrique</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.45; font-size: 11px;
+    }
+    .toolbar {
+      position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7; color: #fff; border: none; padding: 7px 14px; border-radius: 6px;
+      font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 14mm 16mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
+      flex-direction: column; justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; }
+    }
+    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px; }
+    .title-badge {
+      display: inline-block; background: #e0f2fe; color: #0369a1; padding: 2px 7px;
+      border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
+    .sub { color: #475569; font-size: 10px; }
+    .meta-box {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px;
+      margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.5px;
+    }
+    .section-box {
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+    }
+    .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+    .kpi-card { background: #f0fdf4; border: 1px solid #86efac; border-radius: 6px; padding: 6px 8px; font-size: 9.5px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      🌊 Char à Voile du Bout du Monde · Note Physique Marées & Surcote
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Hydrodynamique & Règles de Calcul</span>
+            <h1>Règles de Marée, Seuil Coef 50 & Correcteur Barométrique</h1>
+            <div class="sub">Les lois physiques et réglages appliqués pour sécuriser les séances à Lestrevet</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
+        <div><strong>Auteurs :</strong> Benoît & Sheldon</div>
+        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+      </div>
+
+      <!-- 1. Les 4 Règles d'Or validées avec Jérôme -->
+      <div class="section-box" style="background: #f8fafc;">
+        <div class="section-title">
+          <span>⚙️</span>
+          <span>1. Les 4 Règles Métier Validées dans l'Application</span>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <strong style="color: #166534;">🌅 Règle de 09h00 :</strong><br>
+            Aucun créneau automatique avant 9h du matin pour respecter le rythme de l'école.
+          </div>
+          <div class="kpi-card" style="background: #e0f2fe; border-color: #7dd3fc; color: #0369a1;">
+            <strong>🌊 Règle Coef ≤ 50 :</strong><br>
+            Roulage continu toute la journée en mortes-eaux (la mer ne monte jamais trop haut).
+          </div>
+          <div class="kpi-card" style="background: #fef3c7; border-color: #fde68a; color: #92400e;">
+            <strong>⏱️ Pauses réglementaires :</strong><br>
+            15 min d'intervalle en été (juillet-août) et 30 min l'hiver. Fin 30 min avant coucher soleil.
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. La physique du baromètre inverse (+1cm/hPa) -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>🌡️</span>
+          <span>2. La Loi du Baromètre Inverse & Impact sur Lestrevet</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #334155; line-height: 1.45;">
+          Les annuaires SHOM calculent la marée astronomique pour une pression normale de <strong>1013,25 hPa</strong>. Quand une dépression atlantique s'installe, la colonne d'air pèse moins sur l'eau : la mer « gonfle » d'environ <strong>+1 cm par hPa en dessous de 1013 hPa</strong>.
+        </p>
+
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 9.5px; color: #1e3a8a;">
+          <strong>Exemple concret lors d'un coup de vent breton à 985 hPa :</strong><br>
+          Surcote barométrique = $1013 - 985 = \mathbf{+28\text{ cm de hauteur d'eau en plus}}$.
+        </div>
+
+        <p style="margin: 0; font-size: 10px; color: #475569; line-height: 1.45;">
+          <strong>Conséquence à Lestrevet (pente douce 1,15%) :</strong> Ces 28 cm de surcote repoussent le bord de l'eau de <strong>près de 25 mètres sur le sable</strong> et retardent la basse mer de <strong>20 à 35 minutes</strong>. Activer le correcteur en direct évite à Jérôme d'emmener un groupe sur un banc de sable encore submergé.
+        </p>
+      </div>
+
+      <!-- 3. Recommandation pratique -->
+      <div class="section-box" style="background: #f0fdf4; border-color: #86efac;">
+        <div class="section-title" style="color: #166534;">
+          <span>💡</span>
+          <span>3. Recommandation d'Utilisation au Quotidien</span>
+        </div>
+        <ul style="margin: 0; padding-left: 16px; font-size: 9.5px; color: #15803d; line-height: 1.45;">
+          <li><strong>Pour ouvrir les réservations des semaines à l'avance :</strong> Garder le correcteur désactivé ou utiliser une marge fixe pour garantir des horaires stables aux clients.</li>
+          <li><strong>Pour la décision du moniteur à J-2 / J-1 par gros temps :</strong> Activer le correcteur pour figer les horaires réels sans mauvaise surprise.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Physique Interne</span>
+      <span>Échange Benoît & Jérôme · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        if (document.execCommand('copy')) alert('✓ Note copiée dans le presse-papiers !');
+      } catch (err) {
+        alert('Utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>

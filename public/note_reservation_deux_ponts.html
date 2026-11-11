@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note Stratégique · Choix Gestionnaire de Réservation & Architecture Deux Ponts</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.45; font-size: 11px;
+    }
+    .toolbar {
+      position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7; color: #fff; border: none; padding: 7px 14px; border-radius: 6px;
+      font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 14mm 16mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
+      flex-direction: column; justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; }
+    }
+    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px; }
+    .title-badge {
+      display: inline-block; background: #e0f2fe; color: #0369a1; padding: 2px 7px;
+      border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
+    .sub { color: #475569; font-size: 10px; }
+    .meta-box {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px;
+      margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.5px;
+    }
+    .section-box {
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+    }
+    .handwriting-box {
+      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 6px; height: 38px; position: relative;
+    }
+    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 14px; }
+    .handwriting-label { font-size: 8.5px; color: #94a3b8; font-style: italic; position: absolute; top: 3px; left: 6px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      🛒 Char à Voile du Bout du Monde · Note Stratégique Réservation
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Cahier des Charges & Stratégie Digitale</span>
+            <h1>Choix du Nouveau Gestionnaire de Réservation</h1>
+            <div class="sub">Remplacement de Booking Activities & Liaison bidirectionnelle des « Deux Ponts »</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
+        <div><strong>Auteurs :</strong> Benoît & Sheldon</div>
+        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+      </div>
+
+      <!-- 1. Le principe des Deux Ponts -->
+      <div class="section-box" style="background: #f8fafc;">
+        <div class="section-title">
+          <span>🔄</span>
+          <span>1. L'Architecture des Deux Ponts (Cerveau Métier + Paiements)</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #334155; line-height: 1.45;">
+          Notre application reste le <strong>cerveau métier</strong> (calcul marée glissante, seuil 50, météo AROME, Fiche Agenda) et s'articule avec le logiciel de vente :
+        </p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 9.5px;">
+          <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 6px 8px; border-radius: 6px;">
+            <strong style="color: #166534;">Pont 1 (Amont - L'Offre) :</strong><br>
+            L'application calcule les bons créneaux et les publie automatiquement dans l'outil de vente (via API ou flux iCal synchronisé).
+          </div>
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 6px 8px; border-radius: 6px;">
+            <strong style="color: #1e40af;">Pont 2 (Aval - La Demande) :</strong><br>
+            L'outil de vente renvoie les inscrits (noms, téléphones, paiements) : la Fiche Agenda se remplit toute seule sans double saisie.
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Comparatif des 4 prestataires identifiés -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>⚖️</span>
+          <span>2. Comparatif des Prestataires Candidats pour Jérôme</span>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: left;">
+          <thead>
+            <tr style="background: #0f172a; color: #fff; text-transform: uppercase; font-size: 8.5px;">
+              <th style="padding: 5px 8px;">Solution</th>
+              <th style="padding: 5px 8px;">Spécificité Outdoor / Nautisme</th>
+              <th style="padding: 5px 8px;">Modèle Tarifaire</th>
+              <th style="padding: 5px 8px;">Avis Technique Sheldon</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #e2e8f0; background: #f0fdf4;">
+              <td style="padding: 6px 8px; font-weight: 800; color: #166534;">1. Activiti.fr</td>
+              <td style="padding: 6px 8px;">Spécialiste voile & char à voile (FFV/FFCV). Gère nativement les marées glissantes et flotte de chars.</td>
+              <td style="padding: 6px 8px;">~49 € à 89 € / mois (0% commission CA)</td>
+              <td style="padding: 6px 8px; font-weight: 700; color: #166534;">⭐ Le plus robuste pour le nautisme breton</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 6px 8px; font-weight: 800; color: #0284c7;">2. RésaMinute</td>
+              <td style="padding: 6px 8px;">Conçu pour indépendants. Prise de résa express au téléphone en 15s sur mobile, lien SMS instantané.</td>
+              <td style="padding: 6px 8px;">~29 € à 49 € / mois (support FR ultra-réactif)</td>
+              <td style="padding: 6px 8px; font-weight: 700;">Simple, direct, zéro usine à gaz</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+              <td style="padding: 6px 8px; font-weight: 800; color: #d97706;">3. Billetweb.fr</td>
+              <td style="padding: 6px 8px;">0 € d'abonnement fixe. Idéal hors saison quand l'école roule moins l'hiver.</td>
+              <td style="padding: 6px 8px;">0,29 € + 1% par vente (frais CB inclus)</td>
+              <td style="padding: 6px 8px; font-weight: 700;">Le champion économique à l'acte</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 8px; font-weight: 800; color: #7c3aed;">4. Yootil / Regiondo</td>
+              <td style="padding: 6px 8px;">Passerelle offices de tourisme & plateformes glisse (GetYourGuide, Manawa).</td>
+              <td style="padding: 6px 8px;">Abonnement fixe + 3% à 4% de commission</td>
+              <td style="padding: 6px 8px;">Rentable si Jérôme cherche des touristes externes</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 3. Points à arbitrer avec Jérôme -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>✍️</span>
+          <span>3. Arbitrages & Choix de Jérôme</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #475569;">
+          <strong>Questions clés :</strong> Préfères-tu un abonnement fixe pour garder 100% de ta marge l'été (ex: Activiti), ou une formule sans abonnement l'hiver (ex: Billetweb) ? Quelle est la part de réservations prises au téléphone vs sur le site web ?
+        </p>
+        <div class="handwriting-box">
+          <span class="handwriting-label">Décision de Jérôme (Solution retenue & calendrier de transition) :</span>
+          <div class="line"></div>
+          <div class="line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique Interne</span>
+      <span>Échange Benoît & Jérôme · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) alert('✓ Note copiée dans le presse-papiers !');
+      } catch (err) {
+        alert('Utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>

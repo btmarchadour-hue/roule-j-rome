@@ -50,7 +50,9 @@ interface DayDetailPanelProps {
     record: DayFocusData,
     slot: SessionItem,
     decision: 'valid' | 'rejected' | 'pending',
-    reason?: string
+    reason?: string,
+    pilot?: string,
+    pilotsCount?: number
   ) => void;
   onOpenPrintAgenda?: () => void;
   onOpenObservationModal?: (slot: {
@@ -776,24 +778,61 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               {/* SECTION GAUCHE : STATUT PRINCIPAL & INFORMATIONS */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 {decision === 'valid' && (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      background: '#16a34a',
-                      color: '#ffffff',
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      fontWeight: 900,
-                      fontSize: '0.78rem',
-                      letterSpacing: '0.03em',
-                      boxShadow: '0 1px 2px rgba(22, 163, 74, 0.3)',
-                    }}
-                  >
-                    <span>✓</span>
-                    <span>SÉANCE VALIDÉE</span>
-                  </span>
+                  <>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        background: '#16a34a',
+                        color: '#ffffff',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontWeight: 900,
+                        fontSize: '0.78rem',
+                        letterSpacing: '0.03em',
+                        boxShadow: '0 1px 2px rgba(22, 163, 74, 0.3)',
+                      }}
+                    >
+                      <span>✓</span>
+                      <span>SÉANCE VALIDÉE</span>
+                    </span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: '#dcfce7',
+                        border: '1px solid #86efac',
+                        color: '#166534',
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      <span>👨‍🏫 Moniteur :</span>
+                      <strong>{valItem?.instructor || valItem?.assignedPilot || 'Jérôme'}</strong>
+                    </span>
+
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: valItem?.pilotsCount ? '#e0f2fe' : '#ffedd5',
+                        border: valItem?.pilotsCount ? '1px solid #7dd3fc' : '1px solid #fdba74',
+                        color: valItem?.pilotsCount ? '#0369a1' : '#c2410c',
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      <span>👥 Pilotes :</span>
+                      <strong>{valItem?.pilotsCount ? `${valItem.pilotsCount} inscrits` : '0 pilote !'}</strong>
+                    </span>
+                  </>
                 )}
 
                 {decision === 'rejected' && (

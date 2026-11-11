@@ -31,6 +31,7 @@ import {
   saveSessionSettingsToFirestore,
   resetAllSettingsToFirestore,
   subscribeToTeamNotes,
+  getActiveInstructor,
 } from './utils/firebaseSync';
 import {
   ActiveUserSession,
@@ -600,6 +601,8 @@ export const App: React.FC = () => {
           const isBadWind = x.ok === false;
           const status: 'valid' | 'rejected' = mode === 'wind_only' && isBadWind ? 'rejected' : 'valid';
           const rejectReason = isBadWind ? 'Vent hors plage' : undefined;
+          const assignedPilot = status === 'valid' ? (getActiveInstructor() || 'Jérôme') : undefined;
+          const pilotsCount = status === 'valid' ? 8 : undefined; // Jauge nominale standard 8 pilotes
           return {
             k: kOf(x),
             s: lc(x.a, record.y, record.m, record.d),
@@ -610,6 +613,9 @@ export const App: React.FC = () => {
             customTitle: x.customTitle,
             status,
             rejectReason,
+            assignedPilot,
+            instructor: assignedPilot,
+            pilotsCount,
           };
         }),
       },
@@ -650,18 +656,44 @@ export const App: React.FC = () => {
       record: DayFocusData,
       slot: SessionItem,
       decision: 'valid' | 'rejected' | 'pending',
-      reason?: string
+      reason?: string,
+      pilot?: string,
+      pilotsCount?: number
     ) => {
       if (isReadOnly) {
         notifySync('🔒 Mode Contrôle : modifications de créneau verrouillées');
         return;
       }
+
+      // GARDE-FOU MÉTIER INVIOLABLE (Benoît & Jérôme) :
+      // Les participants au volant sont les "pilotes". Une séance validée / confirmée
+      // DOIT obligatoirement avoir au minimum 1 participant / pilote !
+      const slotKey = kOf(slot);
+      const ds = record.ds;
+      const existing = validations[ds];
+      const existingItem = existing?.items?.find(it => it.k === slotKey);
+
+      let effectivePilotsCount = pilotsCount ?? existingItem?.pilotsCount;
+      if (decision === 'valid' && (!effectivePilotsCount || effectivePilotsCount <= 0)) {
+        const answer = window.prompt(
+          `👥 Règle métier inviolable :\nUne séance validée doit comporter au moins 1 participant (pilote de char).\nCombien de pilotes sont inscrits sur la séance ${slot.customTitle || slot.txt || slotKey} ?`,
+          "8"
+        );
+        if (answer === null) return; // Action annulée par l'utilisateur
+        const parsed = parseInt(answer.trim(), 10);
+        if (isNaN(parsed) || parsed <= 0) {
+          window.alert(
+            "⛔ Validation refusée : Impossible de valider une séance avec 0 participant (pilote) !\nS'il n'y a aucun inscrit, classez le créneau en 'Refusé / Faute d'inscrits' (Vie 1)."
+          );
+          return;
+        }
+        effectivePilotsCount = parsed;
+      }
+
       setValidations(prev => {
-        const ds = record.ds;
-        const existing = prev[ds];
-        const slotKey = kOf(slot);
-        const currentItems = existing?.items || [];
-        const existingItem = currentItems.find(it => it.k === slotKey);
+        const existingInState = prev[ds];
+        const currentItems = existingInState?.items || [];
+        const stateExistingItem = currentItems.find(it => it.k === slotKey);
 
         let nextItems: ValidationItem[];
         if (decision === 'pending') {
@@ -669,6 +701,11 @@ export const App: React.FC = () => {
         } else {
           const isBadWind = slot.ok === false;
           const defaultReason = reason || (isBadWind ? 'Vent hors plage' : 'Refusé / Annulé');
+          const assignedPilot =
+            decision === 'valid'
+              ? pilot || stateExistingItem?.assignedPilot || getActiveInstructor() || 'Jérôme'
+              : undefined;
+
           const updatedItem: ValidationItem = {
             k: slotKey,
             s: lc(slot.a, record.y, record.m, record.d),
@@ -679,6 +716,9 @@ export const App: React.FC = () => {
             customTitle: slot.customTitle,
             status: decision,
             rejectReason: decision === 'rejected' ? defaultReason : undefined,
+            assignedPilot,
+            instructor: assignedPilot,
+            pilotsCount: decision === 'valid' ? effectivePilotsCount : undefined,
           };
 
           if (existingItem) {

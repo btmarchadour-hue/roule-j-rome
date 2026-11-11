@@ -131,6 +131,9 @@ export interface ValidationItem {
   customTitle?: string;
   status?: 'valid' | 'rejected';
   rejectReason?: string;
+  assignedPilot?: string; // Nom du moniteur encadrant (ex: 'Jérôme' | 'Benoît')
+  instructor?: string;    // Moniteur encadrant responsable
+  pilotsCount?: number;   // Nombre de participants / pilotes inscrits (min 1 si séance validée)
 }
 
 export interface ValidationDayRecord {

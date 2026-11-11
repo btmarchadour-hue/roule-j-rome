@@ -51,6 +51,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   const [cancellationNote, setCancellationNote] = useState<string>(
     initialObservation?.cancellationNote || ''
   );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Écarts réels
   const [actualPassableTime, setActualPassableTime] = useState<string>(
@@ -125,6 +126,21 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
+    // GARDE-FOU MÉTIER INVIOLABLE (Règle Benoît & Jérôme) :
+    // En char à voile, les stagiaires/clients au volant sont les "pilotes".
+    // Une séance validée ou marquée "Réalisée" DOIT obligatoirement avoir au moins 1 participant (pilote) !
+    // Si 0 inscrit, elle relève de "Vie 1 : Faute de réservations" et doit être enregistrée comme Annulée.
+    if (status === 'realized') {
+      const pCount = participantsCount === '' ? 0 : Number(participantsCount);
+      if (pCount <= 0) {
+        setErrorMessage(
+          '⛔ Règle métier stricte : Une séance ne peut JAMAIS être enregistrée comme "Réalisée" avec 0 participant (pilote) ! S\'il n\'y avait aucun participant inscrit, cochez "Séance Annulée / Non roulée" avec le motif "Vie 1 : Faute de réservations".'
+        );
+        return;
+      }
+    }
 
     const obs: SlotObservation = {
       id: initialObservation?.id || `obs-${dateStr}-${slotKey}`,
@@ -252,6 +268,30 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSave} style={{ overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {errorMessage && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #ef4444',
+                color: '#991b1b',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                lineHeight: 1.45,
+                fontWeight: 700,
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'flex-start',
+              }}
+            >
+              <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>🚨</span>
+              <div>
+                <strong>Validation bloquée :</strong>
+                <div style={{ marginTop: '2px', fontWeight: 600 }}>{errorMessage}</div>
+              </div>
+            </div>
+          )}
+
           {/* Statut Réalisée / Annulée */}
           <div>
             <label style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569', display: 'block', marginBottom: '6px' }}>
@@ -635,22 +675,47 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               </div>
 
               {/* 3. Bilan participants & chars */}
-              <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a', marginBottom: '8px' }}>
-                  👥 Participants & Matériel sorti
+              <div
+                style={{
+                  background: participantsCount === '' || Number(participantsCount) <= 0 ? '#fff7ed' : '#f8fafc',
+                  border: participantsCount === '' || Number(participantsCount) <= 0 ? '1.5px solid #f97316' : '1.5px solid #cbd5e1',
+                  borderRadius: '8px',
+                  padding: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
+                    👥 Participants (Pilotes au volant) & Chars Sortis
+                  </div>
+                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#c2410c', background: '#ffedd5', padding: '2px 7px', borderRadius: '4px' }}>
+                    * Min. 1 pilote obligatoire
+                  </span>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                   <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Total inscrits
+                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '2px' }}>
+                      Pilotes ayant roulé <span style={{ color: '#dc2626' }}>*</span>
                     </label>
                     <input
                       type="number"
+                      min={1}
                       value={participantsCount}
-                      onChange={e => setParticipantsCount(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="ex: 10"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                      onChange={e => {
+                        setParticipantsCount(e.target.value === '' ? '' : Number(e.target.value));
+                        setErrorMessage(null);
+                      }}
+                      placeholder="ex: 8 (min. 1)"
+                      style={{
+                        width: '100%',
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        border: participantsCount === '' || Number(participantsCount) <= 0 ? '2px solid #ea580c' : '1px solid #cbd5e1',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        background: '#fff',
+                        boxSizing: 'border-box',
+                      }}
                     />
                   </div>
 
@@ -660,6 +725,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     </label>
                     <input
                       type="number"
+                      min={0}
                       value={monoCount}
                       onChange={e => setMonoCount(e.target.value === '' ? '' : Number(e.target.value))}
                       placeholder="ex: 8"
@@ -673,6 +739,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     </label>
                     <input
                       type="number"
+                      min={0}
                       value={biCount}
                       onChange={e => setBiCount(e.target.value === '' ? '' : Number(e.target.value))}
                       placeholder="ex: 1"
@@ -680,6 +747,12 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     />
                   </div>
                 </div>
+
+                {(participantsCount === '' || Number(participantsCount) <= 0) && (
+                  <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#c2410c', background: '#ffedd5', padding: '6px 10px', borderRadius: '6px', fontWeight: 600 }}>
+                    ⚠️ <strong>Attention Jérôme :</strong> Une séance réalisée doit avoir au moins 1 participant (pilote de char). S'il n'y avait aucun inscrit, passez le statut en « Séance Annulée / Non roulée » avec la cause « Vie 1 : Faute de réservations ».
+                  </div>
+                )}
               </div>
             </>
           )}

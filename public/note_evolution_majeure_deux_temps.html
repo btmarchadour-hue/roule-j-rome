@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note Stratégique · Les 2 Temps de l'École & Automatisation Client</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.45; font-size: 11px;
+    }
+    .toolbar {
+      position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7; color: #fff; border: none; padding: 7px 14px; border-radius: 6px;
+      font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 14mm 16mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
+      flex-direction: column; justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; page-break-after: always; }
+    }
+    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 10px; }
+    .title-badge {
+      display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 7px;
+      border-radius: 4px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
+    .sub { color: #475569; font-size: 10px; }
+    .meta-box {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px;
+      margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.5px;
+    }
+    .section-box {
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+    }
+    .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+    .kpi-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; font-size: 9.5px; }
+    .sms-box {
+      background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 8px; padding: 8px 12px;
+      font-family: -apple-system, monospace; font-size: 9.5px; color: #166534; line-height: 1.4;
+      margin-top: 4px;
+    }
+    .handwriting-box {
+      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 6px; height: 38px; position: relative;
+    }
+    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 14px; }
+    .handwriting-label { font-size: 8.5px; color: #94a3b8; font-style: italic; position: absolute; top: 3px; left: 6px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      🚀 Char à Voile du Bout du Monde · Note Stratégique : Évolution Majeure (Les 2 Temps)
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Évolution Majeure · Stratégie École &amp; REX</span>
+            <h1>Les 2 Temps de l'École, Couplage Réservation &amp; Sauvetage par SMS</h1>
+            <div class="sub">Vision opérationnelle pour libérer Jérôme des contraintes administratives et sécuriser le CA</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
+        <div><strong>Auteurs :</strong> Benoît Marchadour &amp; Sheldon</div>
+        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+      </div>
+
+      <!-- 1. La révélation des Deux Temps -->
+      <div class="section-box" style="background: #eff6ff; border-color: #bfdbfe;">
+        <div class="section-title" style="color: #1e40af;">
+          <span>🎯</span>
+          <span>1. Le Constat Fondateur : Le Travail de Jérôme se Décompose en Deux Temps Distincts</span>
+        </div>
+        <p style="margin: 0 0 8px; font-size: 10px; color: #1e3a8a; line-height: 1.45;">
+          Plus nous observons le fonctionnement réel de l'école, plus une vérité s'impose : vouloir tout faire dans un seul et même écran mélange deux métiers complètement différents :
+        </p>
+        <div class="kpi-row">
+          <div class="kpi-card" style="background: #ffffff; border-color: #0284c7;">
+            <strong style="color: #0369a1; font-size: 10.5px;">TEMPS 1 : L'Anticipation Commerciale (M-1 à J-7)</strong>
+            <div style="color: #475569; margin-top: 4px; line-height: 1.4;">
+              • <strong>Son rôle :</strong> Identifier les créneaux théoriques praticables (marée sous 4,50 m, coefficient ≤ 50, règle de 09h00, lever/coucher de soleil).<br>
+              • <strong>L'objectif :</strong> Publier ces créneaux des semaines à l'avance dans l'outil de réservation web pour que les vacanciers puissent acheter sans que les horaires bougent sans arrêt.
+            </div>
+          </div>
+          <div class="kpi-card" style="background: #ffffff; border-color: #16a34a;">
+            <strong style="color: #166534; font-size: 10.5px;">TEMPS 2 : Le Pilotage Tactique &amp; REX (J-2 à H+1)</strong>
+            <div style="color: #475569; margin-top: 4px; line-height: 1.4;">
+              • <strong>Son rôle :</strong> Ajuster à la minute près selon la réalité du terrain (vent AROME, surcote barométrique, bâches de Lestrevet).<br>
+              • <strong>L'objectif :</strong> Arbitrer le maintien ou l'annulation, prévenir les clients pro-activement, et consigner le REX (qui a roulé, qui a été sauvé).
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. La Frustration Actuelle & Le Couplage Client -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>⚡</span>
+          <span>2. La Frustration Actuelle &amp; La Révolution du Couplage Réservation</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #334155; line-height: 1.45;">
+          <strong>Le goulet d'étranglement :</strong> Aujourd'hui, notre application calcule des marées parfaites, mais elle ne connaît pas l'identité des clients inscrits. Jérôme est obligé de faire le pont à la main au téléphone ou sur Booking Activities. En couplant l'appli avec le logiciel de réservation (Nom, Tél mobile, places), nous débloquons deux super-pouvoirs :
+        </p>
+
+        <!-- Automatisation 1 : Alerte préventive -->
+        <div style="margin-bottom: 8px;">
+          <strong style="color: #0f172a; font-size: 10px;">📲 Automatisation 1 : Le SMS d'Alerte Préventive à J-1 (18h00)</strong>
+          <div class="sms-box" style="background: #f8fafc; border-color: #cbd5e1; color: #334155;">
+            « Bonjour Sophie, pour votre séance de char à voile de demain 14h00 à Lestrevet, le vent s'annonce instable. Pas d'inquiétude : Jérôme fait un point météo précis demain matin et vous envoie une confirmation définitive par SMS à 10h00. À demain ! »
+          </div>
+          <div style="font-size: 9px; color: #64748b; margin-top: 2px;">
+            ➔ <em>Bénéfice : Réassurance totale du client, zéro appel anxiogène au moniteur le matin.</em>
+          </div>
+        </div>
+
+        <!-- Automatisation 2 : Annulation & Sauvetage commercial 5 créneaux -->
+        <div>
+          <strong style="color: #0f172a; font-size: 10px;">🔄 Automatisation 2 : L'Annulation &amp; Sauvetage Commercial en 1 Clic (J-J 10h00)</strong>
+          <div class="sms-box">
+            « Bonjour Sophie, la météo ne permet pas de rouler ce jour à 14h (pétole). Jérôme a sélectionné pour vous les 5 meilleurs créneaux de report cette semaine :<br>
+            • Jeu 15h00 (95% Vent OK) · Ven 16h15 (90% Vent OK) · Sam 11h00 (85% Vent OK)...<br>
+            👉 Cliquez ici pour choisir votre report en 5 secondes sans payer à nouveau : [Lien unique] »
+          </div>
+          <div style="font-size: 9px; color: #166534; margin-top: 2px; font-weight: 700;">
+            ➔ <em>Bénéfice : On transforme une annulation météo (perte de CA) en report garanti à 75-80% de taux de sauvetage, sans passer un seul coup de fil !</em>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Garde-fou Métier Inviolable : Aucune Séance Validée sans Participant (Pilote de Char) -->
+      <div class="section-box" style="background: #fef2f2; border-color: #fca5a5;">
+        <div class="section-title" style="color: #991b1b;">
+          <span>🛡️</span>
+          <span>3. Garde-Fou Métier Inviolable : Aucune Séance Validée sans Participant (Pilote de Char) !</span>
+        </div>
+        <div style="font-size: 9.5px; color: #7f1d1d; line-height: 1.45;">
+          <p style="margin: 0 0 6px;">
+            <strong>Mise au point terminologique &amp; Problème grave constaté :</strong> En char à voile, chaque client au volant est un <strong>« pilote »</strong>, tandis que Jérôme ou Benoît est le <strong>« moniteur encadrant »</strong>. Or, nous avons constaté que Jérôme avait pu valider dans l'application des séances comportant <strong>0 participant (0 pilote inscrit)</strong> !
+          </p>
+          <div style="background: #ffffff; border: 1px solid #fca5a5; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; color: #991b1b;">
+            ⚠️ <strong>Pourquoi c'est inacceptable pour le REX :</strong> Un créneau sans client n'a jamais roulé. Il relève strictement de la <em>« Vie 1 : Faute de réservations »</em>. Le valider comme séance réalisée pollue les statistiques, fausse le taux de remplissage réel de l'école et génère des séances fantômes sans aucun chiffre d'affaires.
+          </div>
+          <p style="margin: 0;">
+            <strong>Règle désormais codée en dur dans l'outil :</strong>
+            • <em>Observatoire terrain (Bilan) :</em> Le statut « Séance Réalisée » exige <strong>au minimum 1 pilote ayant roulé</strong>. Le bouton d'enregistrement est bloqué à 0.<br>
+            • <em>Planning de validation :</em> Affichage séparé du Moniteur et du nombre de <strong>Pilotes inscrits</strong>. Si 0 inscrit, le créneau doit impérativement être classé en « Refusé / Faute d'inscrits ».
+          </p>
+        </div>
+      </div>
+
+      <!-- 4. Décision à arbitrer avec Jérôme -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>✍️</span>
+          <span>4. Arbitrage &amp; Feu Vert de Jérôme</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #475569;">
+          Valides-tu cette organisation en 2 temps et le raccordement des données clients pour automatiser les SMS d'alerte et de sauvetage commercial ?
+        </p>
+        <div class="handwriting-box">
+          <span class="handwriting-label">Décision de Jérôme (Accord pour le couplage &amp; module de sauvetage SMS) :</span>
+          <div class="line"></div>
+          <div class="line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique Interne</span>
+      <span>Échange Benoît &amp; Jérôme · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        if (document.execCommand('copy')) alert('✓ Note copiée dans le presse-papiers !');
+      } catch (err) {
+        alert('Utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>

@@ -863,3 +863,70 @@ export const deleteWaterlineGpsLogFromFirestore = async (logId: string): Promise
   }
 };
 
+/* -------------------------------------------------------------------------- */
+/* 7. GESTION DES NOTES TECHNIQUES TRAITÉES & ARCHIVÉES (JÉRÔME & BENOÎT)     */
+/* -------------------------------------------------------------------------- */
+export interface ProcessedTechNoteInfo {
+  isProcessed: boolean;
+  processedAt?: number;
+  processedBy?: string;
+  resolutionNote?: string;
+}
+
+export type ProcessedTechNotesMap = Record<string, ProcessedTechNoteInfo>;
+
+export const subscribeToProcessedTechNotes = (
+  onData: (data: ProcessedTechNotesMap) => void,
+  onError?: (err: Error) => void
+) => {
+  const docRef = doc(db, 'team_notes', 'status_tech_notes');
+  return onSnapshot(
+    docRef,
+    snap => {
+      if (snap.exists()) {
+        const raw = snap.data();
+        const clean: ProcessedTechNotesMap = {};
+        Object.entries(raw).forEach(([k, v]) => {
+          if (k !== 'updatedAt' && v && typeof v === 'object') {
+            clean[k] = v as ProcessedTechNoteInfo;
+          }
+        });
+        onData(clean);
+      } else {
+        onData({});
+      }
+    },
+    error => {
+      console.warn('Erreur écoute statut notes techniques Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const setTechNoteProcessedInFirestore = async (
+  noteId: string,
+  isProcessed: boolean,
+  processedBy?: string,
+  resolutionNote?: string
+): Promise<void> => {
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', 'status_tech_notes');
+    const updatePayload = {
+      [noteId]: cleanForFirestore({
+        isProcessed,
+        processedAt: isProcessed ? Date.now() : null,
+        processedBy: isProcessed ? (processedBy || getActiveInstructor()) : null,
+        resolutionNote: isProcessed ? (resolutionNote || null) : null,
+      }),
+      updatedAt: Date.now(),
+    };
+    await setDoc(docRef, updatePayload, { merge: true });
+    notifySync(isProcessed ? '✓ Note marquée comme traitée et archivée' : '✓ Note remise en actif');
+  } catch (error) {
+    console.error('Erreur setTechNoteProcessedInFirestore:', error);
+    throw error;
+  }
+};
+
+

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note Technique Jérôme · Cadrage Piste Lestrevet · Char à Voile</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 14mm 12mm 14mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.45;
+      font-size: 11.5px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-secondary {
+      background: #334155;
+    }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      min-height: 297mm;
+      margin: 15px auto;
+      padding: 14mm 16mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 4px 0 2px;
+      font-size: 16px;
+      font-weight: 900;
+      color: #0f172a;
+    }
+    .sub {
+      color: #475569;
+      font-size: 10.5px;
+    }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 10px;
+    }
+    .section-box {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11.5px;
+      font-weight: 900;
+      color: #0284c7;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 4px;
+    }
+    .q-item {
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed #e2e8f0;
+    }
+    .q-item:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    .q-text {
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 3px;
+    }
+    .q-why {
+      font-size: 9.5px;
+      color: #64748b;
+      margin-bottom: 5px;
+    }
+    .handwriting-box {
+      border: 1px solid #cbd5e1;
+      background: #fcfcfc;
+      border-radius: 4px;
+      padding: 6px;
+      height: 38px;
+      position: relative;
+    }
+    .handwriting-box .line {
+      border-bottom: 1px dotted #cbd5e1;
+      height: 14px;
+    }
+    .handwriting-label {
+      font-size: 8.5px;
+      color: #94a3b8;
+      font-style: italic;
+      position: absolute;
+      top: 3px;
+      left: 6px;
+    }
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .kpi-card {
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 10px;
+    }
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+      font-size: 9px;
+      color: #64748b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      🏎️ Char à Voile du Bout du Monde · Note de Cadrage Lestrevet (Jérôme)
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / Papier A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <!-- En-tête officiel -->
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Topographie de Précision · Secteur Lestrevet</span>
+            <h1>Cadrage Terrain : Modèle Altimétrique & Piste Utile à Lestrevet</h1>
+            <div class="sub">Application « Ça roule ? » · Calage géométrique fin pour les cours de Jérôme</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Métadonnées -->
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
+        <div><strong>Auteurs :</strong> Benoît Marchadour & Sheldon</div>
+        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+      </div>
+
+      <!-- Contexte & Pourquoi Lestrevet est spécifique -->
+      <div style="background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 10.5px; line-height: 1.45; color: #1e3a8a;">
+        <strong>🎯 Objectif de cette note :</strong> Nous venons d'intégrer les données altimétriques Lidar Litto3D (IGN/SHOM) pour calculer la largeur de plage en temps réel. La baie fait 4 km, mais <strong>Jérôme roule sur le secteur spécifique de Lestrevet</strong> (plus plat, plus ouvert, avec ses propres accès et écoulements). Voici les 3 paramètres de terrain à caler avec lui pour que l'outil affiche la réalité exacte au mètre près.
+      </div>
+
+      <!-- 3 Questions Clés pour Jérôme -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>✍️</span>
+          <span>Les 3 Questions Terrain à Arbitrer avec Jérôme</span>
+        </div>
+
+        <!-- Question 1 : Le point zéro -->
+        <div class="q-item">
+          <div class="q-text">1. Point d'ancrage « Zéro » : D'où part-on exactement à Lestrevet ?</div>
+          <div class="q-why">
+            <em>Pourquoi :</em> Aujourd'hui le modèle mesure la distance depuis « la dune théorique ». Si Jérôme nous donne l'emplacement exact de sa remorque ou de la cale de Lestrevet, l'application affichera la distance réelle nette entre sa remorque et l'eau.
+          </div>
+          <div class="handwriting-box">
+            <span class="handwriting-label">Réponse Jérôme (ex: au niveau de la descente goudronnée / parking nord / coordonnées GPS) :</span>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+        </div>
+
+        <!-- Question 2 : La marge haute de sable sec/mou -->
+        <div class="q-item">
+          <div class="q-text">2. Marge haute non roulable : Où poses-tu ta première bouée de virage ?</div>
+          <div class="q-why">
+            <em>Pourquoi :</em> Entre le pied de dune et le sable dur, il y a une bande de sable sec où les chars s'enfoncent. Est-ce que cette marge est fixe (ex: ~40 m, ~60 m), ou bien considères-tu que tout ce qui a été mouillé par la marée haute précédente (laisse de mer) devient roulable ?
+          </div>
+          <div class="handwriting-box">
+            <span class="handwriting-label">Réponse Jérôme (ex: environ 40-50 m / dépend du vent de terre / laisse de pleine mer) :</span>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+        </div>
+
+        <!-- Question 3 : Comportement des bâches & ruisseaux à Lestrevet -->
+        <div class="q-item">
+          <div class="q-text">3. Bâches résiduelles & ruissellements côtiers à Lestrevet :</div>
+          <div class="q-why">
+            <em>Pourquoi :</em> À Lestrevet, de petites rigoles d'eau douce traversent parfois la plage à mi-marée. À partir de quelle hauteur d'eau ou coefficient le sable est-il parfaitement lisse et sec en surface pour les débutants ?
+          </div>
+          <div class="handwriting-box">
+            <span class="handwriting-label">Réponse Jérôme (ex: dès 3,80 m c'est vidé / gênant seulement par petit coef / secteur nord plus sec) :</span>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Le protocole terrain express (1 clic GPS) -->
+      <div class="section-box" style="background: #f8fafc;">
+        <div class="section-title" style="color: #0f172a;">
+          <span>📍</span>
+          <span>Le protocole de calage terrain express (Zéro prise de tête pour Jérôme)</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 10px; color: #475569;">
+          Pour finaliser le calage mathématique de Lestrevet, Jérôme n'a rien à mesurer au décamètre :
+        </p>
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <strong>1. Aller au bord de l'eau</strong><br>
+            À marée descendante ou montante sur sa zone de cours.
+          </div>
+          <div class="kpi-card" style="background: #e0f2fe; border-color: #7dd3fc; color: #0369a1;">
+            <strong>2. Cliquer sur le gros bouton</strong><br>
+            « TOP RELEVÉ » fige la position GPS lissée et la marée.
+          </div>
+          <div class="kpi-card" style="background: #fef3c7; border-color: #fde68a; color: #92400e;">
+            <strong>3. Calage automatique</strong><br>
+            Après 10 à 15 relevés, la courbe de Lestrevet est 100% calée.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pied de page -->
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document de travail interne</span>
+      <span>Échange Benoît & Jérôme · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          alert('✓ La note a été entièrement copiée dans votre presse-papiers !\n\nOuvrez Word ou votre boîte email et faites Coller (Ctrl+V ou Cmd+V).');
+        } else {
+          alert('Veuillez sélectionner le texte et faire Ctrl+C.');
+        }
+      } catch (err) {
+        alert('Impossible de copier automatiquement : utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>
