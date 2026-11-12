@@ -4,6 +4,33 @@
  * Spot location: Plage de Lestrevet, Plomodiern, Finistère (Académie de Rennes -> Zone B)
  */
 
+export const HOLIDAY_ZONE_COLORS = {
+  A: {
+    code: 'A' as const,
+    colorName: 'Rose',
+    bg: '#db2777',
+    text: '#ffffff',
+    cities: 'Lyon / Bordeaux',
+    label: 'Zone A (Lyon / Bordeaux)',
+  },
+  B: {
+    code: 'B' as const,
+    colorName: 'Bleu',
+    bg: '#2563eb',
+    text: '#ffffff',
+    cities: 'Rennes',
+    label: 'Zone B (Rennes)',
+  },
+  C: {
+    code: 'C' as const,
+    colorName: 'Jaune',
+    bg: '#facc15',
+    text: '#111827',
+    cities: 'Paris',
+    label: 'Zone C (Paris)',
+  },
+} as const;
+
 export interface HolidayInfo {
   isHoliday: boolean;
   holidayName?: string;

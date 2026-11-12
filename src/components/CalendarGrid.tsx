@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppSettings, CustomSlotsMap, TidePoint, ValidationsMap, WindPoint } from '../types';
+import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, tdy, vstat } from '../utils/tides';
 
 interface CalendarGridProps {
@@ -69,6 +70,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
 
     let dayTooltip = '';
 
+    const holiday = getFrenchHolidayInfo(ds);
+
     if (inRange) {
       const dw = dayWind(year, month, d, settings, tideW, first, last, windList);
       if (dw.lvl === 2 || dw.lvl === -1) {
@@ -100,6 +103,13 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         dayTooltip = `${d} ${MOIS[month]} ${year} · ${kt.label}${kt.coef ? ` · Coef ${kt.coef}` : ''}`;
       } else {
         dayTooltip = `${d} ${MOIS[month]} ${year}`;
+      }
+
+      if (holiday.isHoliday) {
+        dayTooltip += ` · 🎒 ${holiday.holidayName} (${holiday.zonesLabel})`;
+      }
+      if (holiday.publicHolidayName) {
+        dayTooltip += ` · ⭐ Férié : ${holiday.publicHolidayName}`;
       }
 
       if (valStatus === 'ok') {
@@ -170,6 +180,28 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             {keyTideLabel}
           </span>
         )}
+        {holiday.isHoliday && (
+          <span
+            className="cal-holiday-corner"
+            aria-label={`Vacances scolaires : ${holiday.zonesLabel}`}
+          >
+            {holiday.zones.map(z => {
+              const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+              return (
+                <span
+                  key={z}
+                  className="cal-holiday-zone"
+                  style={{
+                    backgroundColor: zoneStyle.bg,
+                    color: zoneStyle.text,
+                  }}
+                >
+                  {z}
+                </span>
+              );
+            })}
+          </span>
+        )}
       </button>
     );
   }
@@ -227,6 +259,29 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         ))}
         {emptyCells}
         {dayCells}
+      </div>
+
+      <div className="cal-holiday-legend">
+        <span style={{ fontWeight: 700 }}>Vacances (bas droit) :</span>
+        {(['B', 'C', 'A'] as const).map(z => {
+          const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+          return (
+            <span key={z} className="cal-holiday-legend-item">
+              <span
+                className="cal-holiday-swatch"
+                style={{
+                  backgroundColor: zoneStyle.bg,
+                  color: zoneStyle.text,
+                }}
+              >
+                {z}
+              </span>
+              <span>
+                {zoneStyle.colorName} · {zoneStyle.cities} (Zone {z})
+              </span>
+            </span>
+          );
+        })}
       </div>
     </div>
   );

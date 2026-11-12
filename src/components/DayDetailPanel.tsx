@@ -29,7 +29,7 @@ import {
 } from '../utils/tides';
 import { CurveChart } from './CurveChart';
 import { CustomSlotsManager } from './CustomSlotsManager';
-import { getFrenchHolidayInfo } from '../utils/frenchHolidays';
+import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { WindPanel } from './WindPanel';
 
 interface DayDetailPanelProps {
@@ -288,56 +288,42 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            background: '#fef2f2',
-            border: '1.5px solid #fca5a5',
+            background: '#f8fafc',
+            border: '1.5px solid #cbd5e1',
             padding: '3px 8px',
             borderRadius: '6px',
             fontSize: '0.74rem',
             marginBottom: '8px',
+            color: '#0f172a',
           }}
         >
           <span>🎒 {holiday.holidayName}</span>
-          <span style={{ fontWeight: 800, color: '#b91c1c' }}>({holiday.zonesLabel})</span>
+          <span style={{ fontWeight: 800, color: '#334155' }}>({holiday.zonesLabel})</span>
           <span style={{ display: 'inline-flex', gap: '3px' }}>
-            <span
-              style={{
-                padding: '1px 5px',
-                borderRadius: '3px',
-                fontSize: '0.62rem',
-                fontWeight: 900,
-                color: '#fff',
-                background: holiday.isZoneA ? '#0284c7' : '#cbd5e1',
-                opacity: holiday.isZoneA ? 1 : 0.45,
-              }}
-            >
-              A
-            </span>
-            <span
-              style={{
-                padding: '1px 5px',
-                borderRadius: '3px',
-                fontSize: '0.62rem',
-                fontWeight: 900,
-                color: '#fff',
-                background: holiday.isZoneB ? '#dc2626' : '#cbd5e1',
-                opacity: holiday.isZoneB ? 1 : 0.45,
-              }}
-            >
-              B
-            </span>
-            <span
-              style={{
-                padding: '1px 5px',
-                borderRadius: '3px',
-                fontSize: '0.62rem',
-                fontWeight: 900,
-                color: '#fff',
-                background: holiday.isZoneC ? '#d97706' : '#cbd5e1',
-                opacity: holiday.isZoneC ? 1 : 0.45,
-              }}
-            >
-              C
-            </span>
+            {(['A', 'B', 'C'] as const).map(z => {
+              const active =
+                (z === 'A' && holiday.isZoneA) ||
+                (z === 'B' && holiday.isZoneB) ||
+                (z === 'C' && holiday.isZoneC);
+              const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+              return (
+                <span
+                  key={z}
+                  title={zoneStyle.label}
+                  style={{
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    fontSize: '0.62rem',
+                    fontWeight: 900,
+                    color: active ? zoneStyle.text : '#475569',
+                    background: active ? zoneStyle.bg : '#cbd5e1',
+                    opacity: active ? 1 : 0.45,
+                  }}
+                >
+                  {z}
+                </span>
+              );
+            })}
           </span>
         </div>
       )}

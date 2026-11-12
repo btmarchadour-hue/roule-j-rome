@@ -27,7 +27,7 @@ import {
   toU,
   windAt,
 } from '../utils/tides';
-import { getFrenchHolidayInfo, HolidayInfo } from '../utils/frenchHolidays';
+import { getFrenchHolidayInfo, HolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { CustomSlotsManager } from './CustomSlotsManager';
 
 interface PrintableAgendaSheetProps {
@@ -1401,18 +1401,38 @@ export const PrintableAgendaSheet: React.FC<PrintableAgendaSheetProps> = ({
                       {/* INDICATEUR VACANCES SCOLAIRES (Multi-zones A, B, C) */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                         {day.holiday.isHoliday ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fef2f2', border: '1.5px solid #dc2626', padding: '6px 12px', borderRadius: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', border: '1.5px solid #475569', padding: '6px 12px', borderRadius: '8px' }}>
                             <span style={{ fontSize: '1.25rem' }}>🎒</span>
                             <div style={{ textAlign: 'left' }}>
-                              <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#b91c1c', textTransform: 'uppercase' }}>
+                              <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#0f172a', textTransform: 'uppercase' }}>
                                 {day.holiday.holidayName}
                               </div>
-                              <div style={{ fontSize: '0.72rem', color: '#7f1d1d', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ fontSize: '0.72rem', color: '#334155', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span>{day.holiday.zonesLabel}</span>
                                 <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
-                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneA ? '#0284c7' : '#cbd5e1', opacity: day.holiday.isZoneA ? 1 : 0.45 }}>Zone A</span>
-                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneB ? '#dc2626' : '#cbd5e1', opacity: day.holiday.isZoneB ? 1 : 0.45 }}>Zone B</span>
-                                  <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '0.62rem', fontWeight: 900, color: '#fff', background: day.holiday.isZoneC ? '#d97706' : '#cbd5e1', opacity: day.holiday.isZoneC ? 1 : 0.45 }}>Zone C</span>
+                                  {(['A', 'B', 'C'] as const).map(z => {
+                                    const active =
+                                      (z === 'A' && day.holiday.isZoneA) ||
+                                      (z === 'B' && day.holiday.isZoneB) ||
+                                      (z === 'C' && day.holiday.isZoneC);
+                                    const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+                                    return (
+                                      <span
+                                        key={z}
+                                        style={{
+                                          padding: '1px 6px',
+                                          borderRadius: '3px',
+                                          fontSize: '0.62rem',
+                                          fontWeight: 900,
+                                          color: active ? zoneStyle.text : '#475569',
+                                          background: active ? zoneStyle.bg : '#cbd5e1',
+                                          opacity: active ? 1 : 0.45,
+                                        }}
+                                      >
+                                        Zone {z}
+                                      </span>
+                                    );
+                                  })}
                                 </span>
                               </div>
                             </div>
