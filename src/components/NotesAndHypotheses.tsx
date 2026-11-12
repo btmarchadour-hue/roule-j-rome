@@ -131,19 +131,19 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryLabel: 'Évolution Majeure',
         categoryColor: '#dc2626',
         icon: '🚀',
-        title: 'Note Stratégique : Les 2 Temps de l’École & Couplage Réservation',
-        subtitle: 'Séparation Anticipation Commerciale vs Pilotage Tactique Météo + Sauvetage SMS',
+        title: 'Note Stratégique : Les 2 Temps, le Cycle en 6 Étapes & Nouveaux Modules',
+        subtitle: 'Anticipation vs Tactique, Décalage/Regroupement, Sauvetage SMS, Heures Moniteur & Coupe Litto3D',
         summary:
-          'Clarification majeure du fonctionnement de l’école : découpler la publication des créneaux lointains du pilotage d’urgence à J-1. Couplage avec les données clients pour automatiser les SMS d’alerte et proposer 5 créneaux de report avec % de réussite météo.',
+          'Synthèse complète des notes de cadrage de Benoît : organisation en 2 temps, cycle de vie en 6 étapes (définition, positionnement résa, ajustement/décalage/regroupement dynamique, rétroaction résa, REX sincère, couplage gestion & GPS), gestion des heures moniteur et calage altimétrique Litto3D.',
         keyPoints: [
-          'Temps 1 (Anticipation M-1 à J-7) : Créneaux théoriques stables publiés dans la résa sans bouger.',
-          'Temps 2 (Tactique J-2 à H+1) : Ajustement météo AROME / surcote en direct et décision d’annuler ou rouler.',
-          'Automatisation SMS Préventif J-1 : Alerte préventive à 18h pour réassurer les clients et éviter les appels anxiogènes.',
-          'Sauvetage Commercial en 1 clic : Lien SMS proposant 5 reports immédiats (taux de sauvetage 75-80% au lieu de perte sèche de CA).',
-          'Garde-fou Métier Inviolable : Interdiction formelle de valider une séance avec 0 participant (pilote). Les séances sans client sont classées en "Vie 1 : Faute de réservations".',
+          'Cycle Opérationnel en 6 étapes : De la physique des marées à la synchronisation bidirectionnelle résa.',
+          'Ajustement dynamique : Possibilité de décalage horaire (+30 min) et regroupement de créneaux sous-remplis.',
+          'Sauvetage Commercial en 1 clic : SMS automatisés d’alerte J-1 (18h) et proposition de 5 reports (taux 75-80%).',
+          'Garde-fou Métier Inviolable : Interdiction formelle de valider une séance avec 0 participant (pilote).',
+          'Nouveaux Modules pour Jeudi : Gestion des heures moniteur (Jérôme) et échelle altimétrique en ordonnée Litto3D.',
         ],
         docUrl: '/note_evolution_majeure_deux_temps.html',
-        docBtnLabel: '🚀 Ouvrir la Note Évolution Majeure (A4 / Word)',
+        docBtnLabel: '🚀 Ouvrir la Note Évolution Majeure (2 Pages A4 / Word)',
         statusBadge: {
           label: 'Priorité Réunion Jeudi',
           bg: '#fee2e2',
@@ -924,9 +924,9 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                   background: '#fff',
                 }}
               >
-                <option value="Jérôme">Jérôme (Moniteur)</option>
-                <option value="Benoît">Benoît</option>
-                <option value="Jérôme & Benoît">Jérôme & Benoît (En séance)</option>
+                <option value="Jérôme">Jérôme (Moniteur titulaire)</option>
+                <option value="Benoît">Benoît (Concepteur)</option>
+                <option value="Jérôme & Benoît">Jérôme (Moniteur) &amp; Benoît (Concepteur)</option>
               </select>
             </div>
 

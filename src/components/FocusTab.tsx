@@ -247,7 +247,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               <span>SÉANCE VALIDÉE</span>
             </span>
 
-            {/* BADGE MONITEUR ENCADRANT */}
+            {/* BADGE MONITEUR ENCADRANT (Jérôme - Seul Moniteur Diplômé) */}
             <span
               style={{
                 display: 'inline-flex',
@@ -263,32 +263,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               }}
             >
               <span>👨‍🏫 Moniteur :</span>
-              <strong style={{ color: '#0f172a' }}>{valItem?.instructor || valItem?.assignedPilot || 'Jérôme'}</strong>
-              {!isReadOnly && onSetSlotDecision && (
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    const currentInst = valItem?.instructor || valItem?.assignedPilot || 'Jérôme';
-                    const nextInst = currentInst === 'Jérôme' ? 'Benoît' : 'Jérôme';
-                    onSetSlotDecision(f, x, 'valid', undefined, nextInst, valItem?.pilotsCount || 8);
-                  }}
-                  style={{
-                    background: '#ffffff',
-                    border: '1px solid #86efac',
-                    borderRadius: '4px',
-                    padding: '1px 5px',
-                    fontSize: '0.64rem',
-                    fontWeight: 800,
-                    color: '#166534',
-                    cursor: 'pointer',
-                    marginLeft: '3px',
-                  }}
-                  title="Changer de moniteur encadrant (Jérôme ↔ Benoît)"
-                >
-                  ⇄ Alterner
-                </button>
-              )}
+              <strong style={{ color: '#0f172a' }}>Jérôme (Moniteur diplômé)</strong>
             </span>
 
             {/* BADGE PILOTES / PARTICIPANTS (GARDE-FOU MÉTIER MIN. 1) */}

@@ -57,7 +57,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
-      setFeedback({ type: 'error', msg: 'Accès refusé : seuls Jérôme et Benoît (Admin) peuvent créer des comptes.' });
+      setFeedback({ type: 'error', msg: 'Accès refusé : seuls Jérôme (Moniteur) et Concepteur : Benoît peuvent créer des comptes.' });
       return;
     }
 
@@ -255,7 +255,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
                 Gestion des Utilisateurs & Équipe
               </h2>
               <p style={{ margin: 0, fontSize: '0.72rem', color: '#94a3b8' }}>
-                Accès administrateur (Jérôme & Benoît) · Profils, rôles et mots de passe
+                Accès administrateur (Jérôme &amp; Concepteur : Benoît) · Profils, rôles et mots de passe
               </p>
             </div>
           </div>

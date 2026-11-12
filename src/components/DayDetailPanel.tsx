@@ -812,7 +812,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       }}
                     >
                       <span>👨‍🏫 Moniteur :</span>
-                      <strong>{valItem?.instructor || valItem?.assignedPilot || 'Jérôme'}</strong>
+                      <strong>Jérôme (Moniteur diplômé)</strong>
                     </span>
 
                     <span

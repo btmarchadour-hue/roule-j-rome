@@ -31,7 +31,7 @@ export const DEFAULT_USERS: AppUser[] = [
   {
     id: 'usr_benoit',
     username: 'Benoît',
-    displayName: 'Benoît (Administrateur & DevOps)',
+    displayName: 'Benoît (Concepteur)',
     role: 'admin',
     passwordHash: 'adce9053b3b6b52dc4a7bb0b963351c77cb09477d1ee87bdc4fdd8ff8c3d04d3', // mdp: Maya2103
     isReadOnly: false,

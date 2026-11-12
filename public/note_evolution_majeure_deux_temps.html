@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Note Stratégique · Les 2 Temps de l'École & Automatisation Client</title>
+  <title>Note Stratégique · Évolution Majeure : Les 2 Temps, le Cycle en 6 Étapes & Automatisation</title>
   <style>
-    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
+    @page { size: A4 portrait; margin: 8mm 12mm 8mm 12mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.45; font-size: 11px;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.40; font-size: 10.5px;
     }
     .toolbar {
       position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
@@ -22,198 +22,368 @@
     }
     .btn-secondary { background: #334155; }
     .sheet {
-      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 14mm 16mm;
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 11mm 13mm;
       box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
-      flex-direction: column; justify-content: space-between;
+      flex-direction: column; justify-content: space-between; page-break-after: always;
     }
     @media print {
       body { background: #fff; }
       .toolbar { display: none !important; }
       .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; page-break-after: always; }
     }
-    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 10px; }
+    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 6px; margin-bottom: 8px; }
     .title-badge {
       display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 7px;
-      border-radius: 4px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em;
+      border-radius: 4px; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em;
     }
-    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
-    .sub { color: #475569; font-size: 10px; }
+    h1 { margin: 3px 0 2px; font-size: 15px; font-weight: 900; color: #0f172a; line-height: 1.25; }
+    .sub { color: #475569; font-size: 9.5px; }
     .meta-box {
-      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px;
-      margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.5px;
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px;
+      margin-bottom: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9px;
     }
     .section-box {
-      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 12px; margin-bottom: 10px;
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
     }
     .section-title {
-      font-size: 11px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
-      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+      font-size: 10.5px; font-weight: 900; color: #0284c7; margin-bottom: 5px; display: flex;
+      align-items: center; gap: 5px; border-bottom: 1px solid #f1f5f9; padding-bottom: 3px;
     }
-    .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
-    .kpi-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; font-size: 9.5px; }
+    .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+    .kpi-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 7px 9px; font-size: 9px; }
+    .step-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .step-card {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; font-size: 9px;
+    }
+    .step-num {
+      display: inline-block; background: #0284c7; color: #fff; font-weight: 900;
+      width: 17px; height: 17px; text-align: center; line-height: 17px; border-radius: 50%; font-size: 8.5px; margin-right: 4px;
+    }
     .sms-box {
-      background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 8px; padding: 8px 12px;
-      font-family: -apple-system, monospace; font-size: 9.5px; color: #166534; line-height: 1.4;
-      margin-top: 4px;
+      background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 6px; padding: 6px 10px;
+      font-family: -apple-system, monospace; font-size: 9px; color: #166534; line-height: 1.35;
+      margin-top: 3px;
     }
     .handwriting-box {
-      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 6px; height: 38px; position: relative;
+      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 5px 8px; height: 36px; position: relative;
     }
-    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 14px; }
-    .handwriting-label { font-size: 8.5px; color: #94a3b8; font-style: italic; position: absolute; top: 3px; left: 6px; }
-    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 13px; }
+    .handwriting-label { font-size: 8px; color: #94a3b8; font-style: italic; position: absolute; top: 2px; left: 6px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 5px; font-size: 8.5px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
   </style>
 </head>
 <body>
 
+  <!-- BARRE D'ACTION ÉCRAN -->
   <div class="toolbar">
     <div style="font-weight: 800; font-size: 13px;">
-      🚀 Char à Voile du Bout du Monde · Note Stratégique : Évolution Majeure (Les 2 Temps)
+      🚀 Char à Voile du Bout du Monde · Note Stratégique Évolution Majeure (2 Pages A4)
     </div>
     <div style="display: flex; gap: 8px;">
-      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (2 Pages A4 / PDF)</button>
       <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
     </div>
   </div>
 
-  <div class="sheet" id="printable-note">
-    <div>
-      <table class="header-table">
-        <tr>
-          <td>
-            <span class="title-badge">Évolution Majeure · Stratégie École &amp; REX</span>
-            <h1>Les 2 Temps de l'École, Couplage Réservation &amp; Sauvetage par SMS</h1>
-            <div class="sub">Vision opérationnelle pour libérer Jérôme des contraintes administratives et sécuriser le CA</div>
-          </td>
-          <td style="text-align: right; vertical-align: bottom;">
-            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
-            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
-          </td>
-        </tr>
-      </table>
+  <div id="printable-master-document">
 
-      <div class="meta-box">
-        <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
-        <div><strong>Auteurs :</strong> Benoît Marchadour &amp; Sheldon</div>
-        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
-      </div>
+    <!-- ===================================================================== -->
+    <!-- PAGE 1 : LES 2 TEMPS ET LE CYCLE OPÉRATIONNEL EN 6 ÉTAPES             -->
+    <!-- ===================================================================== -->
+    <div class="sheet">
+      <div>
+        <table class="header-table">
+          <tr>
+            <td>
+              <span class="title-badge">Évolution Majeure · Stratégie École &amp; Cycle des Séances (1/2)</span>
+              <h1>Les 2 Temps de l'École &amp; le Cycle Opérationnel en 6 Étapes</h1>
+              <div class="sub">Vision intégrée : de l'anticipation commerciale lointaine au pilotage tactique en direct sur l'estran</div>
+            </td>
+            <td style="text-align: right; vertical-align: bottom;">
+              <div style="font-weight: 900; color: #0284c7; font-size: 11.5px;">Char à Voile du Bout du Monde</div>
+              <div style="font-size: 9px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+            </td>
+          </tr>
+        </table>
 
-      <!-- 1. La révélation des Deux Temps -->
-      <div class="section-box" style="background: #eff6ff; border-color: #bfdbfe;">
-        <div class="section-title" style="color: #1e40af;">
-          <span>🎯</span>
-          <span>1. Le Constat Fondateur : Le Travail de Jérôme se Décompose en Deux Temps Distincts</span>
+        <!-- Métadonnées & Rôles stricts -->
+        <div class="meta-box">
+          <div><strong>Destinataire :</strong> Jérôme (Moniteur diplômé titulaire)</div>
+          <div><strong>Auteurs :</strong> Concepteur : Benoît Marchadour &amp; Sheldon</div>
+          <div><strong>Date de cadrage :</strong> 12 Novembre 2026</div>
         </div>
-        <p style="margin: 0 0 8px; font-size: 10px; color: #1e3a8a; line-height: 1.45;">
-          Plus nous observons le fonctionnement réel de l'école, plus une vérité s'impose : vouloir tout faire dans un seul et même écran mélange deux métiers complètement différents :
-        </p>
-        <div class="kpi-row">
-          <div class="kpi-card" style="background: #ffffff; border-color: #0284c7;">
-            <strong style="color: #0369a1; font-size: 10.5px;">TEMPS 1 : L'Anticipation Commerciale (M-1 à J-7)</strong>
-            <div style="color: #475569; margin-top: 4px; line-height: 1.4;">
-              • <strong>Son rôle :</strong> Identifier les créneaux théoriques praticables (marée sous 4,50 m, coefficient ≤ 50, règle de 09h00, lever/coucher de soleil).<br>
-              • <strong>L'objectif :</strong> Publier ces créneaux des semaines à l'avance dans l'outil de réservation web pour que les vacanciers puissent acheter sans que les horaires bougent sans arrêt.
+
+        <!-- 1. Le Constat Fondateur : Deux Temps Distincts -->
+        <div class="section-box" style="background: #eff6ff; border-color: #bfdbfe;">
+          <div class="section-title" style="color: #1e40af;">
+            <span>🎯</span>
+            <span>1. Le Constat Fondateur : Le Travail de Jérôme se Décompose en Deux Temps Distincts</span>
+          </div>
+          <p style="margin: 0 0 6px; font-size: 9.5px; color: #1e3a8a; line-height: 1.4;">
+            Vouloir tout gérer dans un seul écran mélange deux logiques opérationnelles radicalement différentes :
+          </p>
+          <div class="kpi-row">
+            <div class="kpi-card" style="background: #ffffff; border-color: #0284c7;">
+              <strong style="color: #0369a1; font-size: 10px;">TEMPS 1 : L'Anticipation Commerciale (M-1 à J-7)</strong>
+              <div style="color: #475569; margin-top: 3px; line-height: 1.35;">
+                • <strong>Rôle :</strong> Identifier les créneaux théoriques praticables (marée sous 4,50 m, coefficient ≤ 50 roulage continu, règle 9h00, lever/coucher soleil).<br>
+                • <strong>Objectif :</strong> Publier ces créneaux dans l'outil de réservation web pour permettre l'achat des vacanciers sans bouger les horaires.
+              </div>
+            </div>
+            <div class="kpi-card" style="background: #ffffff; border-color: #16a34a;">
+              <strong style="color: #166534; font-size: 10px;">TEMPS 2 : Le Pilotage Tactique &amp; REX (J-2 à H+1)</strong>
+              <div style="color: #475569; margin-top: 3px; line-height: 1.35;">
+                • <strong>Rôle :</strong> Ajuster à la minute près selon la météo réelle (AROME HD, surcote barométrique, bâches d'eau Lestrevet).<br>
+                • <strong>Objectif :</strong> Décider le maintien, le décalage ou l'annulation, prévenir les clients et consigner le REX réel.
+              </div>
             </div>
           </div>
-          <div class="kpi-card" style="background: #ffffff; border-color: #16a34a;">
-            <strong style="color: #166534; font-size: 10.5px;">TEMPS 2 : Le Pilotage Tactique &amp; REX (J-2 à H+1)</strong>
-            <div style="color: #475569; margin-top: 4px; line-height: 1.4;">
-              • <strong>Son rôle :</strong> Ajuster à la minute près selon la réalité du terrain (vent AROME, surcote barométrique, bâches de Lestrevet).<br>
-              • <strong>L'objectif :</strong> Arbitrer le maintien ou l'annulation, prévenir les clients pro-activement, et consigner le REX (qui a roulé, qui a été sauvé).
+        </div>
+
+        <!-- 2. La Feuille de Route en 6 Étapes (Notes Manuscrites de Benoît) -->
+        <div class="section-box">
+          <div class="section-title">
+            <span>🗺️</span>
+            <span>2. Le Cycle Opérationnel d'une Séance en 6 Étapes (Feuille de Route)</span>
+          </div>
+          <div class="step-grid">
+            <!-- Étape 1 -->
+            <div class="step-card" style="border-left: 3px solid #0284c7;">
+              <div style="font-weight: 800; color: #0284c7; margin-bottom: 2px;">
+                <span class="step-num">1</span> Définir les créneaux de roulage
+              </div>
+              <div style="color: #334155; line-height: 1.35;">
+                Calcul physique automatique des plages praticables sous le seuil d'eau de 4,50 m, validation des journées continues (Coef ≤ 50) et respect de la règle d'école de 09h00.
+              </div>
+            </div>
+
+            <!-- Étape 2 -->
+            <div class="step-card" style="border-left: 3px solid #0284c7;">
+              <div style="font-weight: 800; color: #0284c7; margin-bottom: 2px;">
+                <span class="step-num">2</span> Positionner les séances &amp; Importation résa
+              </div>
+              <div style="color: #334155; line-height: 1.35;">
+                Placer les séances dans la grille d'agenda et synchroniser les réservations (nom des pilotes, téléphone, places retenues) directement depuis l'outil de vente en ligne.
+              </div>
+            </div>
+
+            <!-- Étape 3 -->
+            <div class="step-card" style="border-left: 3px solid #16a34a; background: #f0fdf4;">
+              <div style="font-weight: 800; color: #166534; margin-bottom: 2px;">
+                <span class="step-num" style="background: #16a34a;">3</span> Faire vivre les séances (Ajustement dynamique)
+              </div>
+              <div style="color: #14532d; line-height: 1.35;">
+                <strong>Ajustement à court et moyen terme :</strong>
+                • Modifier les paramètres selon AROME HD &amp; la surcote.<br>
+                • <strong>Possibilité de décalage :</strong> retarder de 30 min si la mer tarde à se retirer.<br>
+                • <strong>Possibilité de regroupement :</strong> fusionner deux séances à faible effectif pour optimiser la fenêtre de vent et la rentabilité.
+              </div>
+            </div>
+
+            <!-- Étape 4 -->
+            <div class="step-card" style="border-left: 3px solid #0284c7;">
+              <div style="font-weight: 800; color: #0284c7; margin-bottom: 2px;">
+                <span class="step-num">4</span> Reporter l'information (Appli + Export RESA)
+              </div>
+              <div style="color: #334155; line-height: 1.35;">
+                Rétroaction bidirectionnelle immédiate : renvoi des décalages d'horaires et statuts vers l'outil de réservation web, et mise à jour des Fiches Agenda terrain imprimables.
+              </div>
+            </div>
+
+            <!-- Étape 5 -->
+            <div class="step-card" style="border-left: 3px solid #d97706;">
+              <div style="font-weight: 800; color: #b45309; margin-bottom: 2px;">
+                <span class="step-num" style="background: #d97706;">5</span> Statistiques d'activité &amp; REX sincère
+              </div>
+              <div style="color: #334155; line-height: 1.35;">
+                Comptabilisation rigoureuse séparant <strong>Vie 1 (créneau fermé faute d'inscrits)</strong> et <strong>Vie 2 (annulation météo avec clients)</strong>. Taux de remplissage réel sur base de 12 chars max.
+              </div>
+            </div>
+
+            <!-- Étape 6 -->
+            <div class="step-card" style="border-left: 3px solid #7c3aed;">
+              <div style="font-weight: 800; color: #6d28d9; margin-bottom: 2px;">
+                <span class="step-num" style="background: #7c3aed;">6</span> Couplage Gestion &amp; Précision GPS
+              </div>
+              <div style="color: #334155; line-height: 1.35;">
+                Passerelle avec le logiciel de gestion pour automatiser les SMS clients, avec étalonnage terrain par <strong>vérification de la précision GPS</strong> de la ligne d'eau réelle sur le sable.
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 2. La Frustration Actuelle & Le Couplage Client -->
-      <div class="section-box">
-        <div class="section-title">
-          <span>⚡</span>
-          <span>2. La Frustration Actuelle &amp; La Révolution du Couplage Réservation</span>
-        </div>
-        <p style="margin: 0 0 6px; font-size: 10px; color: #334155; line-height: 1.45;">
-          <strong>Le goulet d'étranglement :</strong> Aujourd'hui, notre application calcule des marées parfaites, mais elle ne connaît pas l'identité des clients inscrits. Jérôme est obligé de faire le pont à la main au téléphone ou sur Booking Activities. En couplant l'appli avec le logiciel de réservation (Nom, Tél mobile, places), nous débloquons deux super-pouvoirs :
-        </p>
-
-        <!-- Automatisation 1 : Alerte préventive -->
-        <div style="margin-bottom: 8px;">
-          <strong style="color: #0f172a; font-size: 10px;">📲 Automatisation 1 : Le SMS d'Alerte Préventive à J-1 (18h00)</strong>
-          <div class="sms-box" style="background: #f8fafc; border-color: #cbd5e1; color: #334155;">
-            « Bonjour Sophie, pour votre séance de char à voile de demain 14h00 à Lestrevet, le vent s'annonce instable. Pas d'inquiétude : Jérôme fait un point météo précis demain matin et vous envoie une confirmation définitive par SMS à 10h00. À demain ! »
-          </div>
-          <div style="font-size: 9px; color: #64748b; margin-top: 2px;">
-            ➔ <em>Bénéfice : Réassurance totale du client, zéro appel anxiogène au moniteur le matin.</em>
-          </div>
-        </div>
-
-        <!-- Automatisation 2 : Annulation & Sauvetage commercial 5 créneaux -->
-        <div>
-          <strong style="color: #0f172a; font-size: 10px;">🔄 Automatisation 2 : L'Annulation &amp; Sauvetage Commercial en 1 Clic (J-J 10h00)</strong>
-          <div class="sms-box">
-            « Bonjour Sophie, la météo ne permet pas de rouler ce jour à 14h (pétole). Jérôme a sélectionné pour vous les 5 meilleurs créneaux de report cette semaine :<br>
-            • Jeu 15h00 (95% Vent OK) · Ven 16h15 (90% Vent OK) · Sam 11h00 (85% Vent OK)...<br>
-            👉 Cliquez ici pour choisir votre report en 5 secondes sans payer à nouveau : [Lien unique] »
-          </div>
-          <div style="font-size: 9px; color: #166534; margin-top: 2px; font-weight: 700;">
-            ➔ <em>Bénéfice : On transforme une annulation météo (perte de CA) en report garanti à 75-80% de taux de sauvetage, sans passer un seul coup de fil !</em>
-          </div>
+        <!-- Synthèse de transition vers la page 2 -->
+        <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 8.5px; color: #64748b; text-align: center;">
+          ➔ <em>Suite au verso : Automatisation SMS, Garde-fou 0 pilote, Gestion des heures moniteur &amp; Échelle altimétrique Litto3D.</em>
         </div>
       </div>
 
-      <!-- 3. Garde-fou Métier Inviolable : Aucune Séance Validée sans Participant (Pilote de Char) -->
-      <div class="section-box" style="background: #fef2f2; border-color: #fca5a5;">
-        <div class="section-title" style="color: #991b1b;">
-          <span>🛡️</span>
-          <span>3. Garde-Fou Métier Inviolable : Aucune Séance Validée sans Participant (Pilote de Char) !</span>
-        </div>
-        <div style="font-size: 9.5px; color: #7f1d1d; line-height: 1.45;">
-          <p style="margin: 0 0 6px;">
-            <strong>Mise au point terminologique &amp; Problème grave constaté :</strong> En char à voile, chaque client au volant est un <strong>« pilote »</strong>, tandis que Jérôme ou Benoît est le <strong>« moniteur encadrant »</strong>. Or, nous avons constaté que Jérôme avait pu valider dans l'application des séances comportant <strong>0 participant (0 pilote inscrit)</strong> !
-          </p>
-          <div style="background: #ffffff; border: 1px solid #fca5a5; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; color: #991b1b;">
-            ⚠️ <strong>Pourquoi c'est inacceptable pour le REX :</strong> Un créneau sans client n'a jamais roulé. Il relève strictement de la <em>« Vie 1 : Faute de réservations »</em>. Le valider comme séance réalisée pollue les statistiques, fausse le taux de remplissage réel de l'école et génère des séances fantômes sans aucun chiffre d'affaires.
-          </div>
-          <p style="margin: 0;">
-            <strong>Règle désormais codée en dur dans l'outil :</strong>
-            • <em>Observatoire terrain (Bilan) :</em> Le statut « Séance Réalisée » exige <strong>au minimum 1 pilote ayant roulé</strong>. Le bouton d'enregistrement est bloqué à 0.<br>
-            • <em>Planning de validation :</em> Affichage séparé du Moniteur et du nombre de <strong>Pilotes inscrits</strong>. Si 0 inscrit, le créneau doit impérativement être classé en « Refusé / Faute d'inscrits ».
-          </p>
-        </div>
-      </div>
-
-      <!-- 4. Décision à arbitrer avec Jérôme -->
-      <div class="section-box">
-        <div class="section-title">
-          <span>✍️</span>
-          <span>4. Arbitrage &amp; Feu Vert de Jérôme</span>
-        </div>
-        <p style="margin: 0 0 6px; font-size: 10px; color: #475569;">
-          Valides-tu cette organisation en 2 temps et le raccordement des données clients pour automatiser les SMS d'alerte et de sauvetage commercial ?
-        </p>
-        <div class="handwriting-box">
-          <span class="handwriting-label">Décision de Jérôme (Accord pour le couplage &amp; module de sauvetage SMS) :</span>
-          <div class="line"></div>
-          <div class="line"></div>
-        </div>
+      <div class="footer">
+        <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique &amp; Technique</span>
+        <span>Page 1 / 2 · Échange Jérôme (Moniteur) &amp; Concepteur : Benoît</span>
       </div>
     </div>
 
-    <div class="footer">
-      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique Interne</span>
-      <span>Échange Benoît &amp; Jérôme · Novembre 2026</span>
+    <!-- ===================================================================== -->
+    <!-- PAGE 2 : AUTOMATISATIONS, GARDE-FOUS, HEURES MONITEUR & LITTO3D       -->
+    <!-- ===================================================================== -->
+    <div class="sheet">
+      <div>
+        <table class="header-table">
+          <tr>
+            <td>
+              <span class="title-badge" style="background: #dcfce7; color: #166534;">Module Opérationnel &amp; Validation Terrain (2/2)</span>
+              <h1>Automatisations SMS, Garde-Fous Métier &amp; Nouveaux Modules</h1>
+              <div class="sub">Dispositifs de sauvetage commercial, comptabilisation RH et calage altimétrique Litto3D</div>
+            </td>
+            <td style="text-align: right; vertical-align: bottom;">
+              <div style="font-weight: 900; color: #0284c7; font-size: 11.5px;">Char à Voile du Bout du Monde</div>
+              <div style="font-size: 9px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- 3. Révolution du Couplage Client : Automatisations SMS -->
+        <div class="section-box">
+          <div class="section-title">
+            <span>📲</span>
+            <span>3. Révolution du Couplage Client : Alertes SMS &amp; Sauvetage Commercial en 1 Clic</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <strong style="color: #0f172a; font-size: 9.5px;">Alerte Préventive à J-1 (18h00)</strong>
+              <div class="sms-box" style="background: #f8fafc; border-color: #cbd5e1; color: #334155;">
+                « Bonjour Sophie, pour votre séance de demain 14h à Lestrevet, le vent s'annonce instable. Jérôme fait un point précis demain matin et vous confirme par SMS à 10h00. À demain ! »
+              </div>
+              <div style="font-size: 8.5px; color: #64748b; margin-top: 2px;">
+                ➔ <em>Bénéfice : Réassurance totale du client, zéro appel anxiogène le matin.</em>
+              </div>
+            </div>
+
+            <div>
+              <strong style="color: #0f172a; font-size: 9.5px;">Sauvetage Commercial en 1 Clic (J-J 10h00)</strong>
+              <div class="sms-box">
+                « Bonjour Sophie, séance 14h annulée ce jour (pétole). Jérôme vous propose 5 créneaux de report :<br>
+                • Jeu 15h (95% Vent OK) · Ven 16h (90% Vent OK)...<br>
+                👉 Choisissez en 1 clic sans repayer : [Lien unique] »
+              </div>
+              <div style="font-size: 8.5px; color: #166534; margin-top: 2px; font-weight: 700;">
+                ➔ <em>Bénéfice : Sauvetage de 75-80% du CA en report au lieu d'un remboursement.</em>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Garde-Fou Métier Inviolable : Pilotes vs Moniteur -->
+        <div class="section-box" style="background: #fef2f2; border-color: #fca5a5;">
+          <div class="section-title" style="color: #991b1b;">
+            <span>🛡️</span>
+            <span>4. Garde-Fou Métier Inviolable : Aucune Séance Validée sans Participant (Pilote de Char) !</span>
+          </div>
+          <div style="font-size: 9px; color: #7f1d1d; line-height: 1.35;">
+            <strong>Mise au point légale &amp; Règle d'intégrité :</strong>
+            En char à voile, chaque client au volant est un <strong>« pilote »</strong>. Jérôme est le seul <strong>« moniteur diplômé titulaire »</strong> habilité à encadrer sur l'estran (Benoît étant le <strong>concepteur</strong> du logiciel sans fonction d'encadrement).<br>
+            • <strong>Problème constaté :</strong> Jérôme avait pu valider des séances à <strong>0 inscrit</strong>. C'est inacceptable car cela pollue le REX avec des séances fictives à 0 € de CA.<br>
+            • <strong>Règle codée en dur :</strong> Toute séance validée ou marquée « Réalisée » exige <strong>au minimum 1 pilote inscrit</strong>. À 0, le créneau doit être classé en « Vie 1 : Faute de réservations ».
+          </div>
+        </div>
+
+        <!-- 5. Nouveaux Modules Issus des Notes de Benoît -->
+        <div class="section-box">
+          <div class="section-title">
+            <span>⚙️</span>
+            <span>5. Nouveaux Modules &amp; Points d'Arbitrage pour la Réunion de Jeudi</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <!-- Module A : Heures moniteurs -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 8px; font-size: 9px;">
+              <strong style="color: #0369a1;">⏱️ Gestion des heures moniteur (À voir avec Jérôme)</strong>
+              <div style="color: #475569; margin-top: 2px; line-height: 1.35;">
+                Comptabilisation automatique du volume horaire effectif :<br>
+                • Heures face aux stagiaires sur l'estran.<br>
+                • Heures de préparation, réglage du parc et convoyage.<br>
+                <em>Question à Jérôme : quel format de relevé mensuel ou hebdomadaire souhaites-tu exporter ?</em>
+              </div>
+            </div>
+
+            <!-- Module B : Échelle ordonnée Litto3D & GPS -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 8px; font-size: 9px;">
+              <strong style="color: #0369a1;">📐 Coupe Litto3D : Échelle en ordonnée &amp; GPS</strong>
+              <div style="color: #475569; margin-top: 2px; line-height: 1.35;">
+                • <strong>Échelle en ordonnée intégrée :</strong> L'axe vertical affiche désormais les altitudes graduées de 1 m à 7 m NGF pour situer la mer par rapport au seuil 4,50 m.<br>
+                • <strong>Vérification GPS :</strong> Étalonnage par relevé GPS de la ligne d'eau réelle à marée descendante pour valider la surcote locale.
+              </div>
+            </div>
+
+            <!-- Module C : Décalage & Regroupement -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 8px; font-size: 9px;">
+              <strong style="color: #0369a1;">🔄 Décalage de séances &amp; Regroupement</strong>
+              <div style="color: #475569; margin-top: 2px; line-height: 1.35;">
+                • Bouton d'action rapide pour décaler une séance (+30 min / +45 min) avec notification automatique des inscrits.<br>
+                • Module de fusion de deux créneaux sous-remplis (ex: 3 + 4 = 1 séance de 7) pour libérer le planning.
+              </div>
+            </div>
+
+            <!-- Module D : Autres besoins statistiques -->
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 8px; font-size: 9px;">
+              <strong style="color: #0369a1;">📊 D'autres besoins statistiques ?</strong>
+              <div style="color: #475569; margin-top: 2px; line-height: 1.35;">
+                Recueil des souhaits d'analyse de Jérôme :<br>
+                • Ratio monoplaces vs biplaces par séance.<br>
+                • Pertes de roulage par secteur de vent défavorable.<br>
+                • Analyse de fréquentation par coefficient de marée.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Arbitrage & Signatures -->
+        <div class="section-box" style="margin-bottom: 0;">
+          <div class="section-title">
+            <span>✍️</span>
+            <span>6. Décisions &amp; Relevé de Clôture avec Jérôme</span>
+          </div>
+          <div class="handwriting-box" style="height: 48px; margin-bottom: 6px;">
+            <span class="handwriting-label">Décision de Jérôme (Accord sur les 6 étapes, le couplage SMS et les heures moniteurs) :</span>
+            <div class="line"></div>
+            <div class="line"></div>
+            <div class="line"></div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; padding-top: 4px; border-top: 1px solid #cbd5e1;">
+            <div>
+              <div style="font-size: 8.5px; font-weight: 800; color: #475569; text-transform: uppercase;">Pour l'école · Jérôme (Moniteur diplômé) :</div>
+              <div style="height: 28px; border-bottom: 1px solid #94a3b8; margin-top: 2px;"></div>
+              <div style="font-size: 8px; color: #64748b;">Signature &amp; Date</div>
+            </div>
+            <div>
+              <div style="font-size: 8.5px; font-weight: 800; color: #475569; text-transform: uppercase;">Pour le développement · Concepteur : Benoît :</div>
+              <div style="height: 28px; border-bottom: 1px solid #94a3b8; margin-top: 2px;"></div>
+              <div style="font-size: 8px; color: #64748b;">Signature &amp; Date</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique &amp; Technique</span>
+        <span>Page 2 / 2 · Échange Jérôme (Moniteur) &amp; Concepteur : Benoît</span>
+      </div>
     </div>
+
   </div>
 
   <script>
     function copyDocumentForWord() {
-      const doc = document.getElementById('printable-note');
+      const doc = document.getElementById('printable-master-document');
       if (!doc) return;
       const range = document.createRange();
       range.selectNode(doc);
       window.getSelection().removeAllRanges();
       window.getSelection().addRange(range);
       try {
-        if (document.execCommand('copy')) alert('✓ Note copiée dans le presse-papiers !');
+        if (document.execCommand('copy')) alert('✓ Note complète (2 pages) copiée dans le presse-papiers !');
       } catch (err) {
         alert('Utilisez Ctrl+A puis Ctrl+C.');
       }

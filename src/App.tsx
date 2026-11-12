@@ -588,7 +588,7 @@ export const App: React.FC = () => {
     mode: 'all' | 'wind_only' = 'all'
   ) => {
     if (isReadOnly) {
-      notifySync('🔒 Mode Contrôle actif : validations verrouillées pour Benoît');
+      notifySync('🔒 Mode Contrôle actif : validations réservées au Moniteur (verrouillé pour Concepteur : Benoît)');
       return;
     }
     const updated: ValidationsMap = {
@@ -633,7 +633,7 @@ export const App: React.FC = () => {
 
   const handleClearValidation = useCallback((ds: string) => {
     if (isReadOnly) {
-      notifySync('🔒 Mode Contrôle : réinitialisation verrouillée pour Benoît');
+      notifySync('🔒 Mode Contrôle : réinitialisation verrouillée pour Concepteur : Benoît');
       return;
     }
     setValidations(prev => {
@@ -665,7 +665,7 @@ export const App: React.FC = () => {
         return;
       }
 
-      // GARDE-FOU MÉTIER INVIOLABLE (Benoît & Jérôme) :
+      // GARDE-FOU MÉTIER INVIOLABLE (Concepteur : Benoît & Moniteur : Jérôme) :
       // Les participants au volant sont les "pilotes". Une séance validée / confirmée
       // DOIT obligatoirement avoir au minimum 1 participant / pilote !
       const slotKey = kOf(slot);
@@ -1156,7 +1156,7 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Carte Administration Équipe & Utilisateurs (Réservée aux Administrateurs Jérôme & Benoît) */}
+            {/* Carte Administration Équipe & Utilisateurs (Réservée à Jérôme & Concepteur : Benoît) */}
             {currentUser?.role === 'admin' && (
               <div
                 className="card nop"

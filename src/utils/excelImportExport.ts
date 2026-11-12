@@ -344,8 +344,8 @@ export function downloadExcelLogbookTemplate(): void {
     [
       'Moniteur',
       'Facultatif',
-      'Jérôme ou Benoît',
-      'Moniteur ayant encadré ou prévu la séance.',
+      'Jérôme (Moniteur titulaire)',
+      'Moniteur diplômé ayant encadré la séance (Jérôme).',
     ],
     [
       'Vent / Rafales / Direction',

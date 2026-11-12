@@ -87,7 +87,7 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   // Dimensions SVG
   const svgW = 700;
   const svgH = 260;
-  const padL = 45;
+  const padL = 54;
   const padR = 25;
   const padT = 25;
   const padB = 45;
@@ -443,6 +443,61 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
             style={{ width: '100%', minWidth: '560px', height: 'auto', display: 'block' }}
           >
             <rect x={padL} y={padT} width={plotW} height={plotH} fill="#f0f9ff" />
+
+            {/* ÉCHELLE EN ORDONNÉE (AXE Y : ALTITUDE Z EN MÈTRES - DEMANDE BENOÎT) */}
+            {[1, 2, 3, 4, 5, 6, 7].map(alt => {
+              const yPos = mapY(alt);
+              return (
+                <g key={`y-grid-${alt}`}>
+                  <line
+                    x1={padL}
+                    x2={padL + plotW}
+                    y1={yPos}
+                    y2={yPos}
+                    stroke="#e2e8f0"
+                    strokeWidth="1"
+                    strokeDasharray="2 2"
+                  />
+                  <line
+                    x1={padL - 4}
+                    x2={padL}
+                    y1={yPos}
+                    y2={yPos}
+                    stroke="#94a3b8"
+                    strokeWidth="1.5"
+                  />
+                  <text
+                    x={padL - 8}
+                    y={yPos + 3}
+                    fill="#475569"
+                    fontSize="8.5"
+                    fontWeight="700"
+                    textAnchor="end"
+                  >
+                    {alt} m
+                  </text>
+                </g>
+              );
+            })}
+            <line
+              x1={padL}
+              x2={padL}
+              y1={padT}
+              y2={padT + plotH}
+              stroke="#64748b"
+              strokeWidth="1.5"
+            />
+            <text
+              x={padL - 10}
+              y={padT - 8}
+              fill="#0369a1"
+              fontSize="8"
+              fontWeight="900"
+              textAnchor="start"
+            >
+              ▲ Altitude (Z)
+            </text>
+
             <polygon points={waterPolygon} fill="rgba(14, 165, 233, 0.45)" />
             <polygon points={sandPolygon} fill="#fef3c7" stroke="#d97706" strokeWidth="2" />
 

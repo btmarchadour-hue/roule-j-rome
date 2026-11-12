@@ -245,7 +245,7 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
                     color: author === 'Benoît' ? '#92400e' : '#475569',
                   }}
                 >
-                  💻 Benoît
+                  💻 Concepteur : Benoît
                 </button>
               </div>
 
@@ -426,7 +426,7 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
                             border: `1px solid ${isJerome ? '#bae6fd' : '#fde68a'}`,
                           }}
                         >
-                          {isJerome ? '⛵ Jérôme' : '💻 Benoît'}
+                          {isJerome ? '⛵ Jérôme (Moniteur)' : '💻 Concepteur : Benoît'}
                         </span>
 
                         <span
