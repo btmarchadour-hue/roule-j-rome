@@ -360,10 +360,58 @@ export interface GpsWaterlineLog {
   rawSurcoteCm: number;            // Surcote constatée vs modèle brut SHOM (cm)
   correctedSurcoteCm: number;      // Écart résiduel vs modèle corrigé école (cm)
 
+  // Mesures géométriques calculées par rapport au Cadre Terrain (Dune + Gauche/Droite)
+  measuredWidthFromDuneM?: number;   // Largeur plage mesurée depuis la ligne de dune jusqu'à l'eau (m)
+  lateralPosFromLeftM?: number;      // Position le long de la plage depuis la borne Gauche (m)
+  lateralPosPct?: number;            // Position relative 0% (Gauche) -> 100% (Droite)
+  isInsideZone?: boolean;            // True si compris entre limite Gauche et limite Droite
+  cadreProfileUsed?: BeachCadreProfileKey;
+
   // Notes de terrain
   beachState?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
   note?: string;
   createdAt: number;
+}
+
+export type BeachCadreProfileKey = 'jerome' | 'mairie';
+
+export interface BeachReferencePoint {
+  lat: number;
+  lon: number;
+  accuracyM?: number | null;
+  samplesCount?: number;
+  label?: string;
+  source?: 'gps_calib' | 'manual';
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+export interface BeachCadreProfile {
+  profileKey: BeachCadreProfileKey;
+  name: string;
+  /** Repère Zéro côté Dune : Point A (côté Gauche/Sud en regardant la mer) */
+  dunePointA: BeachReferencePoint | null;
+  /** Repère Zéro côté Dune : Point B (côté Droit/Nord en regardant la mer) */
+  dunePointB: BeachReferencePoint | null;
+  /** Limite latérale Gauche (côté Sud / Lestrevet en regardant la mer) */
+  leftBoundary: BeachReferencePoint | null;
+  /** Limite latérale Droite (côté Nord / Pentrez en regardant la mer) */
+  rightBoundary: BeachReferencePoint | null;
+  /** Marge de sable sec/mou haute (m) entre la dune et le sable roulable */
+  softSandMarginM?: number;
+  notes?: string;
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+export interface BeachCadreConfig {
+  activeProfile: BeachCadreProfileKey;
+  profiles: {
+    jerome: BeachCadreProfile;
+    mairie: BeachCadreProfile;
+  };
+  updatedAt?: number;
+  updatedBy?: string;
 }
 
 export interface WindsUpObsRow {

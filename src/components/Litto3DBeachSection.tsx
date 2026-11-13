@@ -1,17 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { AppSettings, GpsWaterlineLog, TidePoint } from '../types';
+import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint } from '../types';
+import { computeCadreGeometry, evaluatePointAgainstCadre } from '../utils/beachCadreEngine';
 import { hAt } from '../utils/tides';
 
 interface Litto3DBeachSectionProps {
   settings: AppSettings;
   EX: TidePoint[];
   logs?: GpsWaterlineLog[];
+  activeCadre?: BeachCadreProfile | null;
 }
 
 export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   settings,
   EX,
   logs = [],
+  activeCadre = null,
 }) => {
   // Heure actuelle en minute UTC
   const nowUtcMinute = Math.floor(Date.now() / 60000);
@@ -83,6 +86,13 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   // Position et largeur utile au seuil école nominal (ex: 4,50 m)
   const nominalThresholdX = calculateWaterLineX(settings.L);
   const nominalWidthM = Math.max(0, nominalThresholdX - softSandMarginM);
+
+  // Données issues du Cadre Terrain étalonné (Dune + Gauche/Droite)
+  const cadreGeom = useMemo(() => computeCadreGeometry(activeCadre), [activeCadre]);
+  const latestGpsDuneEval = useMemo(() => {
+    if (!activeCadre || logs.length === 0) return null;
+    return evaluatePointAgainstCadre(logs[0].latitude, logs[0].longitude, activeCadre);
+  }, [activeCadre, logs]);
 
   // Dimensions SVG
   const svgW = 700;
@@ -570,6 +580,12 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           <div style={{ fontSize: '0.70rem', color: '#166534', marginTop: '2px' }}>
             (Plage découverte : <strong>{totalDiscoveredX} m</strong> · Marge haute : <strong>{softSandMarginM} m</strong>)
           </div>
+          {latestGpsDuneEval?.widthFromDuneM != null && (
+            <div style={{ fontSize: '0.70rem', color: '#0369a1', fontWeight: 700, marginTop: '4px' }}>
+              GPS Dune → Mer ({logs[0]?.timeStr}) : <strong>{latestGpsDuneEval.widthFromDuneM} m</strong>
+              {cadreGeom.corridorLengthM != null && ` · Longueur zone : ${cadreGeom.corridorLengthM} m`}
+            </div>
+          )}
           <div style={{ fontSize: '0.70rem', color: '#15803d', fontWeight: 700, marginTop: '4px' }}>
             {usefulRollableWidthM >= 180 ? '✓ Idéal grand circuit (12 chars)' : usefulRollableWidthM >= 100 ? '⚡ Circuit compact' : '⛔ Trop étroit (< 100 m)'}
           </div>

@@ -7,10 +7,11 @@ import {
   getDocs,
   writeBatch,
 } from 'firebase/firestore';
-import { db, ensureAuth } from '../firebase';
+import { auth, db, ensureAuth } from '../firebase';
 import {
   AppSettings,
   AppUser,
+  BeachCadreConfig,
   ClientProfile,
   CustomSlotsMap,
   GpsWaterlineLog,
@@ -19,6 +20,59 @@ import {
   ValidationsMap,
 } from '../types';
 import { DEFAULT_USERS } from './authUtils';
+import { createDefaultBeachCadreConfig, saveStoredBeachCadreConfig } from './beachCadreEngine';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+      emailVerified: auth.currentUser?.emailVerified ?? null,
+      isAnonymous: auth.currentUser?.isAnonymous ?? null,
+      tenantId: auth.currentUser?.tenantId ?? null,
+      providerInfo:
+        auth.currentUser?.providerData?.map(provider => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export interface AgendaBookingItem {
   id: string;
@@ -813,6 +867,11 @@ export const subscribeToWaterlineGpsLogs = (
           schoolThresholdM: Number(d.schoolThresholdM) || 4.5,
           rawSurcoteCm: Number(d.rawSurcoteCm) || 0,
           correctedSurcoteCm: Number(d.correctedSurcoteCm) || 0,
+          measuredWidthFromDuneM: d.measuredWidthFromDuneM != null ? Number(d.measuredWidthFromDuneM) : undefined,
+          lateralPosFromLeftM: d.lateralPosFromLeftM != null ? Number(d.lateralPosFromLeftM) : undefined,
+          lateralPosPct: d.lateralPosPct != null ? Number(d.lateralPosPct) : undefined,
+          isInsideZone: d.isInsideZone != null ? Boolean(d.isInsideZone) : undefined,
+          cadreProfileUsed: d.cadreProfileUsed === 'mairie' || d.cadreProfileUsed === 'jerome' ? d.cadreProfileUsed : undefined,
           beachState: d.beachState,
           note: d.note,
           createdAt: d.createdAt || Date.now(),
@@ -833,9 +892,10 @@ export const upsertWaterlineGpsLogToFirestore = async (
   log: Omit<GpsWaterlineLog, 'id'>,
   existingId?: string
 ): Promise<{ id: string; isUpdated: boolean }> => {
+  const cleanId = existingId || `gps_${log.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const path = `waterline_gps_logs/${cleanId}`;
   try {
     await ensureAuth();
-    const cleanId = existingId || `gps_${log.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const docRef = doc(db, 'waterline_gps_logs', cleanId);
     const payload = cleanForFirestore({
       ...log,
@@ -846,9 +906,8 @@ export const upsertWaterlineGpsLogToFirestore = async (
     notifySync(existingId ? '🛡️ Relevé GPS mis à jour (sécurité anti-doublon)' : '✓ Relevé GPS limite d\'eau enregistré');
     return { id: cleanId, isUpdated: Boolean(existingId) };
   } catch (error) {
-    console.error('Erreur enregistrement relevé GPS Firestore:', error);
     notifySync('⚠️ Erreur d\'enregistrement GPS');
-    throw error;
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 };
 
@@ -860,14 +919,76 @@ export const addWaterlineGpsLogToFirestore = async (
 };
 
 export const deleteWaterlineGpsLogFromFirestore = async (logId: string): Promise<void> => {
+  const path = `waterline_gps_logs/${logId}`;
   try {
     await ensureAuth();
     const docRef = doc(db, 'waterline_gps_logs', logId);
     await deleteDoc(docRef);
     notifySync('✓ Relevé GPS supprimé');
   } catch (error) {
-    console.error('Erreur suppression relevé GPS Firestore:', error);
-    throw error;
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* 9B. CADRE TERRAIN DE ROULAGE (DUNE + CÔTÉS GAUCHE/DROITE MAIRIE & JÉRÔME)  */
+/* -------------------------------------------------------------------------- */
+
+export const subscribeToBeachCadreConfig = (
+  onData: (config: BeachCadreConfig) => void,
+  onError?: (err: Error) => void
+) => {
+  const docRef = doc(db, 'app_config', 'beach_cadre_roulage');
+  return onSnapshot(
+    docRef,
+    snapshot => {
+      const def = createDefaultBeachCadreConfig();
+      if (snapshot.exists()) {
+        const d = snapshot.data() as Partial<BeachCadreConfig>;
+        const merged: BeachCadreConfig = {
+          activeProfile: d.activeProfile === 'mairie' ? 'mairie' : 'jerome',
+          profiles: {
+            jerome: { ...def.profiles.jerome, ...(d.profiles?.jerome || {}) },
+            mairie: { ...def.profiles.mairie, ...(d.profiles?.mairie || {}) },
+          },
+          updatedAt: d.updatedAt,
+          updatedBy: d.updatedBy,
+        };
+        saveStoredBeachCadreConfig(merged);
+        onData(merged);
+      } else {
+        onData(def);
+      }
+    },
+    error => {
+      console.warn('Erreur écoute cadre terrain Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const saveBeachCadreConfigToFirestore = async (
+  config: BeachCadreConfig,
+  authorOverride?: string
+): Promise<void> => {
+  const path = 'app_config/beach_cadre_roulage';
+  try {
+    await ensureAuth();
+    const rawAuthor = authorOverride || getActiveInstructor();
+    const allowedAuthors = ['Jérôme', 'Benoît', 'Admin', 'Jerome', 'Benoit'];
+    const safeAuthor = allowedAuthors.includes(rawAuthor) ? rawAuthor : 'Jérôme';
+    const docRef = doc(db, 'app_config', 'beach_cadre_roulage');
+    const payload = cleanForFirestore({
+      ...config,
+      updatedBy: safeAuthor,
+      updatedAt: Date.now(),
+    });
+    await setDoc(docRef, payload);
+    saveStoredBeachCadreConfig({ ...config, updatedBy: safeAuthor, updatedAt: Date.now() });
+    notifySync('✓ Cadre terrain de roulage enregistré dans le Cloud');
+  } catch (error) {
+    notifySync('⚠️ Erreur de sauvegarde du cadre terrain');
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 };
 

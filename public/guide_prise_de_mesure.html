@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guide pour prise de mesure · Mode Opératoire Terrain · Plage de Lestrevet</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 10mm 11mm 10mm 11mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.42;
+      font-size: 10.6px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn-word { background: #1d4ed8; }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      max-width: calc(100% - 20px);
+      margin: 14px auto;
+      padding: 11mm 13mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 6px;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .block, .step-box { break-inside: avoid; page-break-inside: avoid; }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2.5px solid #0284c7;
+      padding-bottom: 7px;
+      margin-bottom: 9px;
+      border-collapse: collapse;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #dcfce7;
+      color: #166534;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 3px 0 2px;
+      font-size: 16.5px;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1.2;
+    }
+    .sub {
+      color: #475569;
+      font-size: 9.8px;
+    }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.4px;
+    }
+    .block {
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 9px 11px;
+      margin-bottom: 10px;
+      background: #ffffff;
+    }
+    .block-blue {
+      background: #f0f9ff;
+      border-color: #7dd3fc;
+    }
+    .block-amber {
+      background: #fffbeb;
+      border-color: #fcd34d;
+    }
+    .block-green {
+      background: #f0fdf4;
+      border-color: #86efac;
+    }
+    .block-indigo {
+      background: #eef2ff;
+      border-color: #a5b4fc;
+    }
+    .block h2 {
+      margin: 0 0 6px;
+      font-size: 11.8px;
+      font-weight: 900;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #0f172a;
+      color: #ffc40d;
+      font-size: 10px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+    }
+    .repere-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 9px;
+      background: #f8fafc;
+    }
+    .repere-card strong.card-head {
+      display: block;
+      font-size: 10.2px;
+      color: #0369a1;
+      margin-bottom: 4px;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 3px;
+    }
+    .step-box {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 10px;
+      margin-bottom: 7px;
+      background: #ffffff;
+    }
+    .step-box-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 900;
+      font-size: 10.5px;
+      color: #0f172a;
+      margin-bottom: 3px;
+    }
+    .tag {
+      font-size: 8.5px;
+      font-weight: 800;
+      padding: 1.5px 6px;
+      border-radius: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+    .tag-green {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .tag-amber {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    ul, ol {
+      margin: 3px 0 0;
+      padding-left: 16px;
+    }
+    li {
+      margin-bottom: 3px;
+    }
+    code {
+      background: #f1f5f9;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 9.6px;
+      color: #0f172a;
+    }
+    table.ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      margin-top: 5px;
+    }
+    table.ref-table th, table.ref-table td {
+      border: 1px solid #cbd5e1;
+      padding: 4.5px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.ref-table th {
+      background: #f1f5f9;
+      color: #334155;
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 8.4px;
+    }
+    .chk-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-bottom: 3.5px;
+    }
+    .chk-box {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 1.5px solid #334155;
+      border-radius: 2px;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+    .footer-note {
+      margin-top: 8px;
+      padding-top: 7px;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.8px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <strong style="font-size:13px;">📏 Guide pour prise de mesure — Mode Opératoire Terrain</strong>
+      <span style="font-size:11px; color:#94a3b8; margin-left:8px;">Check-list complète plage de Lestrevet (zéro doute sur place)</span>
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn btn-word" onclick="exportToWord()">📝 Exporter Word (.doc)</button>
+      <button class="btn" onclick="window.print()">🖨️ Imprimer / PDF A4</button>
+      <button class="btn btn-secondary" onclick="window.close()">Fermer</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="export-content">
+    <table class="header-table">
+      <tr>
+        <td>
+          <span class="title-badge">Procédure Terrain Pas-à-Pas · Zéro Question sur Place</span>
+          <h1>Guide pour prise de mesure : Calage du Cadre, Relevés Plage &amp; Précision</h1>
+          <div class="sub">Feuille de route exacte pour le jour du calibrage avec Jérôme (Dune + Gauche/Droite Mairie &amp; École), mesures quotidiennes au bord de l’eau et moyens techniques d’amélioration de la précision</div>
+        </td>
+        <td style="text-align:right; vertical-align:top; font-size:9.3px; color:#475569; white-space:nowrap;">
+          <strong>Char à Voile du Bout du Monde</strong><br>
+          Plage de Lestrevet · Plomodiern<br>
+          Onglet : <strong>7 · Étalonnage GPS</strong>
+        </td>
+      </tr>
+    </table>
+
+    <div class="meta-box">
+      <div><strong>Opérateurs :</strong> Jérôme &amp; Benoît</div>
+      <div><strong>Durée calage initial :</strong> ~15–20 min (1 seule fois)</div>
+      <div><strong>Relevé quotidien eau :</strong> 10 sec · 1 clic mobile</div>
+    </div>
+
+    <!-- SECTION 0 : CHECKLIST AVANT DE PARTIR -->
+    <div class="block block-blue">
+      <h2><span class="step-num">0</span> Avant de descendre sur le sable (2 min au parking / bureau)</h2>
+      <div class="grid-2">
+        <div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>Bon compte connecté :</strong> ouvrir <em>Ça roule ?</em> en mode <strong>Jérôme</strong> ou <strong>Benoît</strong> (jamais le profil <em>Moniteur</em> qui est en lecture seule et interdit d’enregistrer).</span></div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>GPS réglé au maximum :</strong> sur smartphone, activer <em>Localisation &gt; Position exacte / Haute précision</em> et autoriser la géolocalisation dans Chrome ou Safari.</span></div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>Écran et batterie :</strong> régler la mise en veille de l’écran sur <strong>2 à 5 minutes</strong> (pour ne pas couper pendant les 15 s d’acquisition) et luminosité forte.</span></div>
+        </div>
+        <div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>Bon moment :</strong> le calage fixe (Dune + Gauche/Droite) peut se faire à <strong>n’importe quelle heure</strong> à pied sec. Si vous voulez aussi prendre un 1er point eau dans la foulée, y aller à marée basse ou vers le seuil 4,50 m.</span></div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>Repères Mairie sous la main :</strong> avoir l’arrêté municipal / repères AOT (ou les pointer avant sur Google Maps / Géoportail si les bornes extrêmes sont loin à pied).</span></div>
+          <div class="chk-row"><span class="chk-box"></span><span><strong>Onglet ouvert :</strong> onglet <strong>7 · Étalonnage GPS</strong> → panneau <strong>Cadre de Roulage</strong>.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 1 : REGLE D'ORIENTATION INFAILLIBLE -->
+    <div class="block block-green">
+      <h2><span class="step-num">1</span> La règle visuelle infaillible sur la plage (pour ne jamais inverser)</h2>
+      <p style="margin:0 0 6px;">
+        <strong>Position de référence :</strong> mets-toi face à la mer (tu regardes le large / la Baie de Douarnenez, plein OSO ~245°). Tu as la dune dans le dos.
+      </p>
+      <div class="grid-2">
+        <div class="repere-card">
+          <strong class="card-head">◀ À TA GAUCHE = SUD (Lestrevet)</strong>
+          <ul>
+            <li>Côté <strong>Parking / École / Cale de Lestrevet</strong>.</li>
+            <li>C’est ici qu’on prend <strong>Dune · Point A</strong> et la <strong>Limite Côté Gauche</strong>.</li>
+          </ul>
+        </div>
+        <div class="repere-card">
+          <strong class="card-head">▶ À TA DROITE = NORD (Pentrez)</strong>
+          <ul>
+            <li>Côté <strong>La Lieue de Grève / Plage de Pentrez</strong>.</li>
+            <li>C’est ici qu’on prend <strong>Dune · Point B</strong> et la <strong>Limite Côté Droit</strong>.</li>
+          </ul>
+        </div>
+      </div>
+      <div style="margin-top:6px;">
+        <svg viewBox="0 0 680 158" style="width:100%; height:auto; display:block; border-radius:5px; background:#fef9c3;">
+          <rect x="0" y="0" width="680" height="30" fill="#bef264" />
+          <line x1="0" y1="30" x2="680" y2="30" stroke="#3f6212" stroke-width="2" />
+          <text x="12" y="19" fill="#365314" font-size="9.5" font-weight="900">DUNE DANS LE DOS (Zéro = 0 m) — Ligne A ↔ B au même niveau morphologique</text>
+
+          <circle cx="155" cy="30" r="4.8" fill="#15803d" stroke="#fff" stroke-width="1.5" />
+          <text x="155" y="43" fill="#14532d" font-size="8.5" font-weight="800" text-anchor="middle">Arrêt 1 : Dune A</text>
+
+          <circle cx="485" cy="30" r="4.8" fill="#15803d" stroke="#fff" stroke-width="1.5" />
+          <text x="485" y="43" fill="#14532d" font-size="8.5" font-weight="800" text-anchor="middle">Arrêt 3 : Dune B (≥ 200 m)</text>
+
+          <rect x="0" y="30" width="680" height="22" fill="#fef08a" opacity="0.7" />
+          <line x1="0" y1="52" x2="680" y2="52" stroke="#d97706" stroke-width="1.3" stroke-dasharray="4 3" />
+          <text x="12" y="46" fill="#92400e" font-size="8" font-weight="800">Marge sable mou haut (réglable, ex. 30–50 m)</text>
+
+          <!-- Zone Mairie + Jérôme -->
+          <rect x="75" y="30" width="530" height="92" fill="none" stroke="#64748b" stroke-width="1.4" stroke-dasharray="6 4" />
+          <text x="598" y="66" fill="#475569" font-size="8.2" font-weight="800" text-anchor="end">Cadre Mairie (AOT)</text>
+
+          <rect x="125" y="52" width="420" height="70" fill="#22c55e" fill-opacity="0.22" stroke="#15803d" stroke-width="2" />
+          <text x="335" y="83" fill="#14532d" font-size="10" font-weight="900" text-anchor="middle">COULOIR DE ROULAGE (Longueur = Gauche ↔ Droite)</text>
+
+          <line x1="125" y1="30" x2="125" y2="128" stroke="#dc2626" stroke-width="2" />
+          <text x="125" y="139" fill="#991b1b" font-size="8.2" font-weight="900" text-anchor="middle">Arrêt 2 : Gauche (Sud)</text>
+
+          <line x1="545" y1="30" x2="545" y2="128" stroke="#dc2626" stroke-width="2" />
+          <text x="545" y="139" fill="#991b1b" font-size="8.2" font-weight="900" text-anchor="middle">Arrêt 4 : Droite (Nord)</text>
+
+          <rect x="0" y="122" width="680" height="36" fill="#0284c7" opacity="0.88" />
+          <line x1="0" y1="122" x2="680" y2="122" stroke="#ffffff" stroke-width="2.2" />
+          <text x="668" y="150" fill="#ffffff" font-size="9" font-weight="900" text-anchor="end">MER DEVANT TOI (OSO 245°) · Définit la largeur utile chaque jour</text>
+
+          <line x1="335" y1="30" x2="335" y2="122" stroke="#0f172a" stroke-width="1.6" stroke-dasharray="3 2" />
+          <circle cx="335" cy="122" r="4.8" fill="#ffc40d" stroke="#0f172a" stroke-width="1.5" />
+          <rect x="342" y="101" width="146" height="16" rx="3" fill="#0f172a" />
+          <text x="415" y="112" fill="#ffc40d" font-size="8.2" font-weight="900" text-anchor="middle">Largeur Dune → Mer (calculée)</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- SECTION 2 : CIRCUIT PAS A PAS LE JOUR J -->
+    <div class="block">
+      <h2><span class="step-num">2</span> Le parcours exact en 6 arrêts (sans allers-retours inutiles)</h2>
+
+      <div class="step-box">
+        <div class="step-box-head">
+          <span>Arrêt 1 · Définir le « Zéro Dune » avec Jérôme et prendre Dune · Point A</span>
+          <span class="tag">Profil : Zone Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Décision clé à acter ensemble :</strong> choisissez visuellement ce qui fait foi comme ligne Zéro (<em>ex. le pied exact des ganivelles/oyats ou le haut de la pente sableuse devant l’école</em>). Ce même critère visuel devra être suivi au Point B.</li>
+          <li><strong>Posture GPS :</strong> tenez le smartphone à plat à hauteur du nombril/poitrine, bras un peu dégagé du corps (loin de la ferraille de la remorque). Restez <strong>strictement immobile pendant les 15 secondes</strong> de capture.</li>
+          <li><strong>Action :</strong> dans l’onglet <em>Zone Jérôme</em>, cliquez sur <strong>📍 GPS sur place (10 mes.)</strong> sur la carte <strong>Dune · Point A</strong>. Attendez la barre verte <code>10/10</code>, puis cliquez sur <strong>✏️ Saisir GPS</strong> uniquement pour nommer le repère (ex. <em>« Pied dune face local »</em>) sans changer les coordonnées.</li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-box-head">
+          <span>Arrêt 2 · Prendre la Limite Côté Gauche (Sud / Lestrevet)</span>
+          <span class="tag">Profil : Zone Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Où se placer :</strong> marchez jusqu’au trait imaginaire qui marque l’extrémité <strong>Gauche (Sud)</strong> de la zone de roulage de Jérôme (côté école/cale Sud).</li>
+          <li><strong>Astuce pratique :</strong> inutile d’être pile à la hauteur de la dune ou au bord de l’eau ; n’importe quel point le long de cette frontière Sud donne la même longueur latérale car l’appli projette perpendiculairement sur la dune.</li>
+          <li><strong>Action :</strong> cliquez sur <strong>📍 GPS sur place (10 mes.)</strong> sur <strong>Limite Côté Gauche</strong>, restez immobile 15 s, puis nommez le repère visuel (ex. <em>« Bord Sud panneau plage »</em>).</li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-box-head">
+          <span>Arrêt 3 · Longer le pied de dune vers Pentrez (≥ 200 m) et prendre Dune · Point B</span>
+          <span class="tag">Profil : Zone Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Distance minimale impérative :</strong> marchez ou roulez au moins <strong>200 à 400 mètres vers le Nord</strong> le long de la plage (plus A et B sont espacés, plus l’angle de la ligne de dune est exact au dixième de degré).</li>
+          <li><strong>Alignement exact :</strong> placez-vous au <strong>même repère morphologique</strong> qu’à l’Arrêt 1 (ex. pile au pied des oyats/ganivelles, ni 15 m plus haut dans la dune, ni 15 m plus bas sur le plat).</li>
+          <li><strong>Action :</strong> cliquez sur <strong>📍 GPS sur place (10 mes.)</strong> sur <strong>Dune · Point B</strong>. Contrôlez aussitôt en haut du panneau : la ligne doit afficher <code>Calibré (XXX m) · Mer ~245°</code>.</li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-box-head">
+          <span>Arrêt 4 · Prendre la Limite Côté Droit (Nord / Pentrez)</span>
+          <span class="tag">Profil : Zone Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Où se placer :</strong> allez à la frontière <strong>Droite (Nord)</strong> de la zone de roulage habituelle de Jérôme (côté Lieue de Grève / Pentrez).</li>
+          <li><strong>Action :</strong> cliquez sur <strong>📍 GPS sur place (10 mes.)</strong> sur <strong>Limite Côté Droit</strong>, restez immobile 15 s, puis vérifiez que la <strong>Longueur de roulage</strong> affichée en haut est cohérente (sans message orange d’inversion Gauche/Droite).</li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-box-head">
+          <span>Arrêt 5 · Enregistrer le Cadre Mairie (AOT) sans remesurer la dune</span>
+          <span class="tag tag-amber">Profil : Zone Mairie (AOT)</span>
+        </div>
+        <ul>
+          <li>Depuis l’onglet <em>Zone Jérôme</em>, cliquez sur <strong>« Copier cette ligne de Dune vers Mairie »</strong>.</li>
+          <li>Basculez sur l’onglet <strong>Zone Mairie (AOT)</strong> en haut du panneau.</li>
+          <li>Renseignez ses deux limites latérales (<strong>Limite Gauche Mairie</strong> puis <strong>Limite Droite Mairie</strong>) : soit par <strong>📍 GPS sur place (10 mes.)</strong> si vous passez devant, soit par <strong>✏️ Saisir GPS</strong> en collant les coordonnées <code>lat, lon</code> repérées sur Géoportail ou Google Maps.</li>
+          <li>Vérifiez enfin quel cadre porte le badge <strong>« ✓ Cadre actif pour les calculs Mer »</strong> (en général <em>Zone Jérôme</em>).</li>
+        </ul>
+      </div>
+
+      <div class="step-box" style="margin-bottom:0;">
+        <div class="step-box-head">
+          <span>Arrêt 6 · Régler la Marge Sable Mou + Faire 1 test en direct au bord de l’eau</span>
+          <span class="tag tag-green">Validation immédiate</span>
+        </div>
+        <ul>
+          <li>Observez la bande de sable sec/mou impraticable en haut de plage juste sous la dune zéro et réglez <strong>« Marge sable mou haut de dune »</strong> avec Jérôme (ex. <code>30 m</code> ou <code>40 m</code>).</li>
+          <li>Descendez au front d’eau praticable du moment, remontez en haut de l’onglet, choisissez l’état du sable et appuyez sur <strong>« 📍 TOP RELEVÉ LIMITE BASSE (EN DIRECT) »</strong> (4 mesures, ~3 s).</li>
+          <li><strong>Test de vérité :</strong> la largeur affichée (<code>Largeur Dune → Mer : XXX m</code>) et le point jaune sur le schéma 2D doivent correspondre à la réalité visuelle devant vous !</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 3 : RELEVE QUOTIDIEN ET FAQ TERRAIN -->
+    <div class="block block-amber">
+      <h2><span class="step-num">3</span> Protocole quotidien à l’eau &amp; réponses aux doutes terrain</h2>
+      <div class="grid-2">
+        <div>
+          <strong style="font-size:10px; color:#92400e;">Pour tous les relevés Mer des prochains mois :</strong>
+          <ol>
+            <li>Aller à la limite basse réelle là où s’arrêtent les traces roulables (au contact eau / sable mou).</li>
+            <li>Sélectionner <em>Sable dur / mou / bâches</em> + note éventuelle.</li>
+            <li>Rester immobile 3 secondes et cliquer <strong>TOP RELEVÉ LIMITE BASSE</strong>.</li>
+            <li><strong>Où sur la longueur de la plage ?</strong> N’importe où entre Gauche et Droite (de préférence au milieu du circuit du jour) : la projection perpendiculaire garantit une mesure exacte partout dans le couloir.</li>
+          </ol>
+        </div>
+        <div>
+          <strong style="font-size:10px; color:#92400e;">Que faire en cas d’imprévu sur la plage ?</strong>
+          <ul>
+            <li><strong>GPS &gt; 15 m ou erreur signal :</strong> éloignez-vous de la dune/falaise ou de la remorque, gardez le téléphone bien à l’air libre et relancez.</li>
+            <li><strong>On ajuste une borne plus tard ?</strong> Il suffit de re-capturer la borne concernée : <em>tous les anciens relevés Mer se recalculent automatiquement</em> sans aucune perte.</li>
+            <li><strong>Synchronisation :</strong> tout est envoyé en direct sur Firestore ; si la 4G coupe momentanément, ne videz pas le cache du navigateur, les données restent locales puis se synchronisent.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4 : MOYENS TECHNIQUES POUR GAGNER EN PRECISION -->
+    <div class="block block-indigo">
+      <h2><span class="step-num">4</span> Moyens techniques pour gagner en précision (de 0 € au centimétrique)</h2>
+      <p style="margin:0 0 6px;">
+        <strong>Repère physique clé à Lestrevet :</strong> la pente moyenne de la plage est faible (~<code>1,15 %</code>). Concrètement, <strong>1 cm de variation verticale d’eau équivaut à ~87 cm de largeur de plage horizontale</strong>, et le va-et-vient des vagues (jet de rive) déplace naturellement la trace humide de ±5 à 15 m. Améliorer la précision combine donc <em>géométrie de référence</em>, <em>récepteur GNSS</em> et <em>protocole physique au bord de l’eau</em>.
+      </p>
+
+      <div class="grid-2" style="margin-bottom:7px;">
+        <div class="repere-card" style="background:#ffffff;">
+          <strong class="card-head">A · Gains immédiats à 0 € (carte IGN &amp; logiciel)</strong>
+          <ul>
+            <li><strong>Dune A &amp; B sur Orthophoto IGN (20 cm/px) :</strong> pointer Dune A, Dune B et les bornes Mairie sur Géoportail avec <strong>500 à 1 200 m d’écart</strong> (au lieu de 200 m sur place) ramène l’erreur du Zéro à <strong>±0,30–0,80 m</strong> et l’erreur d’angle sous <code>0,05°</code> (&lt; 0,25 m sur 1 km).</li>
+            <li><strong>Polyligne de dune (3 à 5 points) :</strong> remplacer la droite unique A–B par 3–5 points épousant la courbure de la baie supprime 5 à 15 m d’écart géométrique au centre.</li>
+            <li><strong>Flux continu pondéré (<code>watchPosition</code> 1/σ²) :</strong> écarter les 3 premières secondes de chauffe puis pondérer par l’inverse de la variance améliore un smartphone de ±4–8 m à <strong>±1,5–3 m</strong>.</li>
+            <li><strong>Grille Litto3D Finistère (1 m × 1 m) :</strong> lire la vraie cote NGF <code>Z(lat, lon)</code> sous le point mesuré au lieu d’un profil moyen unique.</li>
+          </ul>
+        </div>
+        <div class="repere-card" style="background:#ffffff;">
+          <strong class="card-head">C · Facteurs physiques &amp; capteurs complémentaires</strong>
+          <ul>
+            <li><strong>Protocole « 3 vagues » au bord de l’eau :</strong> ne pas prendre la pointe extrême d’une vague isolée, mais observer 3 vagues et poser le point à la <strong>limite réelle de sable porteur / traces roulables</strong> (réduit le bruit de ±10 m à ~2–3 m).</li>
+            <li><strong>Baromètre &amp; anémomètre local (Lestrevet Sud) :</strong> mesurer la pression sur place (±0,5 hPa = ∓0,5 cm d’eau) corrige la surcote/décote météo et l’écart de vent réel face à la balise Winds-Up de Pentrez.</li>
+            <li><strong>Caméra fixe calibrée (homographie, option long terme) :</strong> une webcam orientée vers la zone permet de convertir les pixels du trait d’eau en mètres exacts sans descendre sur l’estran.</li>
+          </ul>
+        </div>
+      </div>
+
+      <strong style="font-size:10px; color:#312e81; display:block; margin-bottom:3px;">B · Comparatif des solutions GNSS / matériel de mesure :</strong>
+      <table class="ref-table">
+        <thead>
+          <tr>
+            <th style="width:28%;">Équipement / Niveau</th>
+            <th style="width:14%;">Coût indicatif</th>
+            <th style="width:20%;">Précision horizontale</th>
+            <th style="width:38%;">Intérêt pratique &amp; contraintes terrain à Lestrevet</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Smartphone actuel (moyenne 10 mes.)</strong></td>
+            <td>0 €</td>
+            <td><strong>±3 à 6 m</strong></td>
+            <td>Déjà intégré dans l’appli. Largement suffisant pour le suivi quotidien si le cadre Dune A/B est bien calé.</td>
+          </tr>
+          <tr>
+            <td><strong>Smartphone bi-fréquence L1 + L5</strong><br><span style="color:#64748b; font-size:8.5px;">(iPhone ≥ 14 Pro, Android récents)</span></td>
+            <td>0 € (si équipé)</td>
+            <td><strong>±1 à 2 m</strong></td>
+            <td>Réduit fortement les erreurs par réflexion sur la falaise ou le sable mouillé en mode « Position exacte ».</td>
+          </tr>
+          <tr>
+            <td><strong>Antenne Bluetooth SBAS / EGNOS</strong><br><span style="color:#64748b; font-size:8.5px;">(ex. Garmin GLO 2, Bad Elf)</span></td>
+            <td>120 – 300 €</td>
+            <td><strong>±0,5 à 1,5 m</strong></td>
+            <td>Contourne le lissage logiciel d’iOS/Safari ; boîtier étanche pratique à fixer sur un char ou un sac.</td>
+          </tr>
+          <tr>
+            <td><strong>Récepteur RTK Centipède (u-blox ZED-F9P)</strong><br><span style="color:#64748b; font-size:8.5px;">+ réseau gratuit Centipède RTK (NTRIP)</span></td>
+            <td>250 – 600 €</td>
+            <td><strong>±1 à 3 cm (Fix)</strong><br><span style="color:#64748b; font-size:8.5px;">±20–40 cm (Float)</span></td>
+            <td>Couverture gratuite en Finistère via <strong>Centipède RTK</strong>. Sur <strong>Android</strong>, l’appli NTRIP injecte la position en <em>Position fictive (Mock Location)</em> directement lue par Chrome et « Ça roule ? » sans aucune modification matérielle du site.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="step-box" style="margin-top:7px; margin-bottom:0; background:#ffffff;">
+        <div class="step-box-head">
+          <span>D · Plan d’action recommandé (sans sur-complexifier le terrain)</span>
+          <span class="tag tag-green">Feuille de route</span>
+        </div>
+        <ul>
+          <li><strong>1 · Court terme (0 € — dès le calage) :</strong> relever/affiner les points fixes (<strong>Dune A/B et bornes Mairie</strong>) sur orthophoto IGN 20 cm espacés au maximum, utiliser le GPS sur place pour les bornes accessibles et appliquer le <strong>protocole 3 vagues</strong> au bord de l’eau.</li>
+          <li><strong>2 · Moyen terme (0 € — évolution appli) :</strong> passer la capture en flux continu <code>watchPosition</code> pondéré <code>1/σ²</code>, supporter une polyligne de dune (3–5 pts) et croiser avec le modèle altimétrique Litto3D 1 m.</li>
+          <li><strong>3 · Long terme (si besoin topographique / dossier AOT) :</strong> appairer une antenne <strong>u-blox ZED-F9P + Centipède RTK</strong> sous Android pour obtenir un relevé centimétrique utilisable en référence officielle.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION 5 : FICHE SECOURS PAPIER SUR PLACE -->
+    <div class="block">
+      <h2><span class="step-num">5</span> Fiche mémo de secours sur place (si batterie faible ou note rapide)</h2>
+      <table class="ref-table">
+        <thead>
+          <tr>
+            <th style="width:26%;">Repère fixe</th>
+            <th style="width:14%;">Fait ?</th>
+            <th style="width:32%;">Repère visuel retenu avec Jérôme (poteau, accès, ganivelle…)</th>
+            <th style="width:28%;">Coordonnées de secours / Précision</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Dune · Point A (Sud)</strong></td>
+            <td>☐ Jérôme ☐ Copié Mairie</td>
+            <td>&nbsp;</td>
+            <td>± ______ m</td>
+          </tr>
+          <tr>
+            <td><strong>Dune · Point B (Nord ≥ 200 m)</strong></td>
+            <td>☐ Jérôme ☐ Copié Mairie</td>
+            <td>&nbsp;</td>
+            <td>± ______ m · Azimut : ______ °</td>
+          </tr>
+          <tr>
+            <td><strong>Gauche Jérôme (Sud Lestrevet)</strong></td>
+            <td>☐ GPS 10 mes.</td>
+            <td>&nbsp;</td>
+            <td>± ______ m</td>
+          </tr>
+          <tr>
+            <td><strong>Droite Jérôme (Nord Pentrez)</strong></td>
+            <td>☐ GPS 10 mes.</td>
+            <td>&nbsp;</td>
+            <td>Longueur Jérôme : ________ m</td>
+          </tr>
+          <tr>
+            <td><strong>Gauche &amp; Droite Mairie (AOT)</strong></td>
+            <td>☐ GPS ☐ Carte Bureau</td>
+            <td>G : _____________________ / D : _____________________</td>
+            <td>Longueur Mairie : ________ m</td>
+          </tr>
+          <tr>
+            <td><strong>Marge sable mou convenue</strong></td>
+            <td>☐ Réglée</td>
+            <td>Justification / État haut de plage :</td>
+            <td>________ mètres</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer-note">
+      <span>Guide pour prise de mesure — Char à Voile du Bout du Monde (Plage de Lestrevet)</span>
+      <span>Application « Ça roule ? » · Onglet 7 Étalonnage GPS &amp; Firestore</span>
+    </div>
+  </div>
+
+  <script>
+    function exportToWord() {
+      var content = document.getElementById('export-content').cloneNode(true);
+      var html =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+        'xmlns:w="urn:schemas-microsoft-com:office:word" ' +
+        'xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"><title>Guide pour prise de mesure</title>' +
+        '<style>' +
+        'body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #0f172a; }' +
+        'h1 { font-size: 15pt; color: #0f172a; }' +
+        'h2 { font-size: 11.5pt; color: #0369a1; margin-top: 10pt; }' +
+        'table { border-collapse: collapse; width: 100%; }' +
+        'th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 9pt; }' +
+        'th { background: #f1f5f9; }' +
+        '</style></head><body>' +
+        content.innerHTML +
+        '</body></html>';
+
+      var blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'guide_pour_prise_de_mesure_lestrevet.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

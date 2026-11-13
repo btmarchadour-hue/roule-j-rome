@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note · Axes d’Amélioration &amp; Évolutions Futures · Char à Voile Lestrevet</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 11mm 12mm 11mm 12mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.44;
+      font-size: 10.8px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn-word { background: #1d4ed8; }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      max-width: calc(100% - 20px);
+      margin: 14px auto;
+      padding: 12mm 14mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 6px;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .block, .axe-card { break-inside: avoid; page-break-inside: avoid; }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2.5px solid #6366f1;
+      padding-bottom: 7px;
+      margin-bottom: 10px;
+      border-collapse: collapse;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #ede9fe;
+      color: #5b21b6;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 3px 0 2px;
+      font-size: 16.5px;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1.2;
+    }
+    .sub {
+      color: #475569;
+      font-size: 9.8px;
+    }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 11px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.4px;
+    }
+    .block {
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 9px 11px;
+      margin-bottom: 10px;
+      background: #ffffff;
+    }
+    .block-indigo {
+      background: #eef2ff;
+      border-color: #a5b4fc;
+    }
+    .block-amber {
+      background: #fffbeb;
+      border-color: #fcd34d;
+    }
+    .block-blue {
+      background: #f0f9ff;
+      border-color: #7dd3fc;
+    }
+    .block h2 {
+      margin: 0 0 6px;
+      font-size: 11.8px;
+      font-weight: 900;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #4f46e5;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .axe-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      background: #ffffff;
+    }
+    .axe-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-weight: 900;
+      font-size: 10.6px;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .tag {
+      font-size: 8.5px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e0e7ff;
+      color: #3730a3;
+      white-space: nowrap;
+    }
+    .tag-amber {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .tag-blue {
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+    .tag-green {
+      background: #dcfce7;
+      color: #166534;
+    }
+    ul {
+      margin: 3px 0 0;
+      padding-left: 16px;
+    }
+    li {
+      margin-bottom: 3px;
+    }
+    table.ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      margin-top: 6px;
+    }
+    table.ref-table th, table.ref-table td {
+      border: 1px solid #cbd5e1;
+      padding: 5px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.ref-table th {
+      background: #f1f5f9;
+      color: #334155;
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 8.4px;
+    }
+    .footer-note {
+      margin-top: 10px;
+      padding-top: 7px;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.8px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <strong style="font-size:13px;">💡 Axes d’Amélioration &amp; Évolutions Futures — Ça roule ?</strong>
+      <span style="font-size:11px; color:#94a3b8; margin-left:8px;">Registre vivant des sujets complexes ou non prioritaires à court terme</span>
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn btn-word" onclick="exportToWord()">📝 Exporter Word (.doc)</button>
+      <button class="btn" onclick="window.print()">🖨️ Imprimer / PDF A4</button>
+      <button class="btn btn-secondary" onclick="window.close()">Fermer</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="export-content">
+    <table class="header-table">
+      <tr>
+        <td>
+          <span class="title-badge">Document Vivant · Backlog Technique &amp; Métier</span>
+          <h1>Axes d’Amélioration &amp; Pistes d’Évolution</h1>
+          <div class="sub">Centralisation des sujets trop complexes à modéliser a priori ou volontairement différés après la mise en service terrain</div>
+        </td>
+        <td style="text-align:right; vertical-align:top; font-size:9.3px; color:#475569; white-space:nowrap;">
+          <strong>Char à Voile du Bout du Monde</strong><br>
+          Plage de Lestrevet · Plomodiern<br>
+          Pilotage : <strong>Jérôme &amp; Benoît</strong>
+        </td>
+      </tr>
+    </table>
+
+    <div class="meta-box">
+      <div><strong>Rôle de la note :</strong> Éviter de bloquer les cadrages en cours</div>
+      <div><strong>Méthode :</strong> Observer sur le terrain via le REX puis affiner</div>
+      <div><strong>Statut :</strong> Document évolutif permanent</div>
+    </div>
+
+    <!-- AXE 1 : BACHES & RUISSELLEMENTS (ISSU DE LA NOTE CADRAGE TERRAIN Q3) -->
+    <div class="block block-amber">
+      <h2><span class="step-num">1</span> Topographie Plage · Bâches résiduelles &amp; ruissellements côtiers (Lestrevet)</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Modélisation de la présence / purge des bâches &amp; rigoles d’eau douce</span>
+          <span class="tag tag-amber">Transféré depuis Cadrage Terrain (Q3)</span>
+        </div>
+        <ul>
+          <li><strong>Constat de Jérôme :</strong> phénomène très complexe à définir par une règle simple a priori (dépend des pluies des jours précédents sur les terres, des mouvements de bancs de sable après tempête, de l’enchaînement des coefficients et du secteur Nord vs Sud).</li>
+          <li><strong>Ce qui est déjà en place aujourd’hui :</strong> lors de chaque relevé GPS au bord de l’eau (onglet <em>7 · Étalonnage GPS</em>), l’opérateur peut cocher l’état <strong>« Bâches / flaques »</strong> et ajouter un commentaire libre.</li>
+          <li><strong>Piste d’amélioration future (après historique REX) :</strong> une fois 20 à 40 relevés terrain et bilans REX accumulés sur une saison, croiser automatiquement les mentions <em>« Bâches »</em> avec la hauteur d’eau, le coefficient, la tendance de marée (montante/descendante) et la position GPS (Sud Lestrevet vs Lieue de Grève vs Pentrez) pour afficher une alerte indicative fiable.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- AXE 2 : PRECISION GPS, MODELE PLAGE & CAPTEURS -->
+    <div class="block block-indigo">
+      <h2><span class="step-num">2</span> Précision Topographique, GNSS &amp; Capteurs Locaux</h2>
+
+      <div class="axe-card">
+        <div class="axe-head">
+          <span>2A · Évolutions logicielles gratuites (modèle de plage)</span>
+          <span class="tag">Moyen terme · 0 €</span>
+        </div>
+        <ul>
+          <li><strong>Polyligne de dune (3 à 5 points) :</strong> remplacer la ligne droite Dune A ↔ Dune B par une polyligne suivant la courbure naturelle de l’anse de Lestrevet / Pentrez (supprime 5 à 15 m d’écart géométrique au centre).</li>
+          <li><strong>Capture GPS continue pondérée (<code>watchPosition</code> 1/σ²) :</strong> exclure les 3 premières secondes de chauffe et pondérer par la précision instantanée pour passer de ±4–8 m à <strong>±1,5–3 m</strong> sur smartphone.</li>
+          <li><strong>Grille altimétrique Litto3D réelle (1 m × 1 m) :</strong> intégrer le raster IGN/SHOM exact pour lire la cote NGF réelle <code>Z(lat, lon)</code> sous les pieds du moniteur et calibrer la pente réelle secteur par secteur.</li>
+        </ul>
+      </div>
+
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>2B · Capteurs matériels &amp; mesure directe sur site (optionnel)</span>
+          <span class="tag tag-blue">Long terme / Matériel</span>
+        </div>
+        <ul>
+          <li><strong>Météo locale Lestrevet Sud :</strong> installation d’une balise club ouverte (type <em>Windbird</em> ou station barométrique) sur le local/remorque pour mesurer le vent réel (écart avec la balise Winds-Up de Pentrez à 3–4 km) et la pression locale exacte (±0,5 hPa = ∓0,5 cm d’eau).</li>
+          <li><strong>GNSS haute précision (SBAS ou RTK Centipède) :</strong> antenne Bluetooth SBAS (120–300 €, ±1 m) ou récepteur <strong>u-blox ZED-F9P</strong> connecté au réseau gratuit <strong>Centipède RTK</strong> sur Android (250–600 €, ±1–3 cm) pour un relevé topographique de référence.</li>
+          <li><strong>Caméra fixe calibrée (homographie) :</strong> convertir automatiquement les pixels d’une webcam fixe vers la largeur de plage praticable en mètres sans marcher jusqu’au bord de l’eau.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- AXE 3 : METEO, HOULE & PILOTAGE CYCLE 2 -->
+    <div class="block block-blue">
+      <h2><span class="step-num">3</span> Météo, Houle &amp; Ergonomie Terrain (Cycle 2)</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Affinage vent par secteur, houle OSO et visuel vectoriel</span>
+          <span class="tag tag-blue">À nourrir via REX &amp; QCM</span>
+        </div>
+        <ul>
+          <li><strong>Écart Pentrez ↔ Lestrevet :</strong> enregistrer l’écart constaté entre Winds-Up Pentrez, AROME et le ressenti plage selon la direction du vent (vent de mer ~245°, axe ~335°/155°, vent de terre ENE Kervennec).</li>
+          <li><strong>Pondération de la houle frontale OSO (~245°) :</strong> quantifier de combien de mètres utiles la houle réduit la piste à hauteur de marée égale (jet de rive / mouton).</li>
+          <li><strong>Mini-schéma vectoriel Cycle 2 :</strong> afficher sur l’écran du jour l’orientation réelle de la plage (~335°) avec flèche de vent et flèche de houle en un coup d’œil.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- AXE 4 : RESERVATION & AUTOMATISATION CLIENTS -->
+    <div class="block">
+      <h2><span class="step-num">4</span> Billetterie en ligne &amp; Automatisation Clients (Les Deux Ponts)</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Connexion bidirectionnelle et gestion des reports SMS</span>
+          <span class="tag tag-green">Phase 2 · Après choix outil résa</span>
+        </div>
+        <ul>
+          <li><strong>Pont Amont / Pont Aval :</strong> publication des créneaux Cycle 1 et import automatique des inscrits pour déclencher le Cycle 2 dès le 1er char inscrit.</li>
+          <li><strong>Sauvetage commercial &amp; SMS :</strong> alertes automatiques J-1 et proposition de créneaux de report directement portées par la nouvelle solution de réservation.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- TABLEAU VIVANT POUR COMPLETER AU FIL DE L'EAU -->
+    <div class="block">
+      <h2><span class="step-num">5</span> Tableau de suivi &amp; ajouts ultérieurs</h2>
+      <table class="ref-table">
+        <thead>
+          <tr>
+            <th style="width:24%;">Axe / Idée</th>
+            <th style="width:16%;">Origine</th>
+            <th style="width:18%;">Priorité</th>
+            <th style="width:42%;">Donnée terrain / déclencheur attendu</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Bâches &amp; ruissellements Lestrevet</strong></td>
+            <td>Cadrage Terrain (Q3)</td>
+            <td>À observer (REX)</td>
+            <td>Cumul de tags GPS « Bâches » + retours fin de séance sur 1 saison</td>
+          </tr>
+          <tr>
+            <td><strong>Polyligne dune + Litto3D 1 m + watchPosition 1/σ²</strong></td>
+            <td>Guide Mesure &amp; Précision</td>
+            <td>Moyen terme (0 €)</td>
+            <td>Validation du 1er jeu de points GPS sur les deux cadres (Jérôme &amp; Mairie)</td>
+          </tr>
+          <tr>
+            <td><strong>Correctif vent Pentrez / Lestrevet &amp; houle OSO</strong></td>
+            <td>Plan plage &amp; QCM</td>
+            <td>Moyen terme</td>
+            <td>Arbitrage QCM Jérôme + relevés d’écarts REX</td>
+          </tr>
+          <tr>
+            <td><em>Nouvel axe à ajouter :</em></td>
+            <td>&nbsp;</td>
+            <td>&nbsp;</td>
+            <td>&nbsp;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer-note">
+      <span>Note Axes d’Amélioration — Char à Voile du Bout du Monde (Plage de Lestrevet)</span>
+      <span>Application « Ça roule ? » · Document vivant · Jérôme &amp; Benoît</span>
+    </div>
+  </div>
+
+  <script>
+    function exportToWord() {
+      var content = document.getElementById('export-content').cloneNode(true);
+      var html =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+        'xmlns:w="urn:schemas-microsoft-com:office:word" ' +
+        'xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"><title>Axes d’Amélioration</title>' +
+        '<style>' +
+        'body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #0f172a; }' +
+        'h1 { font-size: 15pt; color: #0f172a; }' +
+        'h2 { font-size: 11.5pt; color: #4338ca; margin-top: 10pt; }' +
+        'table { border-collapse: collapse; width: 100%; }' +
+        'th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 9pt; }' +
+        'th { background: #f1f5f9; }' +
+        '</style></head><body>' +
+        content.innerHTML +
+        '</body></html>';
+
+      var blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'note_axes_amelioration_lestrevet.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

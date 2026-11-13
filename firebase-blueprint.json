@@ -123,6 +123,38 @@
         "lastLoginAt": { "type": "number" }
       },
       "required": ["username", "role", "passwordHash"]
+    },
+    "BeachCadreConfig": {
+      "title": "BeachCadreConfig",
+      "description": "Référentiel fixe du cadre de roulage (ligne de dune, côtés gauche/droite Mairie et Jérôme) stocké dans app_config/beach_cadre_roulage.",
+      "type": "object",
+      "properties": {
+        "activeProfile": { "type": "string", "enum": ["jerome", "mairie"] },
+        "profiles": { "type": "object" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["activeProfile", "profiles", "updatedBy"]
+    },
+    "WaterlineGpsLog": {
+      "title": "WaterlineGpsLog",
+      "description": "Relevé GPS de la limite basse (front de l'eau) avec largeur calculée depuis la dune et position latérale.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number" },
+        "dateStr": { "type": "string" },
+        "timeStr": { "type": "string" },
+        "author": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracyM": { "type": "number" },
+        "measuredWidthFromDuneM": { "type": "number" },
+        "lateralPosFromLeftM": { "type": "number" },
+        "lateralPosPct": { "type": "number" },
+        "isInsideZone": { "type": "boolean" },
+        "cadreProfileUsed": { "type": "string", "enum": ["jerome", "mairie"] }
+      },
+      "required": ["timestamp", "dateStr", "author", "latitude", "longitude"]
     }
   },
   "firestore": {
@@ -148,11 +180,15 @@
     },
     "/app_config/{configId}": {
       "schema": "SecurityConfig",
-      "description": "Paramètres globaux et mot de passe d'accès moniteurs."
+      "description": "Paramètres globaux de l'école, mot de passe d'accès et référentiel cadre terrain (beach_cadre_roulage)."
     },
     "/app_users/{userId}": {
       "schema": "AppUser",
       "description": "Comptes utilisateurs avec rôle et mot de passe individuel."
+    },
+    "/waterline_gps_logs/{logId}": {
+      "schema": "WaterlineGpsLog",
+      "description": "Relevés GPS terrain de la limite basse de roulage (front d'eau)."
     }
   }
 }

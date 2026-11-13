@@ -15,7 +15,7 @@ interface NotesAndHypothesesProps {
 
 interface TechNoteItem {
   id: string;
-  category: 'meteo' | 'topographie' | 'reservation' | 'marees' | 'reunion';
+  category: 'meteo' | 'topographie' | 'reservation' | 'marees' | 'reunion' | 'amelioration';
   categoryLabel: string;
   categoryColor: string;
   icon: string;
@@ -126,6 +126,54 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const notesList = useMemo<TechNoteItem[]>(() => {
     return [
       {
+        id: 'guide-prise-de-mesure',
+        category: 'topographie',
+        categoryLabel: 'Topographie & GPS',
+        categoryColor: '#16a34a',
+        icon: '📏',
+        title: 'Guide pour prise de mesure : Mode Opératoire Plage (Zéro Doute)',
+        subtitle: 'Check-list complète du jour J : réglages, ordre des 6 arrêts, sens Gauche/Droite, moyens d’améliorer la précision et fiche secours',
+        summary:
+          'Feuille de route terrain exhaustive pour le calibrage sur la plage avec Jérôme puis les relevés quotidiens à l’eau : check-list pré-départ, règle visuelle infaillible, parcours en 6 arrêts, feuille de route précision (orthophoto IGN 20 cm, watchPosition 1/σ², Litto3D 1 m, L1+L5, SBAS, Centipède RTK, protocole 3 vagues) et fiche mémo papier de secours.',
+        keyPoints: [
+          'Pré-vol (2 min) : compte admin Jérôme/Benoît actif, GPS Haute Précision, veille écran 2–5 min, repères Mairie prêts.',
+          'Orientation & 6 arrêts : face à la mer (Gauche = Sud, Droite = Nord), Dune A → Borne Gauche → Dune B (≥ 200 m) → Borne Droite → Copie Mairie → Marge + 1er test Mer.',
+          'Gains précision (0 € à RTK cm) : pente ~1,15 % (1 cm = 87 cm), orthophoto IGN 20 cm, polyligne dune, watchPosition 1/σ², Litto3D 1 m, protocole « 3 vagues », SBAS et ZED-F9P + Centipède RTK.',
+          'FAQ & fiche secours : posture téléphone, conduite si signal > 15 m, recalcul rétroactif automatique et tableau de notes terrain imprimable.',
+        ],
+        docUrl: '/guide_prise_de_mesure.html',
+        docBtnLabel: '📏 Ouvrir le Guide pour prise de mesure (A4 / Word)',
+        statusBadge: {
+          label: 'Guide Opérationnel',
+          bg: '#dcfce7',
+          color: '#166534',
+        },
+      },
+      {
+        id: 'note-axes-amelioration',
+        category: 'amelioration',
+        categoryLabel: 'Axes d’Amélioration',
+        categoryColor: '#6366f1',
+        icon: '💡',
+        title: 'Note · Axes d’Amélioration & Évolutions Futures',
+        subtitle: 'Backlog vivant : bâches & ruissellements (ex-Q3), précision GPS/Litto3D, capteurs locaux et billetterie',
+        summary:
+          'Registre évolutif regroupant les sujets trop complexes pour être figés a priori (comme les bâches et rigoles à Lestrevet) ou volontairement planifiés en phase 2 après les premiers retours terrain (REX).',
+        keyPoints: [
+          'Bâches & ruissellements Lestrevet (ex-Q3 Cadrage Terrain) : jugé trop multifactoriel par Jérôme ; suivi via tag GPS « Bâches » + REX avant toute modélisation.',
+          'Précision & Modèle Plage : polyligne de dune (3–5 pts), watchPosition 1/σ², raster Litto3D 1 m, ou ZED-F9P Centipède RTK à long terme.',
+          'Météo & Cycle 2 : correctif empirique balise Pentrez ↔ Lestrevet, balise club locale / baromètre, pondération houle OSO et schéma vectoriel.',
+          'Billetterie Deux Ponts : connexion automatique des inscrits et reports SMS une fois le logiciel de réservation choisi.',
+        ],
+        docUrl: '/note_axes_amelioration.html',
+        docBtnLabel: '💡 Ouvrir la Note Axes d’Amélioration (A4 / Word)',
+        statusBadge: {
+          label: 'Évolutif · Backlog',
+          bg: '#ede9fe',
+          color: '#5b21b6',
+        },
+      },
+      {
         id: 'note-orientation-plage-lestrevet',
         category: 'topographie',
         categoryLabel: 'Topographie & Météo',
@@ -231,14 +279,14 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryColor: '#16a34a',
         icon: '🏖️',
         title: 'Note Cadrage Lestrevet : Pente Litto3D & Piste Utile',
-        subtitle: 'Modèle Lidar IGN/SHOM, pente 1,15 % et les 3 questions de calage pour Jérôme',
+        subtitle: 'Modèle Lidar IGN/SHOM, pente 1,15 % · Q1 cadrée (Dune), Q3 transférée en Améliorations, reste Q2',
         summary:
-          'Utilisation des données altimétriques publiques de haute précision Litto3D Finistère (économie géomètre : ~4 000 €). Calcul en temps réel de la largeur de piste selon la hauteur d’eau et la surcote.',
+          'Utilisation des données altimétriques publiques de haute précision Litto3D Finistère (économie géomètre : ~4 000 €). La Question 1 (référence Pied de dune + procédure GPS) est cadrée et la Question 3 (bâches) a été basculée dans « Axes d’amélioration ».',
         keyPoints: [
           'Pente réelle moyenne d’estran : 1,15 % (1 cm vertical d’eau = ~87 cm à 1 m de sable praticable mangé).',
-          'Question 1 : Ancrage du repère « Zéro » directement sur la remorque / cale de Lestrevet.',
-          'Question 2 : Marge haute de sable sec/mou (laisser libre le réglage entre 30 m et 60 m).',
-          'Question 3 : Hauteur d’eau minimale pour que les bâches d’eau résiduelles soient entièrement purgées.',
+          'Question 1 (Actée sur le principe) : référence au Pied de dune + bornes Gauche/Droite (à relever sur place via le Guide de mesure).',
+          'Question 2 (Reste à arbitrer) : marge haute de sable sec/mou — valeur fixe (30–50 m) ou laisse de pleine mer + synchro avec Litto3D.',
+          'Question 3 (Transférée ➔ Axes d’amélioration) : bâches & ruissellements trop complexes à modéliser sans historique REX.',
         ],
         docUrl: '/note_cadrage_lestrevet_jerome.html',
         docBtnLabel: '📝 Ouvrir la Note Lestrevet (1 page A4)',
@@ -653,6 +701,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
               { id: 'reservation', label: '🛒 Résa' },
               { id: 'marees', label: '🌊 Marées' },
               { id: 'reunion', label: '📋 Réunion' },
+              { id: 'amelioration', label: '💡 Améliorations' },
             ].map(tab => (
               <button
                 key={tab.id}

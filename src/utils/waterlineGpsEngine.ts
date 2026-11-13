@@ -1,4 +1,5 @@
-import { AppSettings, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
+import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
+import { evaluatePointAgainstCadre } from './beachCadreEngine';
 import { build, comp, hAt, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
@@ -28,6 +29,8 @@ export interface GpsCaptureResult {
   altitude?: number | null;
   accuracyM: number;
   accuracyQuality: 'high' | 'medium' | 'low';
+  samplesUsed?: number;
+  spreadM?: number;
   timestamp: number;
 }
 
@@ -126,12 +129,91 @@ export async function requestSmoothedHighAccuracyGps(
     altitude: avgAlt,
     accuracyM: avgAcc,
     accuracyQuality: quality,
+    samplesUsed: validReadings.length,
     timestamp: Date.now(),
   };
 }
 
 /**
- * Calcule instantanément l'ensemble des métriques hydrodynamiques et météo à l'instant T
+ * Étalonnage statique haute précision pour les points fixes du Cadre Terrain (Dune, Gauche, Droite) :
+ * 10 mesures espacées de ~1,6 s, filtrage <= 15 m puis élagage des valeurs les plus éloignées du centroïde médian.
+ */
+export async function requestCalibratedStationaryGps(
+  samplesCount: number = 10,
+  sampleDelayMs: number = 1600,
+  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void
+): Promise<GpsCaptureResult> {
+  const readings: GpsCaptureResult[] = [];
+
+  for (let i = 0; i < samplesCount; i++) {
+    const single = await requestHighAccuracyGps();
+    readings.push(single);
+    onSampleProgress?.(i + 1, samplesCount, single.accuracyM);
+
+    if (i < samplesCount - 1) {
+      await new Promise(r => setTimeout(r, sampleDelayMs));
+    }
+  }
+
+  let pool = readings.filter(r => r.accuracyM <= 15);
+  if (pool.length === 0) {
+    // Tolérance élargie à 25 m si couverture faible, sinon erreur explicite
+    pool = readings.filter(r => r.accuracyM <= 25);
+  }
+  if (pool.length === 0) {
+    const bestAcc = Math.min(...readings.map(r => r.accuracyM));
+    throw new Error(
+      `Signal GPS insuffisant pour l'étalonnage fixe (meilleure précision : ±${bestAcc} m). Restez immobile à découvert pendant la mesure.`
+    );
+  }
+
+  // Médiane robuste des coordonnées pour éliminer d'éventuels rebonds multi-trajets
+  const sortedLats = [...pool].map(r => r.latitude).sort((a, b) => a - b);
+  const sortedLons = [...pool].map(r => r.longitude).sort((a, b) => a - b);
+  const medLat = sortedLats[Math.floor(sortedLats.length / 2)];
+  const medLon = sortedLons[Math.floor(sortedLons.length / 2)];
+
+  let refined = pool;
+  if (pool.length >= 6) {
+    const withDist = pool
+      .map(r => ({ r, dist: calculateGpsDistanceM(r.latitude, r.longitude, medLat, medLon) }))
+      .sort((a, b) => a.dist - b.dist);
+    // Garder les 80 % centraux les plus stables
+    const keepCount = Math.max(4, Math.floor(pool.length * 0.8));
+    refined = withDist.slice(0, keepCount).map(x => x.r);
+  }
+
+  const avgLat = Number((refined.reduce((s, r) => s + r.latitude, 0) / refined.length).toFixed(6));
+  const avgLon = Number((refined.reduce((s, r) => s + r.longitude, 0) / refined.length).toFixed(6));
+  const avgAcc = Number((refined.reduce((s, r) => s + r.accuracyM, 0) / refined.length).toFixed(1));
+  const spreadM = Number(
+    Math.max(
+      0,
+      ...refined.map(r => calculateGpsDistanceM(r.latitude, r.longitude, avgLat, avgLon))
+    ).toFixed(1)
+  );
+
+  const altitudes = refined.map(r => r.altitude).filter((a): a is number => a != null);
+  const avgAlt = altitudes.length > 0 ? Number((altitudes.reduce((sum, a) => sum + a, 0) / altitudes.length).toFixed(1)) : null;
+
+  let quality: 'high' | 'medium' | 'low' = 'high';
+  if (avgAcc > 15) quality = 'low';
+  else if (avgAcc > 5) quality = 'medium';
+
+  return {
+    latitude: avgLat,
+    longitude: avgLon,
+    altitude: avgAlt,
+    accuracyM: avgAcc,
+    accuracyQuality: quality,
+    samplesUsed: refined.length,
+    spreadM,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * Calcule instantanément l'ensemble des métriques hydrodynamiques, météo et largeur depuis la dune à l'instant T
  */
 export function buildWaterlineSnapshot(
   gps: GpsCaptureResult,
@@ -140,7 +222,8 @@ export function buildWaterlineSnapshot(
   EX: TidePoint[],
   windList: WindPoint[],
   beachState?: GpsWaterlineLog['beachState'],
-  note?: string
+  note?: string,
+  activeCadre?: BeachCadreProfile | null
 ): Omit<GpsWaterlineLog, 'id'> {
   const d = new Date(gps.timestamp);
   const dateStr = d.toISOString().slice(0, 10);
@@ -171,10 +254,13 @@ export function buildWaterlineSnapshot(
   };
 
   // 4. Écarts hydrodynamiques (en cm)
-  // À la limite basse de roulage, l'eau réelle est au seuil effectif de roulage L.
-  // L'écart par rapport au modèle théorique correspond à la surcote constatée.
   const rawSurcoteCm = Math.round((settings.L - theoreticalWaterHeightM) * 100);
   const correctedSurcoteCm = Math.round((settings.L - correctedWaterHeightM) * 100);
+
+  // 5. Mesures géométriques par rapport au Cadre Terrain (Largeur depuis la Dune + Position Gauche/Droite)
+  const cadreEval = activeCadre
+    ? evaluatePointAgainstCadre(gps.latitude, gps.longitude, activeCadre)
+    : null;
 
   return {
     timestamp: gps.timestamp,
@@ -192,6 +278,11 @@ export function buildWaterlineSnapshot(
     schoolThresholdM: settings.L,
     rawSurcoteCm,
     correctedSurcoteCm,
+    measuredWidthFromDuneM: cadreEval?.widthFromDuneM ?? undefined,
+    lateralPosFromLeftM: cadreEval?.lateralPosFromLeftM ?? undefined,
+    lateralPosPct: cadreEval?.lateralPosPct ?? undefined,
+    isInsideZone: cadreEval?.isInsideZone ?? undefined,
+    cadreProfileUsed: cadreEval?.widthFromDuneM != null ? cadreEval.profileKey : undefined,
     beachState: beachState || 'dur',
     note: note || '',
     createdAt: Date.now(),
@@ -201,7 +292,10 @@ export function buildWaterlineSnapshot(
 /**
  * Exporte l'historique complet des relevés GPS en CSV avec BOM UTF-8 compatible Excel
  */
-export function exportWaterlineLogsAsCsv(logs: GpsWaterlineLog[]): string {
+export function exportWaterlineLogsAsCsv(
+  logs: GpsWaterlineLog[],
+  activeCadre?: BeachCadreProfile | null
+): string {
   const headers = [
     'ID',
     'Date',
@@ -212,6 +306,11 @@ export function exportWaterlineLogsAsCsv(logs: GpsWaterlineLog[]): string {
     'Altitude_m',
     'Precision_GPS_m',
     'Qualite_GPS',
+    'Largeur_Dune_Mer_m',
+    'Position_Depuis_Gauche_m',
+    'Position_Couloir_pct',
+    'Dans_Cadre_Roulage',
+    'Cadre_Reference',
     'Vent_Moyen_nds',
     'Rafales_nds',
     'Direction_deg',
@@ -228,31 +327,50 @@ export function exportWaterlineLogsAsCsv(logs: GpsWaterlineLog[]): string {
     'Notes',
   ];
 
-  const rows = logs.map(l => [
-    l.id,
-    l.dateStr,
-    l.timeStr,
-    l.author,
-    l.latitude,
-    l.longitude,
-    l.altitude != null ? l.altitude : '',
-    l.accuracyM,
-    l.accuracyQuality,
-    l.weatherSnapshot.windSpeedKts,
-    l.weatherSnapshot.windGustKts,
-    l.weatherSnapshot.windDirectionDeg,
-    l.weatherSnapshot.windDirectionComp,
-    l.weatherSnapshot.pressureHpa,
-    l.weatherSnapshot.waveHeightM != null ? l.weatherSnapshot.waveHeightM : '',
-    l.weatherSnapshot.wavePeriodS != null ? l.weatherSnapshot.wavePeriodS : '',
-    l.theoreticalWaterHeightM,
-    l.correctedWaterHeightM,
-    l.schoolThresholdM,
-    l.rawSurcoteCm,
-    l.correctedSurcoteCm,
-    l.beachState || '',
-    `"${(l.note || '').replace(/"/g, '""')}"`,
-  ]);
+  const rows = logs.map(l => {
+    const dynEval = activeCadre ? evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadre) : null;
+    const widthM = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM ?? '';
+    const latPosM = dynEval?.lateralPosFromLeftM ?? l.lateralPosFromLeftM ?? '';
+    const latPct = dynEval?.lateralPosPct ?? l.lateralPosPct ?? '';
+    const inZone =
+      dynEval?.isInsideZone != null
+        ? (dynEval.isInsideZone ? 'Oui' : 'Hors cadre')
+        : l.isInsideZone != null
+        ? (l.isInsideZone ? 'Oui' : 'Hors cadre')
+        : '';
+    const cadreRef = dynEval?.widthFromDuneM != null ? dynEval.profileKey : (l.cadreProfileUsed || '');
+
+    return [
+      l.id,
+      l.dateStr,
+      l.timeStr,
+      l.author,
+      l.latitude,
+      l.longitude,
+      l.altitude != null ? l.altitude : '',
+      l.accuracyM,
+      l.accuracyQuality,
+      widthM,
+      latPosM,
+      latPct,
+      inZone,
+      cadreRef,
+      l.weatherSnapshot.windSpeedKts,
+      l.weatherSnapshot.windGustKts,
+      l.weatherSnapshot.windDirectionDeg,
+      l.weatherSnapshot.windDirectionComp,
+      l.weatherSnapshot.pressureHpa,
+      l.weatherSnapshot.waveHeightM != null ? l.weatherSnapshot.waveHeightM : '',
+      l.weatherSnapshot.wavePeriodS != null ? l.weatherSnapshot.wavePeriodS : '',
+      l.theoreticalWaterHeightM,
+      l.correctedWaterHeightM,
+      l.schoolThresholdM,
+      l.rawSurcoteCm,
+      l.correctedSurcoteCm,
+      l.beachState || '',
+      `"${(l.note || '').replace(/"/g, '""')}"`,
+    ];
+  });
 
   const csvRows = [headers.join(';'), ...rows.map(r => r.join(';'))];
   return '\uFEFF' + csvRows.join('\r\n');

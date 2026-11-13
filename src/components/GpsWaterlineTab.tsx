@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AppSettings, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
-import { getActiveInstructor } from '../utils/firebaseSync';
+import { AppSettings, BeachCadreConfig, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
 import {
-  addWaterlineGpsLogToFirestore,
   deleteWaterlineGpsLogFromFirestore,
+  getActiveInstructor,
+  saveBeachCadreConfigToFirestore,
+  subscribeToBeachCadreConfig,
   subscribeToWaterlineGpsLogs,
   upsertWaterlineGpsLogToFirestore,
 } from '../utils/firebaseSync';
+import {
+  evaluatePointAgainstCadre,
+  getStoredBeachCadreConfig,
+  saveStoredBeachCadreConfig,
+} from '../utils/beachCadreEngine';
 import {
   buildWaterlineSnapshot,
   exportWaterlineLogsAsCsv,
@@ -15,6 +21,7 @@ import {
   requestSmoothedHighAccuracyGps,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
+import { BeachCadrePanel } from './BeachCadrePanel';
 import { Litto3DBeachSection } from './Litto3DBeachSection';
 
 interface GpsWaterlineTabProps {
@@ -33,6 +40,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   isReadOnly = false,
 }) => {
   const [logs, setLogs] = useState<GpsWaterlineLog[]>(() => getStoredWaterlineLogs());
+  const [cadreConfig, setCadreConfig] = useState<BeachCadreConfig>(() => getStoredBeachCadreConfig());
   const [author, setAuthor] = useState<string>(() => getActiveInstructor());
   const [beachState, setBeachState] = useState<GpsWaterlineLog['beachState']>('dur');
   const [quickNote, setQuickNote] = useState<string>('');
@@ -95,7 +103,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     }
   };
 
-  // Synchronisation temps réel Firestore
+  // Synchronisation temps réel Firestore (logs mer + cadre terrain fixe)
   useEffect(() => {
     const unsubscribe = subscribeToWaterlineGpsLogs(
       remoteLogs => {
@@ -106,8 +114,27 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         console.warn('Mode hors ligne ou local pour logs GPS:', err);
       }
     );
-    return () => unsubscribe();
+    const unsubCadre = subscribeToBeachCadreConfig(
+      remoteCadre => {
+        setCadreConfig(remoteCadre);
+      },
+      err => {
+        console.warn('Mode hors ligne ou local pour cadre terrain:', err);
+      }
+    );
+    return () => {
+      unsubscribe();
+      unsubCadre();
+    };
   }, []);
+
+  const activeCadreProfile = cadreConfig.profiles[cadreConfig.activeProfile];
+
+  const handleSaveCadreConfig = async (nextConfig: BeachCadreConfig) => {
+    setCadreConfig(nextConfig);
+    saveStoredBeachCadreConfig(nextConfig);
+    await saveBeachCadreConfigToFirestore(nextConfig, author);
+  };
 
   // Déclencheur du relevé terrain avec moyennage GPS 4 mesures et filtrage 15m
   const handleCaptureNow = async () => {
@@ -130,7 +157,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
       setCaptureStatus('⚡ Capture instantanée des flux météo AROME & calcul hydrodynamique...');
 
-      // 2. Calcul du snapshot
+      // 2. Calcul du snapshot (avec largeur depuis la dune si cadre étalonné)
       const snapshot = buildWaterlineSnapshot(
         gpsResult,
         author,
@@ -138,7 +165,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         EX,
         windList,
         beachState,
-        quickNote.trim() || undefined
+        quickNote.trim() || undefined,
+        activeCadreProfile
       );
 
       // 3. Détection intelligente anti-doublon (même auteur, même endroit < 25m, il y a moins de 60s)
@@ -195,7 +223,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
       alert('Aucun relevé GPS à exporter pour le moment.');
       return;
     }
-    const csv = exportWaterlineLogsAsCsv(logs);
+    const csv = exportWaterlineLogsAsCsv(logs, activeCadreProfile);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -637,6 +665,18 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   (Écart résiduel : {lastLoggedItem.correctedSurcoteCm > 0 ? `+${lastLoggedItem.correctedSurcoteCm}` : lastLoggedItem.correctedSurcoteCm} cm)
                 </span>
               </div>
+              {(() => {
+                const dyn = evaluatePointAgainstCadre(lastLoggedItem.latitude, lastLoggedItem.longitude, activeCadreProfile);
+                const wDune = dyn.widthFromDuneM ?? lastLoggedItem.measuredWidthFromDuneM;
+                const latPct = dyn.lateralPosPct ?? lastLoggedItem.lateralPosPct;
+                if (wDune == null) return null;
+                return (
+                  <div style={{ fontSize: '0.74rem', color: '#0f172a', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e2e8f0' }}>
+                    Largeur Dune → Mer : <strong>{wDune} m</strong>
+                    {latPct != null && ` · Couloir : ${latPct}%`}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -693,9 +733,18 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         </div>
       </div>
 
+      {/* RÉFÉRENTIEL CADRE TERRAIN FIXE (DUNE + CÔTÉS GAUCHE/DROITE MAIRIE & JÉRÔME) */}
+      <BeachCadrePanel
+        config={cadreConfig}
+        logs={logs}
+        author={author}
+        isReadOnly={isReadOnly}
+        onSaveConfig={handleSaveCadreConfig}
+      />
+
       {/* MODULE LITTO3D FINISTÈRE (IGN / SHOM) : COUPE 2D & LARGEUR DE ROULAGE (POINT 8) */}
       <div style={{ marginBottom: '20px' }}>
-        <Litto3DBeachSection settings={settings} EX={EX} logs={logs} />
+        <Litto3DBeachSection settings={settings} EX={EX} logs={logs} activeCadre={activeCadreProfile} />
       </div>
 
       {/* TABLEAU DES RELEVÉS GPS AVEC FILTRES ET EXPORT */}
@@ -786,6 +835,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 <th style={{ padding: '8px 10px' }}>Auteur</th>
                 <th style={{ padding: '8px 10px' }}>Coordonnées GPS</th>
                 <th style={{ padding: '8px 10px' }}>Précision</th>
+                <th style={{ padding: '8px 10px' }}>Largeur Dune / Zone</th>
                 <th style={{ padding: '8px 10px' }}>Météo AROME capturée</th>
                 <th style={{ padding: '8px 10px' }}>Modèle SHOM brut</th>
                 <th style={{ padding: '8px 10px' }}>Modèle Corrigé</th>
@@ -797,7 +847,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <tbody>
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
+                  <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
                     <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📍</div>
                     <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.90rem', marginBottom: '4px' }}>
                       Aucun relevé GPS pour cette période
@@ -808,7 +858,13 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log, idx) => (
+                filteredLogs.map((log, idx) => {
+                  const dynEval = evaluatePointAgainstCadre(log.latitude, log.longitude, activeCadreProfile);
+                  const widthDune = dynEval.widthFromDuneM ?? log.measuredWidthFromDuneM;
+                  const latPct = dynEval.lateralPosPct ?? log.lateralPosPct;
+                  const inZone = dynEval.isInsideZone ?? log.isInsideZone;
+
+                  return (
                   <tr
                     key={log.id}
                     style={{
@@ -850,6 +906,20 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                         ± {log.accuracyM} m
                       </span>
                     </td>
+                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {widthDune != null ? (
+                        <div>
+                          <strong style={{ color: '#0f172a' }}>{widthDune} m</strong>
+                          {latPct != null && (
+                            <span style={{ fontSize: '0.66rem', color: inZone === false ? '#b45309' : '#15803d', marginLeft: '5px', fontWeight: 700 }}>
+                              · {latPct}%{inZone === false ? ' (hors zone)' : ''}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>— (Dune requise)</span>
+                      )}
+                    </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
                       <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> ({log.weatherSnapshot.windDirectionComp}) · {log.weatherSnapshot.pressureHpa} hPa
                       {log.weatherSnapshot.waveHeightM != null ? ` · ${log.weatherSnapshot.waveHeightM}m` : ''}
@@ -889,7 +959,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
