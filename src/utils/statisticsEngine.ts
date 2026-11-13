@@ -1,5 +1,6 @@
-import { AppSettings, CancellationReason, CustomSlotsMap, SessionItem, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
+import { AppSettings, CancellationReason, CustomSlotsMap, MAX_CHARS_PER_INSTRUCTOR, SessionItem, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
 import { dayFocus, win } from './tides';
+import { getObservationChars, getValidationItemChars, isNoBookingsReason, isNotPublishedCycle1 } from './cycleHelpers';
 
 export const CANCELLATION_REASONS_INFO: Record<
   CancellationReason,
@@ -42,10 +43,10 @@ export const CANCELLATION_REASONS_INFO: Record<
     icon: '⛈️',
   },
   instructor: {
-    label: 'Indisponibilité moniteur / matériel',
-    shortLabel: 'Moniteur / Matériel',
-    color: '#64748b', // Ardoise
-    icon: '🔧',
+    label: 'Absentéisme plage / Non publié C1 (hors météo, clients, plage)',
+    shortLabel: 'Absentéisme / C1',
+    color: '#475569', // Ardoise foncé
+    icon: '🚫',
   },
   other: {
     label: 'Autre motif',
@@ -138,6 +139,74 @@ export function bulkUpsertObservations(newObsList: SlotObservation[]): SlotObser
 }
 
 // -----------------------------------------------------------------------------
+// ANNÉE COMPTABLE DE JÉRÔME (1er NOVEMBRE -> 31 OCTOBRE)
+// -----------------------------------------------------------------------------
+
+export function getFiscalYearStart(dateStr: string): number {
+  const [y, m] = dateStr.split('-').map(Number);
+  if (!y || !m) return 2026;
+  return m >= 11 ? y : y - 1;
+}
+
+export function getFiscalYearBounds(fiscalStartYear: number): {
+  startDateStr: string;
+  endDateStr: string;
+  shortLabel: string;
+  fullLabel: string;
+} {
+  const nextY = fiscalStartYear + 1;
+  return {
+    startDateStr: `${fiscalStartYear}-11-01`,
+    endDateStr: `${nextY}-10-31`,
+    shortLabel: `${fiscalStartYear}/${String(nextY).slice(-2)}`,
+    fullLabel: `Exercice ${fiscalStartYear}–${nextY} (01/11/${fiscalStartYear} – 31/10/${nextY})`,
+  };
+}
+
+export const FISCAL_QUARTERS = [
+  { id: 1, label: 'T1 (Nov–Janv)' },
+  { id: 2, label: 'T2 (Févr–Avr)' },
+  { id: 3, label: 'T3 (Mai–Juil)' },
+  { id: 4, label: 'T4 (Août–Oct)' },
+] as const;
+
+export const FISCAL_MONTHS_ORDER = [11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+
+export function getFiscalQuarterBounds(
+  fiscalStartYear: number,
+  quarterIdx: number
+): { startDateStr: string; endDateStr: string; label: string } {
+  const nextY = fiscalStartYear + 1;
+  switch (quarterIdx) {
+    case 1:
+      return {
+        startDateStr: `${fiscalStartYear}-11-01`,
+        endDateStr: `${nextY}-01-31`,
+        label: `T1 (Nov–Janv) ${fiscalStartYear}/${String(nextY).slice(-2)}`,
+      };
+    case 2:
+      return {
+        startDateStr: `${nextY}-02-01`,
+        endDateStr: `${nextY}-04-30`,
+        label: `T2 (Févr–Avr) ${fiscalStartYear}/${String(nextY).slice(-2)}`,
+      };
+    case 3:
+      return {
+        startDateStr: `${nextY}-05-01`,
+        endDateStr: `${nextY}-07-31`,
+        label: `T3 (Mai–Juil) ${fiscalStartYear}/${String(nextY).slice(-2)}`,
+      };
+    case 4:
+    default:
+      return {
+        startDateStr: `${nextY}-08-01`,
+        endDateStr: `${nextY}-10-31`,
+        label: `T4 (Août–Oct) ${fiscalStartYear}/${String(nextY).slice(-2)}`,
+      };
+  }
+}
+
+// -----------------------------------------------------------------------------
 // CALCULS DES STATISTIQUES GLOBALES & CAMEMBERT
 // -----------------------------------------------------------------------------
 
@@ -163,10 +232,21 @@ export interface PeriodStatsResult {
   totalLostParticipants: number;        // Inscrits définitivement perdus / remboursés
   rescheduledRate: number;              // Taux de sauvetage commercial (% replacés)
   unbookedSlotsCount: number;           // Créneaux fermés faute d'inscrits (Vie 1)
-  weatherCancelledSlotsCount: number;   // Créneaux annulés météo/aléa (Vie 2)
+  weatherCancelledSlotsCount: number;   // Créneaux annulés météo/état plage (Vie 2)
+  instructorAbsentSlotsCount: number;   // Créneaux non publiés C1 ou indispo moniteur (hors météo/clients/plage)
+  instructorAbsenteeismRate: number;    // Taux d'absentéisme sur la plage (%)
+  instructorAbsentReasonsBreakdown: {
+    reason: string;
+    count: number;
+    percentage: number;
+  }[];
   totalMono: number;
   totalBi: number;
-  avgFillRate: number; // en % (sur base de 12 places / séance réalisée)
+  totalRealizedChars: number;           // Total chars sortis (Mono + Bi, règle max 12 chars / moniteur)
+  cycle1PublishedCount: number;         // Créneaux ouverts Cycle 1 en attente d'inscription
+  cycle2ShiftedCount: number;           // Séances décalées en Cycle 2
+  cycle2MergedCount: number;            // Séances regroupées / fusionnées en Cycle 2
+  avgFillRate: number; // en % (sur base de 12 chars max / moniteur par séance réalisée)
   observationsCount: number;
 }
 
@@ -214,8 +294,14 @@ export function computePeriodStats(
   let totalLostParticipants = 0;
   let unbookedSlotsCount = 0;
   let weatherCancelledSlotsCount = 0;
+  let instructorAbsentSlotsCount = 0;
   let totalMono = 0;
   let totalBi = 0;
+  let totalRealizedChars = 0;
+  let cycle1PublishedCount = 0;
+  let cycle2ShiftedCount = 0;
+  let cycle2MergedCount = 0;
+  const absentReasonsMap = new Map<string, number>();
 
   const reasonsCount: Record<CancellationReason, number> = {
     wind_low: 0,
@@ -283,38 +369,77 @@ export function computePeriodStats(
         handledSlotKeys.add(item.k);
         const matchedObs = dayObs.find(o => o.slotKey === item.k);
 
+        if (item.cycle2Status === 'shifted') cycle2ShiftedCount++;
+        if (item.cycle2Status === 'merged') cycle2MergedCount++;
+
+        // Si créneau publié en Cycle 1 mais sans aucune inscription et non encore clôturé/réalisé
+        const itemCharsInfo = getValidationItemChars(item);
+        const isAwaitingCycle1Only =
+          item.cycle1Status === 'published' &&
+          item.cycle2Status === 'awaiting_booking' &&
+          itemCharsInfo.totalChars === 0 &&
+          !matchedObs;
+
+        if (isAwaitingCycle1Only) {
+          cycle1PublishedCount++;
+          return;
+        }
+
         if (item.status === 'valid') {
-          totalRealizedSlots++;
-          if (matchedObs?.participantsCount) {
-            totalParticipants += matchedObs.participantsCount;
-            totalRealizedParticipants += matchedObs.participantsCount;
+          if (item.cycle2Status === 'merged') {
+            // Créneau fusionné dans un autre : ses chars sont déjà portés par la séance cible
+            return;
           }
-          if (matchedObs?.monoCount) totalMono += matchedObs.monoCount;
-          if (matchedObs?.biCount) totalBi += matchedObs.biCount;
+          totalRealizedSlots++;
+          const slotParticipants = matchedObs?.participantsCount ?? item.pilotsCount ?? 0;
+          if (slotParticipants) {
+            totalParticipants += slotParticipants;
+            totalRealizedParticipants += slotParticipants;
+          }
+          const slotMono = matchedObs?.monoCount ?? item.monoCount ?? 0;
+          const slotBi = matchedObs?.biCount ?? item.biCount ?? 0;
+          totalMono += slotMono;
+          totalBi += slotBi;
+
+          const obsChars = matchedObs ? getObservationChars(matchedObs) : 0;
+          const slotChars = obsChars > 0 ? obsChars : itemCharsInfo.totalChars;
+          totalRealizedChars += slotChars;
         } else if (item.status === 'rejected') {
           totalCancelledSlots++;
           // Recherche motif
           let reason: CancellationReason = 'wind_low';
+          const isC1NotPub = isNotPublishedCycle1(item);
           if (matchedObs?.cancellationReason) {
             reason = matchedObs.cancellationReason;
+          } else if (isC1NotPub) {
+            reason = 'instructor';
+          } else if (item.cycle1Status === 'closed_no_bookings' || isNoBookingsReason(item.rejectReason)) {
+            reason = 'no_clients';
           } else {
             // Déduction par défaut si note présente
             const note = item.rejectReason?.toLowerCase() || '';
             if (note.includes('vent fort') || note.includes('rafale')) reason = 'wind_high';
-            else if (note.includes('pétole') || note.includes('vent faible')) reason = 'wind_low';
-            else if (note.includes('client') || note.includes('réserv')) reason = 'no_clients';
+            else if (note.includes('pétole') || note.includes('vent faible') || note.includes('sans vent')) reason = 'wind_low';
             else if (note.includes('bâche') || note.includes('plage')) reason = 'beach_state';
           }
           reasonsCount[reason]++;
 
-          // Distinction Vie 1 (faute d'inscrits) vs Vie 2 (annulé avec inscrits)
+          // Distinction Vie 1 (faute d'inscrits), Absentéisme/C1 non publié (hors météo/clients/plage), et Vie 2 (météo/plage)
           if (reason === 'no_clients') {
             unbookedSlotsCount++;
+          } else if (isC1NotPub || reason === 'instructor') {
+            instructorAbsentSlotsCount++;
+            const rawReason =
+              item.nonPublishReason?.trim() ||
+              matchedObs?.cancellationNote?.trim() ||
+              (item.rejectReason?.replace(/^Non publié\s*\(C1\)\s*:\s*/i, '').trim()) ||
+              'Indisponibilité moniteur / matériel';
+            absentReasonsMap.set(rawReason, (absentReasonsMap.get(rawReason) || 0) + 1);
           } else {
             weatherCancelledSlotsCount++;
-            const booked = matchedObs?.bookedParticipantsCount || 0;
-            const resched = matchedObs?.rescheduledCount || 0;
-            const lost = matchedObs?.lostCount != null ? matchedObs.lostCount : Math.max(0, booked - resched);
+            const booked = matchedObs?.bookedParticipantsCount ?? item.pilotsCount ?? 0;
+            const resched = matchedObs?.rescheduledCount ?? item.rescheduledChars ?? 0;
+            const lost = matchedObs?.lostCount != null ? matchedObs.lostCount : (item.lostChars ?? Math.max(0, booked - resched));
             totalCancelledParticipants += booked;
             totalRescheduledParticipants += resched;
             totalLostParticipants += lost;
@@ -337,6 +462,10 @@ export function computePeriodStats(
 
         if (reason === 'no_clients') {
           unbookedSlotsCount++;
+        } else if (reason === 'instructor') {
+          instructorAbsentSlotsCount++;
+          const rawReason = obs.cancellationNote?.trim() || 'Indisponibilité moniteur / matériel';
+          absentReasonsMap.set(rawReason, (absentReasonsMap.get(rawReason) || 0) + 1);
         } else {
           weatherCancelledSlotsCount++;
           const booked = obs.bookedParticipantsCount || 0;
@@ -354,6 +483,7 @@ export function computePeriodStats(
         }
         if (obs.monoCount) totalMono += obs.monoCount;
         if (obs.biCount) totalBi += obs.biCount;
+        totalRealizedChars += getObservationChars(obs);
       }
     });
 
@@ -380,13 +510,29 @@ export function computePeriodStats(
     .filter(item => item.count > 0)
     .sort((a, b) => b.count - a.count);
 
+  // Règle école : capacité max = 12 CHARS par moniteur (Mono + Bi), PAS en personnes
   const avgFillRate =
-    totalRealizedSlots > 0 ? Math.min(100, (totalParticipants / (totalRealizedSlots * 12)) * 100) : 0;
+    totalRealizedSlots > 0
+      ? Math.min(100, (totalRealizedChars / (totalRealizedSlots * MAX_CHARS_PER_INSTRUCTOR)) * 100)
+      : 0;
 
   const rescheduledRate =
     totalCancelledParticipants > 0
       ? Math.round((totalRescheduledParticipants / totalCancelledParticipants) * 1000) / 10
       : 0;
+
+  const instructorAbsenteeismRate =
+    effectivePossibleSlots > 0
+      ? Math.round((instructorAbsentSlotsCount / effectivePossibleSlots) * 1000) / 10
+      : 0;
+
+  const instructorAbsentReasonsBreakdown = Array.from(absentReasonsMap.entries())
+    .map(([reason, count]) => ({
+      reason,
+      count,
+      percentage: instructorAbsentSlotsCount > 0 ? (count / instructorAbsentSlotsCount) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
 
   return {
     periodLabel: `${startDateStr} au ${endDateStr}`,
@@ -406,8 +552,15 @@ export function computePeriodStats(
     rescheduledRate,
     unbookedSlotsCount,
     weatherCancelledSlotsCount,
+    instructorAbsentSlotsCount,
+    instructorAbsenteeismRate,
+    instructorAbsentReasonsBreakdown,
     totalMono,
     totalBi,
+    totalRealizedChars,
+    cycle1PublishedCount,
+    cycle2ShiftedCount,
+    cycle2MergedCount,
     avgFillRate: Math.round(avgFillRate * 10) / 10,
     observationsCount: observations.length,
   };

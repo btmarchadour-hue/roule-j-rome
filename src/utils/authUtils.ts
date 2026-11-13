@@ -55,11 +55,24 @@ export const DEFAULT_USERS: AppUser[] = [
 const USER_SESSION_KEY = 'cv_user_session';
 const APP_UNLOCKED_KEY = 'cv_app_unlocked';
 
+export function normalizeUserSession(session: ActiveUserSession | null): ActiveUserSession | null {
+  if (!session) return null;
+  if (session.id === 'usr_jerome' || session.id === 'usr_benoit') {
+    return {
+      ...session,
+      role: 'admin',
+      isReadOnly: false,
+    };
+  }
+  return session;
+}
+
 export function getActiveUser(): ActiveUserSession | null {
   try {
     const raw = localStorage.getItem(USER_SESSION_KEY) || sessionStorage.getItem(USER_SESSION_KEY);
     if (raw) {
-      return JSON.parse(raw) as ActiveUserSession;
+      const parsed = JSON.parse(raw) as ActiveUserSession;
+      return normalizeUserSession(parsed);
     }
   } catch (err) {
     console.warn('Erreur lecture session utilisateur:', err);
@@ -69,7 +82,8 @@ export function getActiveUser(): ActiveUserSession | null {
 
 export function setActiveUser(session: ActiveUserSession, remember: boolean = true): void {
   try {
-    const json = JSON.stringify(session);
+    const normalized = normalizeUserSession(session) || session;
+    const json = JSON.stringify(normalized);
     if (remember) {
       localStorage.setItem(USER_SESSION_KEY, json);
       localStorage.setItem(APP_UNLOCKED_KEY, 'true');
@@ -80,7 +94,7 @@ export function setActiveUser(session: ActiveUserSession, remember: boolean = tr
       localStorage.removeItem(USER_SESSION_KEY);
     }
     // Synchroniser l'instructeur actif pour l'émargement et les validations
-    localStorage.setItem('cv_active_instructor', session.username);
+    localStorage.setItem('cv_active_instructor', normalized.username);
   } catch (err) {
     console.warn('Erreur sauvegarde session utilisateur:', err);
   }

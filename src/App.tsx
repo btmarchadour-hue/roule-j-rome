@@ -5,7 +5,6 @@ import { FocusTab } from './components/FocusTab';
 import { Header } from './components/Header';
 import { MarnageChart } from './components/MarnageChart';
 import { NotesAndHypotheses } from './components/NotesAndHypotheses';
-import { PrintableAgendaSheet } from './components/PrintableAgendaSheet';
 import { SettingsCard } from './components/SettingsCard';
 import { SlotObservationModal } from './components/SlotObservationModal';
 import { StatisticsTab } from './components/StatisticsTab';
@@ -19,13 +18,14 @@ import { AppLockScreen } from './components/AppLockScreen';
 import { UserManagementModal } from './components/UserManagementModal';
 import { TeamExchangeModal } from './components/TeamExchangeModal';
 import {
+  AgendaBookingItem,
   subscribeToValidations,
   saveValidationToFirestore,
   deleteValidationFromFirestore,
   subscribeToCustomSlots,
   saveCustomSlotsToFirestore,
-  seedLocalDataToFirestoreIfEmpty,
-  syncLocalDataWithFirestore,
+  subscribeToBookings,
+  saveBookingToFirestore,
   notifySync,
   subscribeToSessionSettings,
   saveSessionSettingsToFirestore,
@@ -39,9 +39,11 @@ import {
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
+  MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
   TeamNote,
   TidePoint,
+  ValidationDayRecord,
   ValidationItem,
   ValidationsMap,
   WindPoint,
@@ -49,6 +51,7 @@ import {
 import { getActiveUser, clearActiveUser } from './utils/authUtils';
 import {
   build,
+  dayFocus,
   kOf,
   LAT,
   lc,
@@ -61,6 +64,14 @@ import {
   toU,
   win,
 } from './utils/tides';
+import {
+  buildReservationKey,
+  Cycle1SlotAction,
+  Cycle2ActionPayload,
+  getSlotBookingsSummary,
+  getValidationItemChars,
+  hasCycle2Trigger,
+} from './utils/cycleHelpers';
 
 const WK = 'cvWind2';
 const VK = 'cvValid1';
@@ -96,35 +107,35 @@ const defaultSettings: AppSettings = {
 };
 
 export const App: React.FC = () => {
-  // Navigation tabs: 1 = Calendrier, 2 = Focus, 3 = Fiche Agenda Papier, 4 = Réglages & Hypothèses
-  // L'application s'ouvre TOUJOURS sur le Calendrier (Tab 1) par défaut
+  // Navigation tabs: 1 = Cycle 1 (Calendrier), 2 = Cycle 2 (Pilotage Terrain), 4 = Statistiques, 7 = Étalonnage GPS, 5 = Clients, 6 = Hypothèses & Notes
   const [activeTab, setActiveTab] = useState<number>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === '7') return 7;
       if (tabParam === '6') return 6;
       if (tabParam === '5') return 5;
       if (tabParam === '4') return 4;
-      if (tabParam === '3' || params.has('autoprint')) return 3;
-      if (tabParam === '2') return 2;
+      if (tabParam === '2' || tabParam === '3' || params.has('autoprint')) return 2;
     } catch {
       // ignore
     }
-    return 1; // Toujours le calendrier au démarrage
+    return 2; // Démarrage direct sur Adaptation météo & prise de décisions (Cycle 2 avec calendrier)
   });
 
-  // Current year & month for calendar grid, and selected date (démarrage officiel au 1er novembre 2026)
-  const [year, setYear] = useState<number>(2026);
-  const [month, setMonth] = useState<number>(10); // 0-indexed: 10 = November
-  const [selectedDate, setSelectedDate] = useState<string>('2026-11-01');
-  const [focusDay, setFocusDay] = useState<'tomorrow' | 'today'>('tomorrow');
+  // Current year, month, selectedDate (Cycle 1) & focusDate (Cycle 2) defaulting to today (clamped to valid range)
+  const initialToday = useMemo(() => {
+    const t = tdy();
+    if (t < minDs) return minDs;
+    if (t > maxDs) return maxDs;
+    return t;
+  }, []);
+  const [initY, initM] = initialToday.split('-').map(Number);
 
-  // Date active pour l'onglet Focus (demain par défaut, ou aujourd'hui)
-  const focusDate = useMemo(() => {
-    const tdRaw = tdy();
-    const td = tdRaw < minDs ? minDs : tdRaw;
-    return focusDay === 'tomorrow' ? shf(td, 1) : td;
-  }, [focusDay]);
+  const [year, setYear] = useState<number>(initY);
+  const [month, setMonth] = useState<number>(initM - 1);
+  const [selectedDate, setSelectedDate] = useState<string>(initialToday);
+  const [focusDate, setFocusDate] = useState<string>(initialToday);
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('cvSettings');
@@ -168,37 +179,13 @@ export const App: React.FC = () => {
     }
   });
 
-  // Initialize selected date based on today if in valid range
+  // Réservations numériques par créneau (`${ds}_${slotKey}` -> AgendaBookingItem[])
+  const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>({});
+
+  // Clean obsolete tab storage key on startup
   useEffect(() => {
     try {
       localStorage.removeItem('cvTab');
-    } catch {
-      // ignore
-    }
-
-    const today = tdy();
-    if (today >= minDs && today <= maxDs) {
-      setSelectedDate(today);
-      const [yy, mm] = today.split('-').map(Number);
-      setYear(yy);
-      setMonth(mm - 1);
-    }
-
-    // Auto-print support when opened in a new standalone window (?autoprint=1)
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('autoprint')) {
-        setActiveTab(3);
-        const timer = setTimeout(() => {
-          try {
-            window.focus();
-            window.print();
-          } catch (e) {
-            console.warn('Autoprint failed:', e);
-          }
-        }, 750);
-        return () => clearTimeout(timer);
-      }
     } catch {
       // ignore
     }
@@ -206,7 +193,7 @@ export const App: React.FC = () => {
 
   // Initialisation et abonnements temps réel Firestore (partage instantané entre smartphone et PC)
   useEffect(() => {
-    // 1. Écouter en temps réel les validations validées/refusées (Firestore = source de vérité absolue)
+    // 1. Écouter en temps réel les validations & cycles 1/2
     const unsubValidations = subscribeToValidations(remoteVals => {
       const data = remoteVals || {};
       setValidations(data);
@@ -243,7 +230,12 @@ export const App: React.FC = () => {
       }
     });
 
-    // 4. Écouter en temps réel les notes d'échange Ben ↔ Jérôme (Module 7)
+    // 4. Écouter en temps réel les réservations clients (déclencheur Cycle 2)
+    const unsubBookings = subscribeToBookings(remoteBookings => {
+      setBookingsMap(remoteBookings || {});
+    });
+
+    // 5. Écouter en temps réel les notes d'échange Ben ↔ Jérôme (Module 7)
     const unsubTeamNotes = subscribeToTeamNotes(notes => {
       setTeamNotes(notes);
     });
@@ -252,6 +244,7 @@ export const App: React.FC = () => {
       unsubValidations();
       unsubCustomSlots();
       unsubSessionSettings();
+      unsubBookings();
       unsubTeamNotes();
     };
   }, []);
@@ -313,6 +306,32 @@ export const App: React.FC = () => {
     }, 600);
   }, [currentUser]);
 
+  const handleAddCustomNonPublishReason = useCallback((rawReason: string) => {
+    const trimmed = rawReason.trim();
+    if (!trimmed) return;
+    if (currentUser?.isReadOnly || currentUser?.role === 'moniteur') {
+      notifySync('🔒 Mode Contrôle : ajout de raison verrouillé');
+      return;
+    }
+    setSettings(prev => {
+      const existing = prev.customNonPublishReasons || [];
+      if (existing.some(r => r.toLowerCase() === trimmed.toLowerCase())) {
+        return prev;
+      }
+      const nextReasons = [...existing, trimmed];
+      const updated = { ...prev, customNonPublishReasons: nextReasons };
+      try {
+        localStorage.setItem('cvSettings', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      saveSessionSettingsToFirestore({ customNonPublishReasons: nextReasons }).catch(err => {
+        console.warn('Erreur sauvegarde raison personnalisée:', err);
+      });
+      return updated;
+    });
+  }, [currentUser]);
+
   // Sauvegarde temporaire pour bouton Annuler / Retour arrière (Module 2)
   const [backupSettings, setBackupSettings] = useState<AppSettings | null>(null);
   const undoResetTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -369,29 +388,148 @@ export const App: React.FC = () => {
     notifySync('✓ Vos réglages précédents ont été restaurés !');
   }, [backupSettings]);
 
+  // Calculations for tides and windows
+  const EX: TidePoint[] = useMemo(() => {
+    return build(settings.les, settings.pcor, windList);
+  }, [settings.les, settings.pcor, windList]);
+
+  // ÉTAPE 3 : Ajustement selon le mode Théorique vs Mode Réel (Modèle Empirique)
+  const isRealMode = settings.calculationMode === 'reel';
+  const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
+  const effectiveThreshold = (settings.L + empiricalOffsetM) - (settings.mg || 0) / 100;
+
+  const tideW = useMemo(() => {
+    return win(EX, effectiveThreshold);
+  }, [EX, effectiveThreshold]);
+
+  const first = EX[0]?.t ?? 0;
+  const last = EX[EX.length - 1]?.t ?? 0;
+
   const handleUpdateCustomSlots = useCallback(
     (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => {
       if (currentUser?.isReadOnly) {
         notifySync('🔒 Mode Contrôle : créneaux sur mesure verrouillés');
         return;
       }
-      setCustomSlotsMap(prev => {
-        const updated = {
-          ...prev,
-          [dateStr]: { replaceDefault, slots },
-        };
-        try {
-          localStorage.setItem(CS_KEY, JSON.stringify(updated));
-        } catch {
-          // ignore
+      if (dateStr < tdy()) {
+        notifySync('🔒 Journée passée : les créneaux Cycle 1 ne sont plus modifiables');
+        return;
+      }
+      const nextCustomMap: CustomSlotsMap = {
+        ...customSlotsMap,
+        [dateStr]: { replaceDefault, slots },
+      };
+      setCustomSlotsMap(nextCustomMap);
+      try {
+        localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
+      } catch {
+        // ignore
+      }
+      saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
+        console.warn('Erreur Firestore custom slots:', err)
+      );
+
+      // Si la journée est déjà publiée en Cycle 1, synchroniser automatiquement les créneaux sans inscrit (tout en préservant les créneaux Cycle 2)
+      const existingRecord = validations[dateStr];
+      if (existingRecord && existingRecord.items && existingRecord.items.length > 0) {
+        const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
+        const preservedCycle2 = existingRecord.items.filter(it => {
+          const bChars = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(dateStr, it.k)] || []
+          ).totalChars;
+          return hasCycle2Trigger(it, bChars);
+        });
+        const usedCycle2Keys = new Set<string>();
+        const syncedItems: ValidationItem[] = [];
+
+        for (const x of nextFocus.list) {
+          const slotKey = kOf(x);
+          const startTimeStr = lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d);
+          const endTimeStr = lc(x.b, nextFocus.y, nextFocus.m, nextFocus.d);
+
+          const matchedC2 = preservedCycle2.find(
+            it => !usedCycle2Keys.has(it.k) && (it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr))
+          );
+          if (matchedC2) {
+            usedCycle2Keys.add(matchedC2.k);
+            syncedItems.push(matchedC2);
+            continue;
+          }
+
+          const matchedExisting = existingRecord.items.find(
+            it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
+          );
+          const keepNotPublished =
+            matchedExisting?.cycle1Status === 'not_published' ||
+            Boolean(matchedExisting?.nonPublishReason);
+          const keepClosedVie1 =
+            !keepNotPublished && matchedExisting?.cycle1Status === 'closed_no_bookings';
+          const notPubReason =
+            matchedExisting?.nonPublishReason || 'Indisponibilité personnelle';
+
+          syncedItems.push({
+            k: slotKey,
+            s: startTimeStr,
+            e: endTimeStr,
+            publishedStart: startTimeStr,
+            publishedEnd: endTimeStr,
+            opt: x.opt,
+            over: x.over,
+            lim: x.lim,
+            customTitle: x.customTitle,
+            status: keepNotPublished || keepClosedVie1 ? 'rejected' : 'valid',
+            rejectReason: keepNotPublished
+              ? `Non publié (C1) : ${notPubReason}`
+              : keepClosedVie1
+              ? matchedExisting?.rejectReason || "Faute d'inscrits (Vie 1)"
+              : undefined,
+            cycle1Status: keepNotPublished
+              ? 'not_published'
+              : keepClosedVie1
+              ? 'closed_no_bookings'
+              : 'published',
+            nonPublishReason: keepNotPublished ? notPubReason : undefined,
+            cycle2Status: keepNotPublished || keepClosedVie1 ? undefined : 'awaiting_booking',
+            charsCount: 0,
+            monoCount: 0,
+            biCount: 0,
+            pilotsCount: 0,
+          });
         }
-        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
-          console.warn('Erreur Firestore custom slots:', err)
+
+        // Préserver tout créneau Cycle 2 dont l'horaire ne figure plus dans la liste calculée
+        for (const c2Item of preservedCycle2) {
+          if (!usedCycle2Keys.has(c2Item.k)) {
+            syncedItems.push(c2Item);
+          }
+        }
+
+        const nextValidation: ValidationDayRecord = {
+          sig: sigOf(nextFocus),
+          ts: Date.now(),
+          k: nextFocus.k,
+          cycle1PublishedAt: existingRecord.cycle1PublishedAt || Date.now(),
+          items: syncedItems,
+        };
+
+        setValidations(prev => {
+          const nextVals = { ...prev, [dateStr]: nextValidation };
+          try {
+            localStorage.setItem(VK, JSON.stringify(nextVals));
+          } catch {
+            // ignore
+          }
+          return nextVals;
+        });
+        saveValidationToFirestore(dateStr, nextValidation).catch(err =>
+          console.warn('Erreur Firestore sync validation Cycle 1:', err)
         );
-        return updated;
-      });
+        notifySync('📅 Horaires Cycle 1 mis à jour');
+      } else {
+        notifySync('✏️ Horaires du jour ajustés');
+      }
     },
-    [currentUser]
+    [currentUser, customSlotsMap, validations, settings, tideW, first, last, windList, bookingsMap]
   );
 
   const handleTabChange = (tab: number) => {
@@ -439,6 +577,18 @@ export const App: React.FC = () => {
     setActiveTab(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const handleNavigateDay = useCallback(
+    (deltaDays: number) => {
+      const nextDs = shf(selectedDate, deltaDays);
+      const clamped = nextDs < minDs ? minDs : nextDs > maxDs ? maxDs : nextDs;
+      const [ny, nm] = clamped.split('-').map(Number);
+      setYear(ny);
+      setMonth(nm - 1);
+      setSelectedDate(clamped);
+    },
+    [selectedDate]
+  );
 
   // Process raw Open-Meteo hourly response + Marine wave data
   const processWind = useCallback((aData: any, gData: any, mData?: any) => {
@@ -581,228 +731,575 @@ export const App: React.FC = () => {
     fetchWind();
   }, [fetchWind, processWind]);
 
-  // Validation handler with optional mode: 'all' | 'wind_only'
-  const handleValidateDay = (
-    ds: string,
-    record: DayFocusData,
-    mode: 'all' | 'wind_only' = 'all'
-  ) => {
-    if (isReadOnly) {
-      notifySync('🔒 Mode Contrôle actif : validations réservées au Moniteur (verrouillé pour Concepteur : Benoît)');
-      return;
-    }
-    const updated: ValidationsMap = {
-      ...validations,
-      [ds]: {
-        sig: sigOf(record),
-        ts: Date.now(),
-        k: record.k,
-        items: record.list.map(x => {
-          const isBadWind = x.ok === false;
-          const status: 'valid' | 'rejected' = mode === 'wind_only' && isBadWind ? 'rejected' : 'valid';
-          const rejectReason = isBadWind ? 'Vent hors plage' : undefined;
-          const assignedPilot = status === 'valid' ? (getActiveInstructor() || 'Jérôme') : undefined;
-          const pilotsCount = status === 'valid' ? 8 : undefined; // Jauge nominale standard 8 pilotes
-          return {
-            k: kOf(x),
-            s: lc(x.a, record.y, record.m, record.d),
-            e: lc(x.b, record.y, record.m, record.d),
-            opt: x.opt,
-            over: x.over,
-            lim: x.lim,
-            customTitle: x.customTitle,
-            status,
-            rejectReason,
-            assignedPilot,
-            instructor: assignedPilot,
-            pilotsCount,
-          };
-        }),
-      },
-    };
-    setValidations(updated);
-    try {
-      localStorage.setItem(VK, JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
-    saveValidationToFirestore(ds, updated[ds]).catch(err =>
-      console.warn('Erreur Firestore validation:', err)
-    );
-  };
-
-  const handleClearValidation = useCallback((ds: string) => {
-    if (isReadOnly) {
-      notifySync('🔒 Mode Contrôle : réinitialisation verrouillée pour Concepteur : Benoît');
-      return;
-    }
+  const persistDayValidation = useCallback((ds: string, nextRecord: ValidationDayRecord | null) => {
     setValidations(prev => {
       const updated = { ...prev };
-      delete updated[ds];
+      if (!nextRecord || nextRecord.items.length === 0) {
+        delete updated[ds];
+      } else {
+        updated[ds] = nextRecord;
+      }
       try {
         localStorage.setItem(VK, JSON.stringify(updated));
       } catch {
         // ignore
       }
+      return updated;
+    });
+
+    if (!nextRecord || nextRecord.items.length === 0) {
       deleteValidationFromFirestore(ds).catch(err =>
         console.warn('Erreur Firestore delete validation:', err)
       );
-      return updated;
-    });
-  }, [isReadOnly]);
+    } else {
+      saveValidationToFirestore(ds, nextRecord).catch(err =>
+        console.warn('Erreur Firestore save validation:', err)
+      );
+    }
+  }, []);
 
-  const handleSetSlotDecision = useCallback(
-    (
-      record: DayFocusData,
-      slot: SessionItem,
-      decision: 'valid' | 'rejected' | 'pending',
-      reason?: string,
-      pilot?: string,
-      pilotsCount?: number
-    ) => {
+  // CYCLE 1 : Publication commerciale ou Non-publication motivée jour par jour (préserve les créneaux déjà en Cycle 2)
+  const handleValidateDay = (
+    ds: string,
+    record: DayFocusData,
+    mode: 'all' | 'wind_only' | 'not_published' = 'all',
+    nonPublishReason?: string
+  ) => {
+    if (isReadOnly) {
+      notifySync('🔒 Mode Lecture seule actif : publications réservées aux administrateurs');
+      return;
+    }
+    if (ds < tdy()) {
+      notifySync('🔒 Journée passée : validation Cycle 1 verrouillée (archive)');
+      return;
+    }
+    const existingRecord = validations[ds];
+    const items: ValidationItem[] = record.list.map(x => {
+      const slotKey = kOf(x);
+      const startTimeStr = lc(x.a, record.y, record.m, record.d);
+      const endTimeStr = lc(x.b, record.y, record.m, record.d);
+      const existingItem = existingRecord?.items?.find(
+        it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
+      );
+      const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
+      const bookingChars = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
+          bookingsMap[buildReservationKey(ds, slotKey)] ||
+          []
+      ).totalChars;
+
+      // Préserver intact tout créneau déjà engagé en Cycle 2 (>= 1 char ou action terrain)
+      if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
+        return {
+          ...existingItem,
+          publishedStart: existingItem.publishedStart || startTimeStr,
+          publishedEnd: existingItem.publishedEnd || endTimeStr,
+          cycle1Status: 'published',
+        };
+      }
+
+      if (mode === 'not_published') {
+        const cleanReason = nonPublishReason?.trim() || 'Indisponibilité personnelle';
+        return {
+          k: slotKey,
+          s: startTimeStr,
+          e: endTimeStr,
+          publishedStart: startTimeStr,
+          publishedEnd: endTimeStr,
+          opt: x.opt,
+          over: x.over,
+          lim: x.lim,
+          customTitle: x.customTitle,
+          status: 'rejected',
+          rejectReason: `Non publié (C1) : ${cleanReason}`,
+          cycle1Status: 'not_published',
+          nonPublishReason: cleanReason,
+          cycle2Status: undefined,
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        };
+      }
+
+      const isBadWind = x.ok === false;
+      const closeInC1 = mode === 'wind_only' && isBadWind;
+
+      return {
+        k: slotKey,
+        s: startTimeStr,
+        e: endTimeStr,
+        publishedStart: startTimeStr,
+        publishedEnd: endTimeStr,
+        opt: x.opt,
+        over: x.over,
+        lim: x.lim,
+        customTitle: x.customTitle,
+        status: closeInC1 ? 'rejected' : 'valid',
+        rejectReason: closeInC1 ? "Fermé Cycle 1 (vent hors plage, 0 inscrit)" : undefined,
+        cycle1Status: closeInC1 ? 'closed_no_bookings' : 'published',
+        nonPublishReason: undefined,
+        cycle2Status: closeInC1 ? undefined : 'awaiting_booking',
+        charsCount: 0,
+        monoCount: 0,
+        biCount: 0,
+        pilotsCount: 0,
+      };
+    });
+
+    const nextRecord: ValidationDayRecord = {
+      sig: sigOf(record),
+      ts: Date.now(),
+      k: record.k,
+      cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+      items,
+    };
+
+    persistDayValidation(ds, nextRecord);
+    notifySync(
+      mode === 'not_published'
+        ? `🚫 Journée marquée « À ne pas publier » (${nonPublishReason?.trim() || 'Indisponibilité'})`
+        : '📅 Cycle 1 publié (créneaux ouverts sans impact météo court-terme)'
+    );
+  };
+
+  const handleClearValidation = useCallback((ds: string) => {
+    if (isReadOnly) {
+      notifySync('🔒 Mode Lecture seule : réinitialisation verrouillée');
+      return;
+    }
+    if (ds < tdy()) {
+      notifySync('🔒 Journée passée : archive Cycle 1 non modifiable');
+      return;
+    }
+    persistDayValidation(ds, null);
+  }, [isReadOnly, persistDayValidation]);
+
+  // CYCLE 1 : Action unitaire sur un créneau (à publier, à ne pas publier + motif, clôturer Vie 1, réinitialiser)
+  const handleSetSlotCycle1Action = useCallback(
+    (record: DayFocusData, slot: SessionItem, action: Cycle1SlotAction, reason?: string) => {
       if (isReadOnly) {
-        notifySync('🔒 Mode Contrôle : modifications de créneau verrouillées');
+        notifySync('🔒 Mode Contrôle : actions Cycle 1 verrouillées');
         return;
       }
-
-      // GARDE-FOU MÉTIER INVIOLABLE (Concepteur : Benoît & Moniteur : Jérôme) :
-      // Les participants au volant sont les "pilotes". Une séance validée / confirmée
-      // DOIT obligatoirement avoir au minimum 1 participant / pilote !
-      const slotKey = kOf(slot);
       const ds = record.ds;
-      const existing = validations[ds];
-      const existingItem = existing?.items?.find(it => it.k === slotKey);
+      if (ds < tdy()) {
+        notifySync('🔒 Journée passée : archive Cycle 1 non modifiable');
+        return;
+      }
+      const slotKey = kOf(slot);
+      const startTimeStr = lc(slot.a, record.y, record.m, record.d);
+      const endTimeStr = lc(slot.b, record.y, record.m, record.d);
+      const existingRecord = validations[ds];
+      const currentItems = existingRecord?.items || [];
+      const existingItem = currentItems.find(it => it.k === slotKey);
 
-      let effectivePilotsCount = pilotsCount ?? existingItem?.pilotsCount;
-      if (decision === 'valid' && (!effectivePilotsCount || effectivePilotsCount <= 0)) {
-        const answer = window.prompt(
-          `👥 Règle métier inviolable :\nUne séance validée doit comporter au moins 1 participant (pilote de char).\nCombien de pilotes sont inscrits sur la séance ${slot.customTitle || slot.txt || slotKey} ?`,
-          "8"
-        );
-        if (answer === null) return; // Action annulée par l'utilisateur
-        const parsed = parseInt(answer.trim(), 10);
-        if (isNaN(parsed) || parsed <= 0) {
-          window.alert(
-            "⛔ Validation refusée : Impossible de valider une séance avec 0 participant (pilote) !\nS'il n'y a aucun inscrit, classez le créneau en 'Refusé / Faute d'inscrits' (Vie 1)."
-          );
-          return;
-        }
-        effectivePilotsCount = parsed;
+      let nextItems: ValidationItem[];
+      if (action === 'reset') {
+        nextItems = currentItems.filter(it => it.k !== slotKey);
+      } else {
+        const cleanReason = reason?.trim() || 'Indisponibilité personnelle';
+        const nextItem: ValidationItem =
+          action === 'not_published'
+            ? {
+                k: slotKey,
+                s: existingItem?.publishedStart || startTimeStr,
+                e: existingItem?.publishedEnd || endTimeStr,
+                publishedStart: existingItem?.publishedStart || startTimeStr,
+                publishedEnd: existingItem?.publishedEnd || endTimeStr,
+                opt: slot.opt,
+                over: slot.over,
+                lim: slot.lim,
+                customTitle: slot.customTitle,
+                status: 'rejected',
+                rejectReason: `Non publié (C1) : ${cleanReason}`,
+                cycle1Status: 'not_published',
+                nonPublishReason: cleanReason,
+                cycle2Status: undefined,
+                charsCount: 0,
+                monoCount: 0,
+                biCount: 0,
+                pilotsCount: 0,
+              }
+            : action === 'close_no_bookings'
+            ? {
+                k: slotKey,
+                s: existingItem?.publishedStart || startTimeStr,
+                e: existingItem?.publishedEnd || endTimeStr,
+                publishedStart: existingItem?.publishedStart || startTimeStr,
+                publishedEnd: existingItem?.publishedEnd || endTimeStr,
+                opt: slot.opt,
+                over: slot.over,
+                lim: slot.lim,
+                customTitle: slot.customTitle,
+                status: 'rejected',
+                rejectReason: "Faute d'inscrits (Vie 1)",
+                cycle1Status: 'closed_no_bookings',
+                nonPublishReason: undefined,
+                cycle2Status: undefined,
+                charsCount: 0,
+                monoCount: 0,
+                biCount: 0,
+                pilotsCount: 0,
+              }
+            : {
+                k: slotKey,
+                s: existingItem?.publishedStart || startTimeStr,
+                e: existingItem?.publishedEnd || endTimeStr,
+                publishedStart: existingItem?.publishedStart || startTimeStr,
+                publishedEnd: existingItem?.publishedEnd || endTimeStr,
+                opt: slot.opt,
+                over: slot.over,
+                lim: slot.lim,
+                customTitle: slot.customTitle,
+                status: 'valid',
+                rejectReason: undefined,
+                cycle1Status: 'published',
+                nonPublishReason: undefined,
+                cycle2Status: 'awaiting_booking',
+                charsCount: 0,
+                monoCount: 0,
+                biCount: 0,
+                pilotsCount: 0,
+              };
+
+        nextItems = existingItem
+          ? currentItems.map(it => (it.k === slotKey ? nextItem : it))
+          : [...currentItems, nextItem];
       }
 
-      setValidations(prev => {
-        const existingInState = prev[ds];
-        const currentItems = existingInState?.items || [];
-        const stateExistingItem = currentItems.find(it => it.k === slotKey);
-
-        let nextItems: ValidationItem[];
-        if (decision === 'pending') {
-          nextItems = currentItems.filter(item => item.k !== slotKey);
-        } else {
-          const isBadWind = slot.ok === false;
-          const defaultReason = reason || (isBadWind ? 'Vent hors plage' : 'Refusé / Annulé');
-          const assignedPilot =
-            decision === 'valid'
-              ? pilot || stateExistingItem?.assignedPilot || getActiveInstructor() || 'Jérôme'
-              : undefined;
-
-          const updatedItem: ValidationItem = {
-            k: slotKey,
-            s: lc(slot.a, record.y, record.m, record.d),
-            e: lc(slot.b, record.y, record.m, record.d),
-            opt: slot.opt,
-            over: slot.over,
-            lim: slot.lim,
-            customTitle: slot.customTitle,
-            status: decision,
-            rejectReason: decision === 'rejected' ? defaultReason : undefined,
-            assignedPilot,
-            instructor: assignedPilot,
-            pilotsCount: decision === 'valid' ? effectivePilotsCount : undefined,
-          };
-
-          if (existingItem) {
-            nextItems = currentItems.map(it => (it.k === slotKey ? updatedItem : it));
-          } else {
-            nextItems = [...currentItems, updatedItem];
-          }
-
-          nextItems.sort((p, q) => {
-            const aStart = record.list.find(x => kOf(x) === p.k)?.a || 0;
-            const bStart = record.list.find(x => kOf(x) === q.k)?.a || 0;
-            return aStart - bStart;
-          });
-        }
-
-        let updated: ValidationsMap;
-        if (nextItems.length === 0) {
-          updated = { ...prev };
-          delete updated[ds];
-        } else {
-          updated = {
-            ...prev,
-            [ds]: {
+      persistDayValidation(
+        ds,
+        nextItems.length === 0
+          ? null
+          : {
               sig: sigOf(record),
               ts: Date.now(),
               k: record.k,
+              cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
               items: nextItems,
-            },
-          };
-        }
+            }
+      );
+    },
+    [isReadOnly, validations, persistDayValidation]
+  );
 
-        try {
-          localStorage.setItem(VK, JSON.stringify(updated));
-        } catch {
-          // ignore
-        }
-        if (nextItems.length === 0) {
-          deleteValidationFromFirestore(ds).catch(err =>
-            console.warn('Erreur Firestore delete validation:', err)
-          );
-        } else {
-          saveValidationToFirestore(ds, updated[ds]).catch(err =>
-            console.warn('Erreur Firestore save validation:', err)
-          );
-        }
-        return updated;
+  // PASSAGE AUTOMATIQUE CYCLE 1 -> CYCLE 2 DÈS LA 1ÈRE INSCRIPTION
+  const handleSaveSlotBookings = useCallback(
+    (
+      ds: string,
+      slotKey: string,
+      slotStart: string,
+      slotEnd: string,
+      bookings: AgendaBookingItem[]
+    ) => {
+      if (isReadOnly) {
+        notifySync('🔒 Mode Contrôle : réservations verrouillées');
+        return;
+      }
+      const resKey = buildReservationKey(ds, slotKey);
+      setBookingsMap(prev => ({ ...prev, [resKey]: bookings }));
+      saveBookingToFirestore(resKey, bookings).catch(err =>
+        console.warn('Erreur Firestore réservations:', err)
+      );
+
+      const summary = getSlotBookingsSummary(bookings);
+      const existingRecord = validations[ds];
+      const currentItems = existingRecord?.items || [];
+      const existingItem = currentItems.find(it => it.k === slotKey);
+      const instructor = getActiveInstructor() || 'Jérôme';
+
+      let nextItem: ValidationItem;
+      if (summary.totalChars > 0) {
+        const nextC2Status =
+          existingItem?.cycle2Status && existingItem.cycle2Status !== 'awaiting_booking'
+            ? existingItem.cycle2Status
+            : 'confirmed';
+
+        nextItem = {
+          ...(existingItem || {
+            k: slotKey,
+            s: slotStart,
+            e: slotEnd,
+            opt: slotKey.endsWith('o'),
+            over: 0,
+            lim: '',
+          }),
+          k: slotKey,
+          s: existingItem?.s || slotStart,
+          e: existingItem?.e || slotEnd,
+          publishedStart: existingItem?.publishedStart || slotStart,
+          publishedEnd: existingItem?.publishedEnd || slotEnd,
+          cycle1Status: 'published',
+          cycle2Status: nextC2Status,
+          status: existingItem?.status === 'rejected' && nextC2Status === 'cancelled_weather' ? 'rejected' : 'valid',
+          rejectReason:
+            existingItem?.status === 'rejected' && nextC2Status === 'cancelled_weather'
+              ? existingItem.rejectReason
+              : undefined,
+          assignedPilot: instructor,
+          instructor,
+          charsCount: summary.totalChars,
+          monoCount: summary.monoCount,
+          biCount: summary.biCount,
+          pilotsCount: summary.totalPeople,
+        };
+        notifySync(
+          summary.totalChars > MAX_CHARS_PER_INSTRUCTOR
+            ? `⚠️ ${summary.totalChars}/${MAX_CHARS_PER_INSTRUCTOR} chars inscrits (dépassement moniteur) · Cycle 2 actif`
+            : `⚡ ${summary.totalChars} char(s) inscrit(s) · Créneau basculé en Cycle 2`
+        );
+      } else {
+        nextItem = {
+          ...(existingItem || {
+            k: slotKey,
+            s: slotStart,
+            e: slotEnd,
+            opt: slotKey.endsWith('o'),
+            over: 0,
+            lim: '',
+          }),
+          k: slotKey,
+          s: existingItem?.s || slotStart,
+          e: existingItem?.e || slotEnd,
+          publishedStart: existingItem?.publishedStart || slotStart,
+          publishedEnd: existingItem?.publishedEnd || slotEnd,
+          cycle1Status:
+            existingItem?.cycle1Status === 'not_published'
+              ? 'not_published'
+              : existingItem?.cycle1Status === 'closed_no_bookings'
+              ? 'closed_no_bookings'
+              : 'published',
+          cycle2Status:
+            existingItem?.cycle1Status === 'not_published' ||
+            existingItem?.cycle1Status === 'closed_no_bookings'
+              ? undefined
+              : 'awaiting_booking',
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        };
+        notifySync('📅 0 char inscrit · Retour en attente Cycle 1');
+      }
+
+      const nextItems = existingItem
+        ? currentItems.map(it => (it.k === slotKey ? nextItem : it))
+        : [...currentItems, nextItem];
+
+      persistDayValidation(ds, {
+        sig: existingRecord?.sig || slotKey,
+        ts: Date.now(),
+        k: existingRecord?.k || 'g',
+        cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+        items: nextItems,
       });
     },
-    []
+    [isReadOnly, validations, persistDayValidation]
   );
 
-  const handleToggleSlotValidation = useCallback(
-    (record: DayFocusData, slot: SessionItem) => {
-      const ds = record.ds;
-      const existing = validations[ds];
-      const slotKey = kOf(slot);
-      const item = existing?.items?.find(it => it.k === slotKey);
-      if (!item) {
-        handleSetSlotDecision(record, slot, 'valid');
-      } else if (item.status === 'valid' || !item.status) {
-        handleSetSlotDecision(record, slot, 'rejected');
-      } else {
-        handleSetSlotDecision(record, slot, 'pending');
+  // CYCLE 2 : Décisions tactiques terrain (Maintenir, Décaler, Regrouper, Annuler Vie 2, REX)
+  const handleCycle2Action = useCallback(
+    (record: DayFocusData, slot: SessionItem, payload: Cycle2ActionPayload) => {
+      if (isReadOnly) {
+        notifySync('🔒 Mode Contrôle : pilotage Cycle 2 verrouillé');
+        return;
       }
+
+      const ds = record.ds;
+      const slotKey = kOf(slot);
+      const startTimeStr = lc(slot.a, record.y, record.m, record.d);
+      const endTimeStr = lc(slot.b, record.y, record.m, record.d);
+      const existingRecord = validations[ds];
+      const currentItems = existingRecord?.items || [];
+      const existingItem = currentItems.find(it => it.k === slotKey);
+      const existingCounts = getValidationItemChars(existingItem);
+      const instructor = getActiveInstructor() || 'Jérôme';
+
+      const baseItem: ValidationItem = existingItem || {
+        k: slotKey,
+        s: startTimeStr,
+        e: endTimeStr,
+        publishedStart: startTimeStr,
+        publishedEnd: endTimeStr,
+        opt: slot.opt,
+        over: slot.over,
+        lim: slot.lim,
+        customTitle: slot.customTitle,
+      };
+
+      let nextItems = [...currentItems];
+      let updatedSource: ValidationItem = { ...baseItem };
+
+      if (payload.type === 'confirm' || payload.type === 'realized') {
+        const mono = payload.monoCount ?? existingCounts.mono;
+        const bi = payload.biCount ?? existingCounts.bi;
+        const chars = mono + bi > 0 ? mono + bi : existingCounts.totalChars;
+        if (chars < 1) {
+          notifySync('⛔ Au moins 1 char inscrit est requis pour activer le Cycle 2');
+          return;
+        }
+        updatedSource = {
+          ...baseItem,
+          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedEnd: baseItem.publishedEnd || endTimeStr,
+          cycle1Status: 'published',
+          cycle2Status: payload.type === 'realized' ? 'realized' : 'confirmed',
+          status: 'valid',
+          rejectReason: undefined,
+          assignedPilot: payload.instructor || instructor,
+          instructor: payload.instructor || instructor,
+          monoCount: mono,
+          biCount: bi,
+          charsCount: chars,
+          pilotsCount: payload.pilotsCount ?? (mono + bi > 0 ? mono + bi * 2 : existingCounts.people),
+        };
+      } else if (payload.type === 'shift') {
+        const isZeroShift = payload.shiftMinutes === 0;
+        updatedSource = {
+          ...baseItem,
+          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedEnd: baseItem.publishedEnd || endTimeStr,
+          actualStart: isZeroShift ? undefined : payload.newStart,
+          actualEnd: isZeroShift ? undefined : payload.newEnd,
+          shiftMinutes: isZeroShift ? undefined : payload.shiftMinutes,
+          cycle1Status: 'published',
+          cycle2Status: isZeroShift ? 'confirmed' : 'shifted',
+          status: 'valid',
+          rejectReason: undefined,
+          assignedPilot: baseItem.assignedPilot || instructor,
+          instructor: baseItem.instructor || instructor,
+        };
+        notifySync(
+          isZeroShift
+            ? '🕒 Horaire rétabli sur Cycle 1'
+            : `🕒 Séance décalée (${payload.shiftMinutes > 0 ? '+' : ''}${payload.shiftMinutes} min) ➔ ${payload.newStart} - ${payload.newEnd}`
+        );
+      } else if (payload.type === 'merge') {
+        updatedSource = {
+          ...baseItem,
+          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedEnd: baseItem.publishedEnd || endTimeStr,
+          cycle1Status: 'published',
+          cycle2Status: 'merged',
+          mergedIntoKey: payload.targetSlotKey,
+          mergedLabel: payload.targetLabel,
+          status: 'rejected',
+          rejectReason: `Regroupé vers ${payload.targetLabel}`,
+        };
+
+        // Ajouter les chars déplacés sur le créneau cible pour refléter la jauge combinée
+        const targetSess = record.list.find(s => kOf(s) === payload.targetSlotKey);
+        if (targetSess) {
+          const tStart = lc(targetSess.a, record.y, record.m, record.d);
+          const tEnd = lc(targetSess.b, record.y, record.m, record.d);
+          const existingTarget = nextItems.find(it => it.k === payload.targetSlotKey);
+          const tCounts = getValidationItemChars(existingTarget);
+          const combMono = tCounts.mono + existingCounts.mono;
+          const combBi = tCounts.bi + existingCounts.bi;
+          const combChars = tCounts.totalChars + existingCounts.totalChars;
+          const combPeople = tCounts.people + existingCounts.people;
+
+          const updatedTarget: ValidationItem = {
+            ...(existingTarget || {
+              k: payload.targetSlotKey,
+              s: tStart,
+              e: tEnd,
+              publishedStart: tStart,
+              publishedEnd: tEnd,
+              opt: targetSess.opt,
+              over: targetSess.over,
+              lim: targetSess.lim,
+              customTitle: targetSess.customTitle,
+            }),
+            cycle1Status: 'published',
+            cycle2Status:
+              existingTarget?.cycle2Status && existingTarget.cycle2Status !== 'awaiting_booking'
+                ? existingTarget.cycle2Status
+                : 'confirmed',
+            status: 'valid',
+            assignedPilot: existingTarget?.assignedPilot || instructor,
+            instructor: existingTarget?.instructor || instructor,
+            monoCount: combMono,
+            biCount: combBi,
+            charsCount: combChars,
+            pilotsCount: combPeople,
+          };
+
+          nextItems = existingTarget
+            ? nextItems.map(it => (it.k === payload.targetSlotKey ? updatedTarget : it))
+            : [...nextItems, updatedTarget];
+
+          notifySync(
+            combChars > MAX_CHARS_PER_INSTRUCTOR
+              ? `⚠️ Regroupé (${combChars}/${MAX_CHARS_PER_INSTRUCTOR} chars : dépassement moniteur)`
+              : `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${MAX_CHARS_PER_INSTRUCTOR} chars)`
+          );
+        }
+      } else if (payload.type === 'cancel_weather') {
+        updatedSource = {
+          ...baseItem,
+          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedEnd: baseItem.publishedEnd || endTimeStr,
+          cycle1Status: 'published',
+          cycle2Status: 'cancelled_weather',
+          status: 'rejected',
+          rejectReason: payload.reason,
+          rescheduledChars: payload.rescheduledChars ?? 0,
+          lostChars: payload.lostChars ?? 0,
+        };
+        notifySync(`⛔ Annulé météo (Vie 2) : ${payload.reason}`);
+      } else if (payload.type === 'reset_to_cycle1') {
+        updatedSource = {
+          ...baseItem,
+          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedEnd: baseItem.publishedEnd || endTimeStr,
+          actualStart: undefined,
+          actualEnd: undefined,
+          shiftMinutes: undefined,
+          mergedIntoKey: undefined,
+          mergedLabel: undefined,
+          cycle1Status: 'published',
+          cycle2Status: existingCounts.totalChars > 0 ? 'confirmed' : 'awaiting_booking',
+          status: 'valid',
+          rejectReason: undefined,
+        };
+      }
+
+      nextItems = nextItems.some(it => it.k === slotKey)
+        ? nextItems.map(it => (it.k === slotKey ? updatedSource : it))
+        : [...nextItems, updatedSource];
+
+      persistDayValidation(ds, {
+        sig: sigOf(record),
+        ts: Date.now(),
+        k: record.k,
+        cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+        items: nextItems,
+      });
     },
-    [validations, handleSetSlotDecision]
+    [isReadOnly, validations, persistDayValidation]
   );
 
-  // Calculations for tides and windows
-  const EX: TidePoint[] = useMemo(() => {
-    return build(settings.les, settings.pcor, windList);
-  }, [settings.les, settings.pcor, windList]);
+  const handleOpenCycle2FromCalendar = useCallback((ds: string) => {
+    const [yy, mm] = ds.split('-').map(Number);
+    if (Number.isFinite(yy) && Number.isFinite(mm)) {
+      setYear(yy);
+      setMonth(mm - 1);
+    }
+    setFocusDate(ds);
+    setActiveTab(2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
-  // ÉTAPE 3 : Ajustement selon le mode Théorique vs Mode Réel (Modèle Empirique)
-  const isRealMode = settings.calculationMode === 'reel';
-  const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
-  const effectiveThreshold = (settings.L + empiricalOffsetM) - (settings.mg || 0) / 100;
-
-  const tideW = useMemo(() => {
-    return win(EX, effectiveThreshold);
-  }, [EX, effectiveThreshold]);
-
-  const first = EX[0]?.t ?? 0;
-  const last = EX[EX.length - 1]?.t ?? 0;
+  const handleFocusDateChange = useCallback((ds: string) => {
+    setFocusDate(ds);
+    const [yy, mm] = ds.split('-').map(Number);
+    if (Number.isFinite(yy) && Number.isFinite(mm)) {
+      setYear(yy);
+      setMonth(mm - 1);
+    }
+  }, []);
 
   if (!isUnlocked) {
     return <AppLockScreen onUnlock={handleUnlock} />;
@@ -825,35 +1322,21 @@ export const App: React.FC = () => {
         {activeTab === 1 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
         {activeTab === 2 && <TideHeaderCard selectedDate={focusDate} EX={EX} />}
 
-        {/* Navigation tabs */}
+        {/* Navigation tabs (100% Digital : Cycle 2, Stat, Étalonnage, Cycle 1, Hypothèses & Notes, Répertoire) */}
         <nav className="tabs noprint">
-          <button
-            type="button"
-            className={activeTab === 1 ? 'on' : ''}
-            onClick={() => handleTabChange(1)}
-          >
-            Calendrier
-          </button>
           <button
             type="button"
             className={activeTab === 2 ? 'on' : ''}
             onClick={() => handleTabChange(2)}
           >
-            Focus Lendemain
-          </button>
-          <button
-            type="button"
-            className={activeTab === 3 ? 'on' : ''}
-            onClick={() => handleTabChange(3)}
-          >
-            📋 Fiche Agenda Papier
+            ⚡ Adaptation aux conditions météo et prise de décisions
           </button>
           <button
             type="button"
             className={activeTab === 4 ? 'on' : ''}
             onClick={() => handleTabChange(4)}
           >
-            📊 Statistiques & Relevés
+            📊 Statistiques &amp; Relevés
           </button>
           <button
             type="button"
@@ -864,21 +1347,28 @@ export const App: React.FC = () => {
           </button>
           <button
             type="button"
-            className={activeTab === 5 ? 'on' : ''}
-            onClick={() => handleTabChange(5)}
+            className={activeTab === 1 ? 'on' : ''}
+            onClick={() => handleTabChange(1)}
           >
-            👥 Répertoire Clients
+            📅 Validation des créneaux de roulage
           </button>
           <button
             type="button"
             className={activeTab === 6 ? 'on' : ''}
             onClick={() => handleTabChange(6)}
           >
-            💡 Hypothèses & Notes
+            💡 Hypothèses &amp; Notes
+          </button>
+          <button
+            type="button"
+            className={activeTab === 5 ? 'on' : ''}
+            onClick={() => handleTabChange(5)}
+          >
+            👥 Répertoire Clients
           </button>
         </nav>
 
-        {/* Tab 1: Calendrier */}
+        {/* Tab 1: Cycle 1 · Calendrier & Offre Commerciale */}
         {activeTab === 1 && (
           <div id="tab1">
             <CalendarGrid
@@ -895,6 +1385,7 @@ export const App: React.FC = () => {
               last={last}
               windList={windList}
               validations={validations}
+              bookingsMap={bookingsMap}
               customSlotsMap={customSlotsMap}
             />
 
@@ -917,11 +1408,16 @@ export const App: React.FC = () => {
               customSlotsMap={customSlotsMap}
               onUpdateCustomSlots={handleUpdateCustomSlots}
               validations={validations}
+              bookingsMap={bookingsMap}
+              onSaveSlotBookings={handleSaveSlotBookings}
               onValidateDay={handleValidateDay}
               onClearValidation={handleClearValidation}
-              onToggleSlotValidation={handleToggleSlotValidation}
-              onSetSlotDecision={handleSetSlotDecision}
-              onOpenPrintAgenda={() => handleTabChange(3)}
+              onSetSlotCycle1Action={handleSetSlotCycle1Action}
+              onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
+              onNavigateDay={handleNavigateDay}
+              canPrevDay={selectedDate > minDs}
+              canNextDay={selectedDate < maxDs}
+              onOpenCycle2={handleOpenCycle2FromCalendar}
               onOpenObservationModal={slot => setActiveObservationSlot(slot)}
               isReadOnly={isReadOnly}
             />
@@ -964,7 +1460,7 @@ export const App: React.FC = () => {
               userName={currentUser?.displayName || currentUser?.username || 'Jérôme'}
             />
 
-            {/* Lien d'accès direct vers le nouvel onglet Hypothèses & Notes */}
+            {/* Lien d'accès direct vers l'onglet Hypothèses & Notes */}
             <div
               className="card nop"
               style={{
@@ -984,10 +1480,10 @@ export const App: React.FC = () => {
                 <span style={{ fontSize: '1.5rem' }}>💡</span>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--tx)' }}>
-                    Réglages validés et hypothèses du moniteur & notes de calcul
+                    Réglages validés et hypothèses du moniteur &amp; notes de calcul
                   </div>
                   <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
-                    Règles d'enchaînement, pauses, surcote barométrique détaillée et explications techniques.
+                    Règles d&apos;enchaînement, pauses, surcote barométrique détaillée et explications techniques.
                   </div>
                 </div>
               </div>
@@ -996,7 +1492,7 @@ export const App: React.FC = () => {
                 type="button"
                 className="fbtn"
                 onClick={() => {
-                  handleTabChange(5);
+                  handleTabChange(6);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 style={{
@@ -1014,16 +1510,20 @@ export const App: React.FC = () => {
                   gap: '8px',
                 }}
               >
-                <span>Consulter les Hypothèses & Notes</span>
+                <span>Consulter les Hypothèses &amp; Notes</span>
                 <span style={{ fontSize: '0.95rem' }}>➔</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Focus (Limité au lendemain avec tableau Windguru, Exigences 7 & 8) */}
+        {/* Tab 2: Cycle 2 · Adaptation aux conditions météo et prise de décisions */}
         {activeTab === 2 && (
           <FocusTab
+            year={year}
+            month={month}
+            onPrevMonth={handlePrevMonth}
+            onNextMonth={handleNextMonth}
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             EX={EX}
@@ -1032,39 +1532,16 @@ export const App: React.FC = () => {
             last={last}
             windList={windList}
             validations={validations}
-            onValidateDay={handleValidateDay}
-            onClearValidation={handleClearValidation}
-            onToggleSlotValidation={handleToggleSlotValidation}
-            onSetSlotDecision={handleSetSlotDecision}
+            bookingsMap={bookingsMap}
+            onSaveSlotBookings={handleSaveSlotBookings}
+            onCycle2Action={handleCycle2Action}
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
-            onOpenPrintAgenda={() => handleTabChange(3)}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
             isReadOnly={isReadOnly}
-            activeDay={focusDay}
-            onActiveDayChange={setFocusDay}
-          />
-        )}
-
-        {/* Tab 3: Fiche Agenda Papier (Impression et collage agenda) */}
-        {activeTab === 3 && (
-          <PrintableAgendaSheet
-            settings={settings}
-            EX={EX}
-            W={tideW}
-            first={first}
-            last={last}
-            windList={windList}
-            validations={validations}
-            customSlotsMap={customSlotsMap}
-            onUpdateCustomSlots={handleUpdateCustomSlots}
-            selectedDate={selectedDate}
-            onSelectDate={setSelectedDate}
-            onValidateDay={handleValidateDay}
-            onToggleSlotValidation={handleToggleSlotValidation}
-            onSetSlotDecision={handleSetSlotDecision}
-            isReadOnly={isReadOnly}
+            focusDate={focusDate}
+            onFocusDateChange={handleFocusDateChange}
           />
         )}
 

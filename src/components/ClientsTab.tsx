@@ -233,7 +233,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
               }}
             >
               <span>🔒</span>
-              <span>Mode Contrôle (Benoît) : Répertoire en lecture seule</span>
+              <span>Mode Moniteur : Répertoire en lecture seule</span>
             </span>
           )}
 

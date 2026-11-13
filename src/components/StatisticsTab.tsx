@@ -6,6 +6,8 @@ import {
   computeCalibrationStats,
   getStoredObservations,
   exportObservationsAsCsv,
+  getFiscalYearStart,
+  getFiscalYearBounds,
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { StatisticsComparator } from './StatisticsComparator';
@@ -82,12 +84,16 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   // Filtre de population / jours : 'all' | 'holidays_only' | 'weekends_only'
   const [filterScope, setFilterScope] = useState<'all' | 'holidays_only' | 'weekends_only'>('all');
 
-  // Mois / Année d'analyse modifiables directement dans les statistiques (avec les années 2026 à 2031)
+  // Mois / Année d'analyse modifiables directement dans les statistiques
   const [statsYear, setStatsYear] = useState<number>(() => {
     return parseInt(selectedDate.slice(0, 4), 10) || 2026;
   });
   const [statsMonth, setStatsMonth] = useState<number>(() => {
     return parseInt(selectedDate.slice(5, 7), 10) || 11;
+  });
+  // Exercice comptable de Jérôme (1er novembre -> 31 octobre)
+  const [statsFiscalYear, setStatsFiscalYear] = useState<number>(() => {
+    return getFiscalYearStart(selectedDate || '2026-11-01');
   });
   const [statsRefDate, setStatsRefDate] = useState<string>(selectedDate || '2026-11-01');
 
@@ -98,17 +104,27 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       if (y && m) {
         setStatsYear(y);
         setStatsMonth(m);
+        setStatsFiscalYear(getFiscalYearStart(selectedDate));
         setStatsRefDate(selectedDate);
       }
     }
   }, [selectedDate]);
 
-  // Liste des années disponibles dans le jeu de données SHOM (2026 à 2031)
+  // Liste des années civiles disponibles dans le jeu de données SHOM (2026 à 2031)
   const availableYears = useMemo(() => {
     const minY = parseInt(minDs.slice(0, 4), 10) || 2026;
     const maxY = parseInt(maxDs.slice(0, 4), 10) || 2031;
     const list: number[] = [];
     for (let y = minY; y <= maxY; y++) list.push(y);
+    return list;
+  }, []);
+
+  // Liste des exercices comptables disponibles (01/11 -> 31/10)
+  const availableFiscalYears = useMemo(() => {
+    const minFY = getFiscalYearStart(minDs);
+    const maxFY = getFiscalYearStart(maxDs);
+    const list: number[] = [];
+    for (let fy = minFY; fy <= maxFY; fy++) list.push(fy);
     return list;
   }, []);
 
@@ -144,16 +160,20 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     }
 
     if (timeGranularity === 'year') {
-      const yearStart = `${statsYear}-01-01`;
-      const yearEnd = `${statsYear}-12-31`;
+      const bounds = getFiscalYearBounds(statsFiscalYear);
+      const clampedStart = bounds.startDateStr < minDs ? minDs : bounds.startDateStr;
+      const clampedEnd = bounds.endDateStr > maxDs ? maxDs : bounds.endDateStr;
+      const isPartial = bounds.endDateStr > maxDs;
       return {
-        startDateStr: yearStart < minDs ? minDs : yearStart,
-        endDateStr: yearEnd > maxDs ? maxDs : yearEnd,
-        periodTitle: `Année ${statsYear}`,
+        startDateStr: clampedStart,
+        endDateStr: clampedEnd,
+        periodTitle: isPartial
+          ? `${bounds.fullLabel} · jusqu'au ${maxDs.split('-').reverse().join('/')}`
+          : bounds.fullLabel,
       };
     }
 
-    // 'all' : Historique complet (2026 jusqu'à 2031)
+    // 'all' : Historique complet (à partir du 01/11/2026)
     const startY = minDs.slice(0, 4);
     const endY = maxDs.slice(0, 4);
     return {
@@ -161,7 +181,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
       endDateStr: maxDs,
       periodTitle: `Historique global (${startY}–${endY})`,
     };
-  }, [timeGranularity, statsRefDate, statsYear, statsMonth]);
+  }, [timeGranularity, statsRefDate, statsYear, statsMonth, statsFiscalYear]);
 
   // Calcul des statistiques de la période sélectionnée
   const periodStats = useMemo(() => {
@@ -452,7 +472,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           border: '1px solid var(--bd, #e2e8f0)',
         }}
       >
-        {/* Sélecteur de granularité : Semaine / Mois / Année */}
+        {/* Sélecteur de granularité : Semaine / Mois / Exercice comptable (01/11–31/10) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--mu)', textTransform: 'uppercase' }}>
             Période :
@@ -461,7 +481,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             {[
               { id: 'week', label: 'Semaine' },
               { id: 'month', label: 'Mois' },
-              { id: 'year', label: `Année ${statsYear}` },
+              { id: 'year', label: `Exercice ${statsFiscalYear}/${String(statsFiscalYear + 1).slice(-2)}` },
               { id: 'all', label: 'Tout' },
             ].map(tab => (
               <button
@@ -490,24 +510,24 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
               <button
                 type="button"
-                onClick={() => setStatsYear(y => Math.max(availableYears[0], y - 1))}
-                disabled={statsYear <= availableYears[0]}
+                onClick={() => setStatsFiscalYear(fy => Math.max(availableFiscalYears[0], fy - 1))}
+                disabled={statsFiscalYear <= availableFiscalYears[0]}
                 style={{
                   padding: '4px 8px',
                   borderRadius: '6px',
                   border: '1px solid #cbd5e1',
-                  background: statsYear <= availableYears[0] ? '#f1f5f9' : '#fff',
-                  cursor: statsYear <= availableYears[0] ? 'not-allowed' : 'pointer',
+                  background: statsFiscalYear <= availableFiscalYears[0] ? '#f1f5f9' : '#fff',
+                  cursor: statsFiscalYear <= availableFiscalYears[0] ? 'not-allowed' : 'pointer',
                   fontWeight: 800,
                   fontSize: '0.78rem',
                 }}
-                title="Année précédente"
+                title="Exercice comptable précédent"
               >
                 ‹
               </button>
               <select
-                value={statsYear}
-                onChange={e => setStatsYear(Number(e.target.value))}
+                value={statsFiscalYear}
+                onChange={e => setStatsFiscalYear(Number(e.target.value))}
                 style={{
                   padding: '4px 8px',
                   borderRadius: '6px',
@@ -519,124 +539,147 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                {availableYears.map(y => (
-                  <option key={y} value={y}>
-                    Année {y}
-                  </option>
-                ))}
+                {availableFiscalYears.map(fy => {
+                  const b = getFiscalYearBounds(fy);
+                  const isPartial = b.endDateStr > maxDs;
+                  return (
+                    <option key={fy} value={fy}>
+                      Exercice {fy}–{fy + 1} (01/11 → 31/10{isPartial ? ', partiel' : ''})
+                    </option>
+                  );
+                })}
               </select>
               <button
                 type="button"
-                onClick={() => setStatsYear(y => Math.min(availableYears[availableYears.length - 1], y + 1))}
-                disabled={statsYear >= availableYears[availableYears.length - 1]}
+                onClick={() =>
+                  setStatsFiscalYear(fy => Math.min(availableFiscalYears[availableFiscalYears.length - 1], fy + 1))
+                }
+                disabled={statsFiscalYear >= availableFiscalYears[availableFiscalYears.length - 1]}
                 style={{
                   padding: '4px 8px',
                   borderRadius: '6px',
                   border: '1px solid #cbd5e1',
-                  background: statsYear >= availableYears[availableYears.length - 1] ? '#f1f5f9' : '#fff',
-                  cursor: statsYear >= availableYears[availableYears.length - 1] ? 'not-allowed' : 'pointer',
+                  background: statsFiscalYear >= availableFiscalYears[availableFiscalYears.length - 1] ? '#f1f5f9' : '#fff',
+                  cursor: statsFiscalYear >= availableFiscalYears[availableFiscalYears.length - 1] ? 'not-allowed' : 'pointer',
                   fontWeight: 800,
                   fontSize: '0.78rem',
                 }}
-                title="Année suivante"
+                title="Exercice comptable suivant"
               >
                 ›
               </button>
             </div>
           )}
 
-          {timeGranularity === 'month' && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (statsMonth === 1) {
-                    if (statsYear > availableYears[0]) {
+          {timeGranularity === 'month' && (() => {
+            const [minY, minM] = minDs.split('-').map(Number);
+            const [maxY, maxM] = maxDs.split('-').map(Number);
+            const isAtMin = statsYear < minY || (statsYear === minY && statsMonth <= minM);
+            const isAtMax = statsYear > maxY || (statsYear === maxY && statsMonth >= maxM);
+            return (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  disabled={isAtMin}
+                  onClick={() => {
+                    if (isAtMin) return;
+                    if (statsMonth === 1) {
                       setStatsYear(y => y - 1);
                       setStatsMonth(12);
+                    } else {
+                      setStatsMonth(m => m - 1);
                     }
-                  } else {
-                    setStatsMonth(m => m - 1);
-                  }
-                }}
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 800,
-                  fontSize: '0.78rem',
-                }}
-                title="Mois précédent"
-              >
-                ‹
-              </button>
-              <select
-                value={statsMonth}
-                onChange={e => setStatsMonth(Number(e.target.value))}
-                style={{
-                  padding: '4px 6px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  fontWeight: 800,
-                  fontSize: '0.78rem',
-                  background: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                {MOIS.map((mName, idx) => (
-                  <option key={idx + 1} value={idx + 1}>
-                    {mName.charAt(0).toUpperCase() + mName.slice(1)}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={statsYear}
-                onChange={e => setStatsYear(Number(e.target.value))}
-                style={{
-                  padding: '4px 6px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  fontWeight: 800,
-                  fontSize: '0.78rem',
-                  background: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                {availableYears.map(y => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  if (statsMonth === 12) {
-                    if (statsYear < availableYears[availableYears.length - 1]) {
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: isAtMin ? '#f1f5f9' : '#fff',
+                    cursor: isAtMin ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    fontSize: '0.78rem',
+                  }}
+                  title="Mois précédent"
+                >
+                  ‹
+                </button>
+                <select
+                  value={statsMonth}
+                  onChange={e => setStatsMonth(Number(e.target.value))}
+                  style={{
+                    padding: '4px 6px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontWeight: 800,
+                    fontSize: '0.78rem',
+                    background: '#fff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {MOIS.map((mName, idx) => {
+                    const mNum = idx + 1;
+                    const disabled =
+                      (statsYear === minY && mNum < minM) ||
+                      (statsYear === maxY && mNum > maxM);
+                    return (
+                      <option key={mNum} value={mNum} disabled={disabled}>
+                        {mName.charAt(0).toUpperCase() + mName.slice(1)}
+                      </option>
+                    );
+                  })}
+                </select>
+                <select
+                  value={statsYear}
+                  onChange={e => {
+                    const nextY = Number(e.target.value);
+                    setStatsYear(nextY);
+                    if (nextY === minY && statsMonth < minM) setStatsMonth(minM);
+                    if (nextY === maxY && statsMonth > maxM) setStatsMonth(maxM);
+                  }}
+                  style={{
+                    padding: '4px 6px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontWeight: 800,
+                    fontSize: '0.78rem',
+                    background: '#fff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {availableYears.map(y => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={isAtMax}
+                  onClick={() => {
+                    if (isAtMax) return;
+                    if (statsMonth === 12) {
                       setStatsYear(y => y + 1);
                       setStatsMonth(1);
+                    } else {
+                      setStatsMonth(m => m + 1);
                     }
-                  } else {
-                    setStatsMonth(m => m + 1);
-                  }
-                }}
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 800,
-                  fontSize: '0.78rem',
-                }}
-                title="Mois suivant"
-              >
-                ›
-              </button>
-            </div>
-          )}
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: isAtMax ? '#f1f5f9' : '#fff',
+                    cursor: isAtMax ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    fontSize: '0.78rem',
+                  }}
+                  title="Mois suivant"
+                >
+                  ›
+                </button>
+              </div>
+            );
+          })()}
 
           {timeGranularity === 'week' && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -795,14 +838,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </span>
           </div>
 
-          {/* Distinction Vie 1 (faute d'inscrits) vs Vie 2 (annulations météo / terrain) */}
+          {/* Distinction Absentéisme plage / Vie 1 (faute d'inscrits) / Vie 2 (météo & état plage) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '6px', fontSize: '0.70rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#334155', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+              <span>• Non publié C1 / Absentéisme :</span>
+              <strong>{periodStats.instructorAbsentSlotsCount}</strong>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', background: '#f0f9ff', padding: '2px 6px', borderRadius: '4px' }}>
-              <span>• Faute d'inscrits (Vie 1) :</span>
+              <span>• Faute d&apos;inscrits (Vie 1) :</span>
               <strong>{periodStats.unbookedSlotsCount}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#991b1b', background: '#fef2f2', padding: '2px 6px', borderRadius: '4px' }}>
-              <span>• Annulées météo / aléas (Vie 2) :</span>
+              <span>• Annulées météo / plage (Vie 2) :</span>
               <strong>{periodStats.weatherCancelledSlotsCount}</strong>
             </div>
           </div>
@@ -817,7 +864,54 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Dissocie les créneaux fermés sans réservation de ceux annulés alors qu'ils étaient programmés.</em>
+            ℹ️ <em>Dissocie l&apos;absentéisme C1, les créneaux sans réservation et la météo / état plage.</em>
+          </div>
+        </div>
+
+        {/* KPI 2b : Taux d'absentéisme sur la plage (hors météo / clients / état plage) */}
+        <div
+          className="card"
+          style={{
+            padding: '14px 16px',
+            background: 'var(--card)',
+            border: '1.5px solid #475569',
+            borderRadius: '10px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#334155', letterSpacing: '0.04em' }}>
+            🚫 Absentéisme plage (Cycle 1)
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
+            <span style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
+              {periodStats.instructorAbsenteeismRate}%
+            </span>
+            <span style={{ fontSize: '0.74rem', color: '#475569', fontWeight: 700 }}>
+              non publiés
+            </span>
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
+            <strong>{periodStats.instructorAbsentSlotsCount}</strong> créneau{periodStats.instructorAbsentSlotsCount > 1 ? 'x' : ''} sur{' '}
+            <strong>{periodStats.totalPossibleSlots}</strong> possibles
+            {periodStats.instructorAbsentReasonsBreakdown.length > 0 && (
+              <div style={{ marginTop: '4px', fontSize: '0.69rem', color: '#1e293b', fontWeight: 700 }}>
+                Motif #1 : {periodStats.instructorAbsentReasonsBreakdown[0].reason} ({periodStats.instructorAbsentReasonsBreakdown[0].count})
+              </div>
+            )}
+          </div>
+          <div
+            style={{
+              fontSize: '0.67rem',
+              color: '#475569',
+              marginTop: '8px',
+              paddingTop: '6px',
+              borderTop: '1px dashed #cbd5e1',
+              lineHeight: '1.25',
+            }}
+          >
+            ℹ️ <em>Absentéisme sur la plage hors météo, manque de clients ou état de la plage.</em>
           </div>
         </div>
 
@@ -872,11 +966,11 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Remplissage moyen : {periodStats.avgFillRate}% (base 12 pilotes max).</em>
+            ℹ️ <em>Remplissage moyen : {periodStats.avgFillRate}% (base 12 chars max / moniteur · {periodStats.totalRealizedChars} chars sortis).</em>
           </div>
         </div>
 
-        {/* KPI 4 : Répartition Matériel Mono vs Bi */}
+        {/* KPI 4 : Répartition Flotte Chars (Mono / Bi) & Pilotage Cycle 1/2 */}
         <div
           className="card"
           style={{
@@ -890,7 +984,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           }}
         >
           <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--mu)', letterSpacing: '0.04em' }}>
-            🏎️ Flotte Chars (Mono / Bi)
+            🏎️ Flotte Chars ({periodStats.totalRealizedChars} chars)
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginTop: '6px' }}>
             <div>
@@ -904,7 +998,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            {periodStats.totalParticipants > 0 ? `${Math.round((periodStats.totalMono / periodStats.totalParticipants) * 100)}% monoplaces` : 'Répartition conforme aux réservations'}
+            {periodStats.totalMono + periodStats.totalBi > 0
+              ? `${Math.round((periodStats.totalMono / (periodStats.totalMono + periodStats.totalBi)) * 100)}% monoplaces · ${periodStats.cycle2ShiftedCount} décalage(s)`
+              : `${periodStats.cycle1PublishedCount} en attente Cycle 1 · ${periodStats.cycle2ShiftedCount} décalée(s)`}
           </div>
           <div
             style={{
@@ -916,7 +1012,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Répartition du parc de chars mobilisé selon les fiches d'émargement.</em>
+            ℹ️ <em>1 mono = 1 char · 1 bi = 1 char · max 12 chars/moniteur ({periodStats.cycle2MergedCount} fusion(s) Cycle 2).</em>
           </div>
         </div>
       </div>
@@ -1050,6 +1146,71 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </div>
           </div>
         )}
+
+        {/* Détail de l'absentéisme plage & non-publications Cycle 1 (hors météo, clients, état de plage) */}
+        <div
+          style={{
+            marginTop: '16px',
+            padding: '12px 14px',
+            background: '#f8fafc',
+            borderRadius: '10px',
+            border: '1px solid #cbd5e1',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+            <div>
+              <div style={{ fontSize: '0.78rem', fontWeight: 900, color: '#0f172a' }}>
+                🚫 Détail de l&apos;absentéisme sur la plage (hors météo, manque de clients, état de la plage)
+              </div>
+              <div style={{ fontSize: '0.70rem', color: '#64748b' }}>
+                Basé sur les créneaux marqués « À ne pas publier » en Cycle 1 et leurs raisons personnalisées.
+              </div>
+            </div>
+            <span style={{ fontSize: '0.76rem', fontWeight: 900, color: '#334155', background: '#e2e8f0', padding: '3px 9px', borderRadius: '6px' }}>
+              {periodStats.instructorAbsenteeismRate}% ({periodStats.instructorAbsentSlotsCount} créneau{periodStats.instructorAbsentSlotsCount > 1 ? 'x' : ''})
+            </span>
+          </div>
+
+          {periodStats.instructorAbsentReasonsBreakdown.length === 0 ? (
+            <div style={{ fontSize: '0.74rem', color: '#64748b', fontStyle: 'italic' }}>
+              Aucune non-publication enregistrée sur cette période (0% d&apos;absentéisme hors météo/clients/plage).
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {periodStats.instructorAbsentReasonsBreakdown.map(item => (
+                <div
+                  key={item.reason}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(150px, 1.4fr) 1fr auto',
+                    alignItems: 'center',
+                    gap: '10px',
+                    background: '#fff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                  }}
+                >
+                  <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a' }}>
+                    {item.reason}
+                  </span>
+                  <div style={{ height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${Math.min(100, Math.round(item.percentage))}%`,
+                        height: '100%',
+                        background: '#475569',
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, fontFamily: 'monospace', color: '#334155' }}>
+                    {item.count} ({Math.round(item.percentage)}%)
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 5. SECTION 2 : OBSERVATOIRE DES ÉCARTS & CALIBRATION DU SPOT (POINT 2) */}

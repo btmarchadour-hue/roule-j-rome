@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note d'Arbitrage · Organisation 100 % Digitale, Cycle 1 / Cycle 2 &amp; Règle des 12 Chars</title>
+  <style>
+    @page { size: A4 portrait; margin: 10mm 13mm 10mm 13mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.42; font-size: 10.5px;
+    }
+    .toolbar {
+      position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .btn {
+      background: #0284c7; color: #fff; border: none; padding: 7px 14px; border-radius: 6px;
+      font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-secondary { background: #334155; }
+    .sheet {
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 12mm 14mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
+      flex-direction: column; justify-content: space-between;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; }
+    }
+    .header-table { width: 100%; border-bottom: 2px solid #7c3aed; padding-bottom: 7px; margin-bottom: 10px; }
+    .title-badge {
+      display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 7px;
+      border-radius: 4px; font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 15.5px; font-weight: 900; color: #0f172a; line-height: 1.25; }
+    .sub { color: #475569; font-size: 9.5px; }
+    .meta-box {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px;
+      margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.2px;
+    }
+    .section-box {
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 11px; margin-bottom: 9px;
+    }
+    .section-title {
+      font-size: 10.8px; font-weight: 900; color: #0284c7; margin-bottom: 5px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 3px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .card-mini {
+      background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; padding: 7px 9px; font-size: 9.2px;
+    }
+    .question-box {
+      background: #fffbeb; border: 2px solid #f59e0b; border-radius: 6px; padding: 9px 11px; margin-bottom: 9px;
+    }
+    .choice-row {
+      display: flex; gap: 14px; margin: 6px 0; font-size: 9.5px; font-weight: 800; color: #0f172a; flex-wrap: wrap;
+    }
+    .handwriting-box {
+      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 5px 8px; height: 42px; position: relative;
+    }
+    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 15px; }
+    .handwriting-label { font-size: 8px; color: #94a3b8; font-style: italic; position: absolute; top: 2px; left: 6px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 8.5px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 13px;">
+      ⚡ Char à Voile du Bout du Monde · Note d'Arbitrage Cycle 1 / Cycle 2 &amp; Organisation 100 % Digitale
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer / PDF (A4)</button>
+      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="printable-note">
+    <div>
+      <table class="header-table">
+        <tr>
+          <td>
+            <span class="title-badge">Arbitrage Organisation &amp; Passage au 100 % Digital</span>
+            <h1>Dissociation Cycle 1 / Cycle 2, Règle des 12 Chars &amp; Cadence de Publication</h1>
+            <div class="sub">Nouveau fonctionnement opérationnel sans papier pour Char à Voile du Bout du Monde</div>
+          </td>
+          <td style="text-align: right; vertical-align: bottom;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 11.5px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="meta-box">
+        <div><strong>Destinataire :</strong> Jérôme Bouchez (Moniteur diplômé titulaire)</div>
+        <div><strong>Auteurs :</strong> Benoît Marchadour (Concepteur) &amp; Sheldon</div>
+        <div><strong>Statut :</strong> En production sur l'application · 1 point à trancher</div>
+      </div>
+
+      <!-- 1. Les 3 piliers validés et déjà en place -->
+      <div class="section-box" style="background: #f0f9ff; border-color: #7dd3fc;">
+        <div class="section-title" style="color: #0369a1;">
+          <span>✅</span>
+          <span>1. Ce qui est acté et opérationnel dès aujourd'hui dans « Ça roule ? »</span>
+        </div>
+        <div class="grid-2">
+          <div class="card-mini" style="background: #ffffff; border-color: #0284c7;">
+            <strong style="color: #0369a1;">📅 Cycle 1 · Offre Commerciale (Jour par jour)</strong>
+            <div style="color: #334155; margin-top: 3px; line-height: 1.38;">
+              • Ouverture commerciale des créneaux calculés (marées &amp; règle 09h00) sans exiger d'inscrits à l'avance.<br>
+              • <strong>Stabilité totale :</strong> les variations météo court-terme ne basculent plus le Cycle 1 en alerte rouge tant qu'il n'y a aucun inscrit.<br>
+              • Clôture propre à 0 inscrit en <strong>Vie 1 (Faute d'inscrits)</strong>.
+            </div>
+          </div>
+
+          <div class="card-mini" style="background: #ffffff; border-color: #7c3aed;">
+            <strong style="color: #6d28d9;">⚡ Cycle 2 · Pilotage Terrain (Dès le 1er char !)</strong>
+            <div style="color: #334155; margin-top: 3px; line-height: 1.38;">
+              • Déclenché automatiquement <strong>dès la 1ère inscription</strong> (≥ 1 char engagé).<br>
+              • Outils terrain en un clic : <strong>Maintenir</strong>, <strong>Décaler</strong> (horaire Cycle 1 mémorisé), <strong>Regrouper / Fusionner</strong>, <strong>Annuler météo (Vie 2)</strong> et <strong>REX</strong>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Règle capacité & 100% digital & SMS -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>⚙️</span>
+          <span>2. Jauge Matériel (12 Chars Max), Organisation 100 % Digitale &amp; SMS</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+          <div class="card-mini" style="border-left: 3px solid #16a34a;">
+            <strong style="color: #166534;">🚗 Règle des 12 Chars / Moniteur</strong>
+            <div style="color: #334155; margin-top: 2px;">
+              La limite d'encadrement s'exprime bien en <strong>nombre de chars</strong> (1 monoplace = 1 char, 1 biplace = 1 char) et non en nombre de personnes : <strong>12 chars max</strong> (ex : 10 mono + 2 bi = 12 chars = 100 %, pour 14 pilotes/passagers).
+            </div>
+          </div>
+          <div class="card-mini" style="border-left: 3px solid #0284c7;">
+            <strong style="color: #0369a1;">📱 Zéro Papier · 100 % Digital</strong>
+            <div style="color: #334155; margin-top: 2px;">
+              L'ancien onglet <em>« Fiche Agenda Papier »</em> est définitivement supprimé. La saisie des réservations (noms, téléphone, mono/bi, règlement) se fait directement dans l'application, en mobilité sur téléphone ou PC.
+            </div>
+          </div>
+          <div class="card-mini" style="border-left: 3px solid #64748b;">
+            <strong style="color: #334155;">📲 SMS clients en attente</strong>
+            <div style="color: #334155; margin-top: 2px;">
+              Conformément au point convenu, l'envoi automatique de SMS en cas de décalage, regroupement ou Vie 2 est mis en attente de connexion avec le <strong>futur outil de réservation</strong>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Question d'arbitrage pour Jérôme -->
+      <div class="question-box">
+        <div class="section-title" style="color: #b45309; border-bottom-color: #fde68a;">
+          <span>❓</span>
+          <span>3. Question à Trancher avec Jérôme : Cadence de Publication du Cycle 1 à Long Terme</span>
+        </div>
+        <p style="margin: 0 0 6px; font-size: 9.8px; color: #78350f; line-height: 1.45;">
+          Aujourd'hui, nous avons conservé la publication commerciale du <strong>Cycle 1 strictement jour par jour</strong> depuis le Calendrier afin de rester parfaitement alignés avec tes habitudes de préparation.
+          À l'usage avec la digitalisation complète, souhaites-tu conserver uniquement le bouton <em>« Jour par jour »</em>, ou aimerais-tu aussi un bouton optionnel pour ouvrir une <strong>semaine complète ou un mois entier d'un seul coup</strong> (hors jours à fort vent/morts-eaux atypiques) tout en gardant la main jour par jour ?
+        </p>
+
+        <div class="choice-row">
+          <span>☐ Option A : Rester 100 % jour par jour (plus de contrôle fin sur chaque marée)</span>
+          <span>☐ Option B : Ajouter une aide à l'ouverture par semaine / mois entier (avec ajustement jour par jour derrière)</span>
+        </div>
+
+        <div class="handwriting-box" style="margin-top: 6px;">
+          <span class="handwriting-label">Réponse / retour d'usage de Jérôme après quelques jours de prise en main :</span>
+          <div class="line"></div>
+          <div class="line"></div>
+        </div>
+      </div>
+
+      <!-- 4. Signatures -->
+      <div class="section-box" style="margin-bottom: 0;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div>
+            <div style="font-size: 8.5px; font-weight: 800; color: #475569; text-transform: uppercase;">Jérôme Bouchez (Moniteur diplômé titulaire) :</div>
+            <div style="height: 26px; border-bottom: 1px solid #94a3b8; margin-top: 4px;"></div>
+            <div style="font-size: 8px; color: #64748b;">Avis &amp; Date</div>
+          </div>
+          <div>
+            <div style="font-size: 8.5px; font-weight: 800; color: #475569; text-transform: uppercase;">Benoît Marchadour (Concepteur) :</div>
+            <div style="height: 26px; border-bottom: 1px solid #94a3b8; margin-top: 4px;"></div>
+            <div style="font-size: 8px; color: #64748b;">Date</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Note d'Arbitrage Opérationnel</span>
+      <span>Échange Jérôme (Moniteur) &amp; Benoît (Concepteur) · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    function copyDocumentForWord() {
+      const doc = document.getElementById('printable-note');
+      if (!doc) return;
+      const range = document.createRange();
+      range.selectNode(doc);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      try {
+        if (document.execCommand('copy')) alert('✓ Note copiée dans le presse-papiers !');
+      } catch (err) {
+        alert('Utilisez Ctrl+A puis Ctrl+C.');
+      }
+      window.getSelection().removeAllRanges();
+    }
+  </script>
+</body>
+</html>

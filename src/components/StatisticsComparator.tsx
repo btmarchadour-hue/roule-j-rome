@@ -1,7 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { AppSettings, CustomSlotsMap, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
-import { computePeriodStats, PeriodStatsResult, CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
-import { minDs, maxDs, MOIS, p2, shf } from '../utils/tides';
+import {
+  computePeriodStats,
+  PeriodStatsResult,
+  CANCELLATION_REASONS_INFO,
+  getFiscalYearStart,
+  getFiscalYearBounds,
+  getFiscalQuarterBounds,
+  FISCAL_QUARTERS,
+  FISCAL_MONTHS_ORDER,
+} from '../utils/statisticsEngine';
+import { minDs, maxDs, MOIS, p2 } from '../utils/tides';
 
 interface StatisticsComparatorProps {
   settings: AppSettings;
@@ -27,29 +36,36 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
   validations,
   customSlotsMap,
   observations,
-  availableYears,
 }) => {
+  const availableFiscalYears = useMemo(() => {
+    const minFY = getFiscalYearStart(minDs);
+    const maxFY = getFiscalYearStart(maxDs);
+    const list: number[] = [];
+    for (let fy = minFY; fy <= maxFY; fy++) list.push(fy);
+    return list;
+  }, []);
+
   // Preset actif
   const [preset, setPreset] = useState<ComparatorPreset>('year_vs_year');
 
   // Filtre contextuel : Tous les jours ou week-ends
   const [filterScope, setFilterScope] = useState<'all' | 'weekends_only'>('all');
 
-  // Paramètres pour le preset Année vs Année
+  // Paramètres pour le preset Exercice comptable vs Exercice comptable (01/11 -> 31/10)
   const [yearA, setYearA] = useState<number>(2026);
   const [yearB, setYearB] = useState<number>(2027);
 
-  // Paramètres pour le preset Même mois
+  // Paramètres pour le preset Même mois (rattaché à l'exercice comptable)
   const [monthSelected, setMonthSelected] = useState<number>(11); // 1-12
   const [monthYearA, setMonthYearA] = useState<number>(2026);
   const [monthYearB, setMonthYearB] = useState<number>(2027);
 
-  // Paramètres pour le preset Saison estivale (Juillet-Août)
+  // Paramètres pour le preset Saison estivale (Juillet-Août de l'exercice comptable)
   const [summerYearA, setSummerYearA] = useState<number>(2026);
   const [summerYearB, setSummerYearB] = useState<number>(2027);
 
-  // Paramètres pour le preset Trimestre
-  const [quarterIdx, setQuarterIdx] = useState<number>(3); // 1: T1 (Jan-Mar), 2: T2 (Avr-Juin), 3: T3 (Juil-Sep), 4: T4 (Oct-Déc)
+  // Paramètres pour le preset Trimestre comptable (T1 Nov-Janv -> T4 Août-Oct)
+  const [quarterIdx, setQuarterIdx] = useState<number>(1); // 1: Nov-Janv, 2: Févr-Avr, 3: Mai-Juil, 4: Août-Oct
   const [quarterYearA, setQuarterYearA] = useState<number>(2026);
   const [quarterYearB, setQuarterYearB] = useState<number>(2027);
 
@@ -69,44 +85,44 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
     let titleB = '';
 
     if (preset === 'year_vs_year') {
-      sA = `${yearA}-01-01`;
-      eA = `${yearA}-12-31`;
-      titleA = `Année ${yearA}`;
-      sB = `${yearB}-01-01`;
-      eB = `${yearB}-12-31`;
-      titleB = `Année ${yearB}`;
+      const bA = getFiscalYearBounds(yearA);
+      const bB = getFiscalYearBounds(yearB);
+      sA = bA.startDateStr;
+      eA = bA.endDateStr;
+      titleA = `Ex. ${yearA}–${yearA + 1}`;
+      sB = bB.startDateStr;
+      eB = bB.endDateStr;
+      titleB = `Ex. ${yearB}–${yearB + 1}`;
     } else if (preset === 'same_month') {
       const monthName = MOIS[monthSelected - 1];
-      const lastDayA = new Date(monthYearA, monthSelected, 0).getDate();
-      const lastDayB = new Date(monthYearB, monthSelected, 0).getDate();
-      sA = `${monthYearA}-${p2(monthSelected)}-01`;
-      eA = `${monthYearA}-${p2(monthSelected)}-${p2(lastDayA)}`;
-      titleA = `${monthName} ${monthYearA}`;
-      sB = `${monthYearB}-${p2(monthSelected)}-01`;
-      eB = `${monthYearB}-${p2(monthSelected)}-${p2(lastDayB)}`;
-      titleB = `${monthName} ${monthYearB}`;
+      const calYearA = monthSelected >= 11 ? monthYearA : monthYearA + 1;
+      const calYearB = monthSelected >= 11 ? monthYearB : monthYearB + 1;
+      const lastDayA = new Date(calYearA, monthSelected, 0).getDate();
+      const lastDayB = new Date(calYearB, monthSelected, 0).getDate();
+      sA = `${calYearA}-${p2(monthSelected)}-01`;
+      eA = `${calYearA}-${p2(monthSelected)}-${p2(lastDayA)}`;
+      titleA = `${monthName} ${calYearA} (Ex. ${monthYearA}/${String(monthYearA + 1).slice(-2)})`;
+      sB = `${calYearB}-${p2(monthSelected)}-01`;
+      eB = `${calYearB}-${p2(monthSelected)}-${p2(lastDayB)}`;
+      titleB = `${monthName} ${calYearB} (Ex. ${monthYearB}/${String(monthYearB + 1).slice(-2)})`;
     } else if (preset === 'summer_season') {
-      sA = `${summerYearA}-07-01`;
-      eA = `${summerYearA}-08-31`;
-      titleA = `Été ${summerYearA} (Juil–Août)`;
-      sB = `${summerYearB}-07-01`;
-      eB = `${summerYearB}-08-31`;
-      titleB = `Été ${summerYearB} (Juil–Août)`;
+      const calSummerA = summerYearA + 1;
+      const calSummerB = summerYearB + 1;
+      sA = `${calSummerA}-07-01`;
+      eA = `${calSummerA}-08-31`;
+      titleA = `Été ${calSummerA} (Ex. ${summerYearA}/${String(summerYearA + 1).slice(-2)})`;
+      sB = `${calSummerB}-07-01`;
+      eB = `${calSummerB}-08-31`;
+      titleB = `Été ${calSummerB} (Ex. ${summerYearB}/${String(summerYearB + 1).slice(-2)})`;
     } else if (preset === 'quarter') {
-      const qNames = ['T1 (Janv–Mars)', 'T2 (Avr–Juin)', 'T3 (Juil–Sept)', 'T4 (Oct–Déc)'];
-      const qRanges = [
-        ['01-01', '03-31'],
-        ['04-01', '06-30'],
-        ['07-01', '09-30'],
-        ['10-01', '12-31'],
-      ];
-      const range = qRanges[quarterIdx - 1];
-      sA = `${quarterYearA}-${range[0]}`;
-      eA = `${quarterYearA}-${range[1]}`;
-      titleA = `${qNames[quarterIdx - 1]} ${quarterYearA}`;
-      sB = `${quarterYearB}-${range[0]}`;
-      eB = `${quarterYearB}-${range[1]}`;
-      titleB = `${qNames[quarterIdx - 1]} ${quarterYearB}`;
+      const qA = getFiscalQuarterBounds(quarterYearA, quarterIdx);
+      const qB = getFiscalQuarterBounds(quarterYearB, quarterIdx);
+      sA = qA.startDateStr;
+      eA = qA.endDateStr;
+      titleA = qA.label;
+      sB = qB.startDateStr;
+      eB = qB.endDateStr;
+      titleB = qB.label;
     } else {
       // Custom
       sA = customStartA;
@@ -328,10 +344,10 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
               ⚖️ Comparateur Opérationnel & Multi-Saisons
             </div>
             <h3 style={{ margin: '2px 0 0', fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
-              Comparer deux périodes (Année N vs N-1, Mois, Trimestres ou Sur-mesure)
+              Comparer deux périodes (Exercices 01/11–31/10, Mois, Trimestres ou Sur-mesure)
             </h3>
             <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '2px' }}>
-              Mesurez l'évolution de la fréquentation, l'impact météo sur les créneaux praticables et le taux de concrétisation.
+              Mesurez l'évolution de la fréquentation, l'impact météo sur les créneaux praticables et le taux de concrétisation sur l'année comptable de Jérôme.
             </div>
           </div>
 
@@ -364,10 +380,10 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
           </span>
           <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', flexWrap: 'wrap', gap: '2px' }}>
             {[
-              { id: 'year_vs_year', label: '📅 Année vs Année' },
-              { id: 'same_month', label: '🗓️ Même mois (N vs N-1)' },
+              { id: 'year_vs_year', label: '📅 Exercice vs Exercice (01/11–31/10)' },
+              { id: 'same_month', label: '🗓️ Même mois (Ex. N vs N-1)' },
               { id: 'summer_season', label: '☀️ Saison Estivale (Juil-Août)' },
-              { id: 'quarter', label: '📊 Trimestre / Saison' },
+              { id: 'quarter', label: '📊 Trimestre comptable' },
               { id: 'custom', label: '✏️ Personnalisé' },
             ].map(p => (
               <button
@@ -412,14 +428,16 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
 
             {preset === 'year_vs_year' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Année :</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Exercice :</span>
                 <select
                   value={yearA}
                   onChange={e => setYearA(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      {fy}–{fy + 1} (01/11 → 31/10{getFiscalYearBounds(fy).endDateStr > maxDs ? ', partiel' : ''})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -432,17 +450,24 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   onChange={e => setMonthSelected(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {MOIS.map((m, idx) => (
-                    <option key={idx + 1} value={idx + 1}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
-                  ))}
+                  {FISCAL_MONTHS_ORDER.map(mNum => {
+                    const mName = MOIS[mNum - 1];
+                    return (
+                      <option key={mNum} value={mNum}>
+                        {mName.charAt(0).toUpperCase() + mName.slice(1)}
+                      </option>
+                    );
+                  })}
                 </select>
                 <select
                   value={monthYearA}
                   onChange={e => setMonthYearA(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      Ex. {fy}–{fy + 1}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -450,14 +475,16 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
 
             {preset === 'summer_season' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Été :</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Saison :</span>
                 <select
                   value={summerYearA}
                   onChange={e => setSummerYearA(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.filter(fy => `${fy + 1}-08-31` <= maxDs).map(fy => (
+                    <option key={fy} value={fy}>
+                      Été {fy + 1} (Ex. {fy}–{fy + 1})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -470,18 +497,19 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   onChange={e => setQuarterIdx(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  <option value={1}>T1 (Janv–Mars)</option>
-                  <option value={2}>T2 (Avr–Juin)</option>
-                  <option value={3}>T3 (Juil–Sept)</option>
-                  <option value={4}>T4 (Oct–Déc)</option>
+                  {FISCAL_QUARTERS.map(q => (
+                    <option key={q.id} value={q.id}>{q.label}</option>
+                  ))}
                 </select>
                 <select
                   value={quarterYearA}
                   onChange={e => setQuarterYearA(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      Ex. {fy}–{fy + 1}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -522,14 +550,16 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
 
             {preset === 'year_vs_year' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Année :</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Exercice :</span>
                 <select
                   value={yearB}
                   onChange={e => setYearB(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      {fy}–{fy + 1} (01/11 → 31/10{getFiscalYearBounds(fy).endDateStr > maxDs ? ', partiel' : ''})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -545,8 +575,10 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   onChange={e => setMonthYearB(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      Ex. {fy}–{fy + 1}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -554,14 +586,16 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
 
             {preset === 'summer_season' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Été :</span>
+                <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>Saison :</span>
                 <select
                   value={summerYearB}
                   onChange={e => setSummerYearB(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.filter(fy => `${fy + 1}-08-31` <= maxDs).map(fy => (
+                    <option key={fy} value={fy}>
+                      Été {fy + 1} (Ex. {fy}–{fy + 1})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -570,15 +604,17 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
             {preset === 'quarter' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.76rem', fontWeight: 700 }}>
-                  {['T1 (Janv–Mars)', 'T2 (Avr–Juin)', 'T3 (Juil–Sept)', 'T4 (Oct–Déc)'][quarterIdx - 1]}
+                  {FISCAL_QUARTERS.find(q => q.id === quarterIdx)?.label}
                 </span>
                 <select
                   value={quarterYearB}
                   onChange={e => setQuarterYearB(Number(e.target.value))}
                   style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.8rem' }}
                 >
-                  {availableYears.map(y => (
-                    <option key={y} value={y}>{y}</option>
+                  {availableFiscalYears.map(fy => (
+                    <option key={fy} value={fy}>
+                      Ex. {fy}–{fy + 1}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -827,9 +863,9 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
               {/* Ligne 6 : Taux de remplissage moyen */}
               <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                 <td style={{ padding: '10px 10px', fontWeight: 800 }}>
-                  📈 Taux de remplissage moyen
+                  📈 Taux de remplissage moyen (chars)
                   <div style={{ fontSize: '0.67rem', color: '#64748b', fontWeight: 400 }}>
-                    Remplissage des séances (base 12 places / séance)
+                    Remplissage des séances (base 12 chars max / moniteur)
                   </div>
                 </td>
                 <td style={{ padding: '10px 10px', fontWeight: 800, fontFamily: 'monospace' }}>
@@ -842,7 +878,7 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   {renderDeltaBadge(deltas.diffFillRate, ' pts')}
                 </td>
                 <td style={{ padding: '10px 10px', fontSize: '0.70rem', color: '#64748b' }}>
-                  Capacité d'encadrement optimisée à {statsB.avgFillRate}% sur B
+                  Capacité d&apos;encadrement optimisée à {statsB.avgFillRate}% sur B ({statsB.totalRealizedChars} chars)
                 </td>
               </tr>
 
@@ -855,10 +891,10 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   </div>
                 </td>
                 <td style={{ padding: '10px 10px' }}>
-                  <span style={{ fontWeight: 800 }}>{statsA.totalMono}</span> Mono · <span style={{ fontWeight: 800 }}>{statsA.totalBi}</span> Bi
+                  <span style={{ fontWeight: 800 }}>{statsA.totalMono}</span> Mono · <span style={{ fontWeight: 800 }}>{statsA.totalBi}</span> Bi ({statsA.totalRealizedChars} chars)
                 </td>
                 <td style={{ padding: '10px 10px' }}>
-                  <span style={{ fontWeight: 800 }}>{statsB.totalMono}</span> Mono · <span style={{ fontWeight: 800 }}>{statsB.totalBi}</span> Bi
+                  <span style={{ fontWeight: 800 }}>{statsB.totalMono}</span> Mono · <span style={{ fontWeight: 800 }}>{statsB.totalBi}</span> Bi ({statsB.totalRealizedChars} chars)
                 </td>
                 <td style={{ padding: '10px 10px' }}>
                   <div style={{ fontSize: '0.70rem', fontWeight: 700 }}>
@@ -866,8 +902,8 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                   </div>
                 </td>
                 <td style={{ padding: '10px 10px', fontSize: '0.70rem', color: '#64748b' }}>
-                  {statsB.totalParticipants > 0
-                    ? `${Math.round((statsB.totalMono / statsB.totalParticipants) * 100)}% monoplaces en B`
+                  {statsB.totalMono + statsB.totalBi > 0
+                    ? `${Math.round((statsB.totalMono / (statsB.totalMono + statsB.totalBi)) * 100)}% monoplaces en B`
                     : 'N/A'}
                 </td>
               </tr>

@@ -122,9 +122,34 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
     }
   };
 
-  // Les 7 Notes Techniques et Documents Structurés par Thème
+  // Les Notes Techniques et Documents Structurés par Thème
   const notesList = useMemo<TechNoteItem[]>(() => {
     return [
+      {
+        id: 'note-arbitrage-cycle1-cycle2-digital',
+        category: 'reunion',
+        categoryLabel: 'Arbitrage Organisation',
+        categoryColor: '#7c3aed',
+        icon: '⚡',
+        title: 'Note Jérôme : Cycle 1 / Cycle 2, Règle des 12 Chars & Passage au 100 % Digital',
+        subtitle: 'Dissociation offre/terrain, abandon du papier, SMS reportés & question sur la cadence Cycle 1',
+        summary:
+          'Point de cadrage et question directe à Jérôme suite au passage à l’organisation 100 % digitale : capacité fixée à 12 chars max/moniteur (mono + bi), Cycle 2 déclenché dès la 1ère inscription, et arbitrage long terme sur l’ouverture Cycle 1 jour par jour vs semaine/mois.',
+        keyPoints: [
+          'Cycle 1 (Offre commerciale) : maintenu jour par jour, protégé contre les alertes météo tant que 0 char inscrit.',
+          'Cycle 2 (Pilotage terrain) : déclenché dès le 1er char inscrit (Maintenir, Décaler, Regrouper, Vie 2, REX).',
+          'Capacité : règle officielle en nombre de chars (1 mono = 1 char, 1 bi = 1 char, max 12 chars / moniteur).',
+          '100 % Digital : suppression définitive de la Fiche Agenda Papier · SMS clients reportés au nouvel outil de résa.',
+          'Question pour Jérôme : garder uniquement le « jour par jour » en Cycle 1 ou ajouter une option semaine/mois ?',
+        ],
+        docUrl: '/note_arbitrage_cycle1_cycle2_digital.html',
+        docBtnLabel: '⚡ Ouvrir la Note d’Arbitrage pour Jérôme (A4 / Word)',
+        statusBadge: {
+          label: 'À arbitrer avec Jérôme',
+          bg: '#fef3c7',
+          color: '#92400e',
+        },
+      },
       {
         id: 'note-evolution-deux-temps',
         category: 'reservation',
@@ -207,10 +232,10 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         title: 'Note Stratégique : Choix du Gestionnaire de Réservation',
         subtitle: 'Remplacement de Booking Activities & Architecture des « Deux Ponts »',
         summary:
-          'Notre application reste le cerveau métier exclusif (calcul des marées glissantes, règle de 50, AROME, Fiche Agenda). L’outil de vente externe assure la billetterie et le paiement sécurisé.',
+          'Notre application reste le cerveau métier exclusif (calcul des marées glissantes, règle de 50, AROME, inscriptions numériques). L’outil de vente externe assure la billetterie, le paiement sécurisé et l’automatisation future des SMS.',
         keyPoints: [
-          'Pont 1 (Amont) : Publication automatique des bons créneaux calculés dans l’agenda de vente.',
-          'Pont 2 (Aval) : Rapatriement automatique des inscrits pour pré-remplir la Fiche Agenda papier.',
+          'Pont 1 (Amont) : Publication automatique des bons créneaux calculés (Cycle 1) dans l’agenda de vente.',
+          'Pont 2 (Aval) : Rapatriement automatique des inscrits pour déclencher le Cycle 2 et pré-remplir les séances en numérique.',
           'Comparatif 4 solutions : Activiti.fr (spécialiste voile/marées), RésaMinute, Billetweb (0 € abonnement), Regiondo.',
           'Question clé : Choix entre forfait fixe sans commission (Activiti) ou commission à la vente (Billetweb).',
         ],

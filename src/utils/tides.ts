@@ -825,6 +825,9 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
       st: 'none' as const,
       valCount: 0,
       rejCount: 0,
+      cycle2Count: 0,
+      closedNoBookingsCount: 0,
+      notPublishedCount: 0,
       totalCount: f.list.length,
       isPartial: false,
     };
@@ -832,24 +835,61 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
 
   const validItems = V.items.filter(x => x.status !== 'rejected');
   const rejectedItems = V.items.filter(x => x.status === 'rejected');
+  const cycle2Items = V.items.filter(
+    x =>
+      x.cycle1Status !== 'not_published' &&
+      !x.nonPublishReason &&
+      ((x.charsCount ?? 0) > 0 ||
+        (x.pilotsCount ?? 0) > 0 ||
+        (x.cycle2Status != null && x.cycle2Status !== 'awaiting_booking'))
+  );
+  const notPublishedItems = rejectedItems.filter(
+    x =>
+      x.cycle1Status === 'not_published' ||
+      Boolean(x.nonPublishReason) ||
+      (x.rejectReason || '').toLowerCase().includes('non publié') ||
+      (x.rejectReason || '').toLowerCase().includes('non publie')
+  );
+  const closedNoBookingsItems = rejectedItems.filter(
+    x =>
+      x.cycle1Status !== 'not_published' &&
+      !x.nonPublishReason &&
+      (x.cycle1Status === 'closed_no_bookings' ||
+        (x.rejectReason || '').toLowerCase().includes('inscr') ||
+        (x.rejectReason || '').toLowerCase().includes('client'))
+  );
+
   const valKeys = new Set(V.items.map(x => x.k));
   const curMap = new Map(f.list.map(x => [kOf(x), x]));
   const missing = V.items.filter(x => !curMap.has(x.k));
+  const missingCycle2 = missing.filter(
+    x =>
+      x.cycle1Status !== 'not_published' &&
+      !x.nonPublishReason &&
+      ((x.charsCount ?? 0) > 0 ||
+        (x.pilotsCount ?? 0) > 0 ||
+        (x.cycle2Status != null && x.cycle2Status !== 'awaiting_booking'))
+  );
   const kchg = V.k !== f.k;
   const isPartial = validItems.length < f.list.length;
   const isPast = f.ds < tdy();
 
-  // Pour les jours passés, les séances ont déjà eu lieu :
-  // On ne doit JAMAIS afficher d'alerte de modification météo ou d'avertissement de réévaluation.
-  if (!isPast && (missing.length > 0 || kchg)) {
+  // Dissociation Cycle 1 / Cycle 2 :
+  // - Cycle 1 (offre commerciale sans inscrit) reste librement modifiable sans déclencher d'alerte Cycle 2.
+  // - Seuls les créneaux déjà engagés en Cycle 2 (>= 1 char inscrit) déclenchent une alerte tactique si retirés ou impactés météo.
+  const hasCycle2Booked = cycle2Items.length > 0;
+  if (!isPast && (missingCycle2.length > 0 || (kchg && hasCycle2Booked))) {
     return {
       st: 'chg' as const,
       V,
       add: f.list.filter(x => !valKeys.has(kOf(x))),
       rem: missing,
-      kchg,
+      kchg: kchg && hasCycle2Booked,
       valCount: validItems.length,
       rejCount: rejectedItems.length,
+      cycle2Count: cycle2Items.length,
+      closedNoBookingsCount: closedNoBookingsItems.length,
+      notPublishedCount: notPublishedItems.length,
       totalCount: f.list.length,
       isPartial,
     };
@@ -860,6 +900,9 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
     V,
     valCount: validItems.length,
     rejCount: rejectedItems.length,
+    cycle2Count: cycle2Items.length,
+    closedNoBookingsCount: closedNoBookingsItems.length,
+    notPublishedCount: notPublishedItems.length,
     totalCount: f.list.length,
     isPartial,
   };
@@ -1042,22 +1085,38 @@ export function exportMonthCsv(
 
 export function exportValidCsv(validations: ValidationsMap, cap: number) {
   const rows: (string | number)[][] = [
-    ['Date', 'Début', 'Fin', 'Décision', 'Type', 'Dépassement (min)', 'Limité par', 'Places', 'Motif / Notes', 'Enregistré le']
+    ['Date', 'Début Cycle 1', 'Fin Cycle 1', 'Début Cycle 2', 'Fin Cycle 2', 'Décision', 'Phase', 'Type', 'Chars engagés', 'Dépassement (min)', 'Limité par', 'Motif / Notes', 'Enregistré le']
   ];
   for (const ds of Object.keys(validations).sort()) {
     const [y, m, d] = ds.split('-');
     for (const x of validations[ds].items) {
       const isRej = x.status === 'rejected';
+      const typedChars =
+        x.monoCount != null || x.biCount != null ? (x.monoCount || 0) + (x.biCount || 0) : undefined;
+      const chars = x.charsCount ?? typedChars ?? (isRej ? 0 : (x.pilotsCount || cap || 1));
+      const phase =
+        x.cycle1Status === 'not_published' || x.nonPublishReason
+          ? 'Cycle 1 (Non publié)'
+          : x.cycle2Status && x.cycle2Status !== 'awaiting_booking'
+          ? `Cycle 2 (${x.cycle2Status})`
+          : x.cycle1Status || (isRej ? 'Clôturé' : 'Cycle 1');
       rows.push([
         d + '/' + m + '/' + y,
-        x.s.replace('h', ':'),
-        x.e.replace('h', ':'),
-        isRej ? 'REFUSÉ' : 'VALIDÉ',
+        (x.publishedStart || x.s).replace('h', ':'),
+        (x.publishedEnd || x.e).replace('h', ':'),
+        (x.actualStart || x.s).replace('h', ':'),
+        (x.actualEnd || x.e).replace('h', ':'),
+        x.cycle1Status === 'not_published' || x.nonPublishReason
+          ? 'NON PUBLIÉ (C1)'
+          : isRej
+          ? 'REFUSÉ / ANNULÉ'
+          : 'OUVERT / VALIDÉ',
+        phase,
         x.customTitle || (x.opt ? 'optionnel' : 'séance'),
+        isRej ? 0 : chars,
         x.over || '',
         x.lim || '',
-        isRej ? 0 : (cap || 1),
-        x.rejectReason || '',
+        x.nonPublishReason ? `Non publié : ${x.nonPublishReason}` : x.rejectReason || '',
         new Date(validations[ds].ts).toLocaleString('fr-FR'),
       ]);
     }

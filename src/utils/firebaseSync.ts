@@ -27,6 +27,9 @@ export interface AgendaBookingItem {
   email?: string;
   pax?: string;
   chars: string;
+  monoCount?: number;
+  biCount?: number;
+  peopleCount?: number;
   formula: string;
   payment: string;
   status: 'valid' | 'pending' | 'signed';
@@ -476,7 +479,12 @@ export const subscribeToUsers = (
       }
       const list: AppUser[] = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...(docSnap.data() as any) });
+        const rawUser = { id: docSnap.id, ...(docSnap.data() as any) } as AppUser;
+        if (rawUser.id === 'usr_jerome' || rawUser.id === 'usr_benoit') {
+          list.push({ ...rawUser, role: 'admin', isReadOnly: false });
+        } else {
+          list.push(rawUser);
+        }
       });
       // Trier : Admin en premier, puis ordre alphabétique
       list.sort((a, b) => {

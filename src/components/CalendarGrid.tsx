@@ -1,5 +1,7 @@
 import React from 'react';
 import { AppSettings, CustomSlotsMap, TidePoint, ValidationsMap, WindPoint } from '../types';
+import { AgendaBookingItem } from '../utils/firebaseSync';
+import { getSlotBookingsSummary } from '../utils/cycleHelpers';
 import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, tdy, vstat } from '../utils/tides';
 
@@ -18,6 +20,7 @@ interface CalendarGridProps {
   windList: WindPoint[];
   validations?: ValidationsMap;
   customSlotsMap?: CustomSlotsMap;
+  bookingsMap?: Record<string, AgendaBookingItem[]>;
 }
 
 export const CalendarGrid: React.FC<CalendarGridProps> = ({
@@ -35,6 +38,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
   windList,
   validations = {},
   customSlotsMap = {},
+  bookingsMap = {},
 }) => {
   const dayNames = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
   const firstDayOffset = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
@@ -65,8 +69,11 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     let valStatus: 'none' | 'ok' | 'chg' = 'none';
     let valCount = 0;
     let rejCount = 0;
+    let notPublishedCount = 0;
+    let cycle2Count = 0;
     let totalCount = 0;
     let isPartial = false;
+    let dayBookedChars = 0;
 
     let dayTooltip = '';
 
@@ -87,12 +94,21 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         badgeText = (n ? String(n) : '') + (e ? `+${e}` : '');
       }
 
+      // Compter les chars réservés dans bookingsMap pour ce jour
+      for (const [bKey, bItems] of Object.entries(bookingsMap)) {
+        if (bKey.startsWith(`${ds}_`) && Array.isArray(bItems) && bItems.length > 0) {
+          dayBookedChars += getSlotBookingsSummary(bItems).totalChars;
+        }
+      }
+
       if (validations && validations[ds]) {
         const fDay = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
         const vInfo = vstat(fDay, validations);
         valStatus = isPast && vInfo.st === 'chg' ? 'ok' : vInfo.st;
         valCount = vInfo.valCount;
         rejCount = vInfo.rejCount;
+        notPublishedCount = vInfo.notPublishedCount || 0;
+        cycle2Count = vInfo.cycle2Count;
         totalCount = vInfo.totalCount;
         isPartial = vInfo.isPartial;
       }
@@ -112,12 +128,16 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         dayTooltip += ` · ⭐ Férié : ${holiday.publicHolidayName}`;
       }
 
+      if (dayBookedChars > 0) {
+        dayTooltip += ` · ⚡ Cycle 2 actif (${dayBookedChars} char${dayBookedChars > 1 ? 's' : ''} inscrit${dayBookedChars > 1 ? 's' : ''})`;
+      }
+
       if (valStatus === 'ok') {
-        dayTooltip += ` · ✓ ${valCount} validé${valCount > 1 ? 's' : ''}${
-          rejCount ? `, ${rejCount} refusé${rejCount > 1 ? 's' : ''}` : ''
+        dayTooltip += ` · ${cycle2Count > 0 ? '✓' : '📅'} ${valCount} ouvert${valCount > 1 ? 's' : ''}${
+          rejCount ? `, ${rejCount} fermé${rejCount > 1 ? 's' : ''}` : ''
         }${isPast ? ' (passé)' : ''}`;
       } else if (!isPast && valStatus === 'chg') {
-        dayTooltip += ' · ⚠️ À revalider (météo modifiée)';
+        dayTooltip += ' · ⚠️ Cycle 2 : météo/créneaux modifiés depuis validation';
       }
     }
 
@@ -129,6 +149,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     ]
       .filter(Boolean)
       .join(' ');
+
+    const hasCycle2 = dayBookedChars > 0 || cycle2Count > 0;
 
     dayCells.push(
       <button
@@ -144,21 +166,42 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         {valStatus === 'ok' && valCount > 0 && (
           <span
             className="cal-val-tag ok"
-            title={isPartial ? `${valCount}/${totalCount} créneaux validés` : 'Créneaux validés'}
+            style={!hasCycle2 && !isPast ? { background: '#0284c7' } : undefined}
+            title={
+              hasCycle2
+                ? `${cycle2Count} créneau(x) en Cycle 2${dayBookedChars > 0 ? ` (${dayBookedChars} chars)` : ''}`
+                : isPartial
+                ? `Cycle 1 : ${valCount}/${totalCount} créneau(x) publié(s)`
+                : 'Cycle 1 : journée publiée à la vente'
+            }
           >
-            {isPartial ? `${valCount}/${totalCount}` : '✓'}
+            {hasCycle2 ? (isPartial ? `${valCount}/${totalCount}` : '⚡') : isPartial ? `${valCount}/${totalCount}` : 'C1'}
+          </span>
+        )}
+        {valStatus === 'none' && dayBookedChars > 0 && (
+          <span
+            className="cal-val-tag ok"
+            style={{ background: '#7c3aed' }}
+            title={`Cycle 2 déclenché (${dayBookedChars} char${dayBookedChars > 1 ? 's' : ''})`}
+          >
+            ⚡
           </span>
         )}
         {valStatus === 'ok' && valCount === 0 && rejCount > 0 && (
           <span
             className="cal-val-tag rej"
-            title={`${rejCount} créneau${rejCount > 1 ? 'x' : ''} refusé${rejCount > 1 ? 's' : ''}`}
+            style={notPublishedCount > 0 ? { background: '#475569' } : undefined}
+            title={
+              notPublishedCount > 0
+                ? `${notPublishedCount} créneau${notPublishedCount > 1 ? 'x' : ''} non publié${notPublishedCount > 1 ? 's' : ''} en Cycle 1`
+                : `${rejCount} créneau${rejCount > 1 ? 'x' : ''} fermé${rejCount > 1 ? 's' : ''}`
+            }
           >
-            ✕
+            {notPublishedCount > 0 ? '🚫' : '✕'}
           </span>
         )}
         {!isPast && valStatus === 'chg' && (
-          <span className="cal-val-tag warn" title="Prévisions modifiées depuis validation">
+          <span className="cal-val-tag warn" title="Cycle 2 : prévisions modifiées sur journée engagée">
             ⚠️
           </span>
         )}

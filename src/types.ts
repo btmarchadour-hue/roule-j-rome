@@ -28,6 +28,7 @@ export interface AppSettings {
   fmin: number;
   calculationMode?: 'theorique' | 'reel';
   empiricalOffsetCm?: number;
+  customNonPublishReasons?: string[];
 }
 
 export interface TidePoint {
@@ -121,6 +122,8 @@ export interface DayFocusData {
   pl: DayPlan;
 }
 
+export const MAX_CHARS_PER_INSTRUCTOR = 12;
+
 export interface ValidationItem {
   k: string;
   s: string;
@@ -133,7 +136,23 @@ export interface ValidationItem {
   rejectReason?: string;
   assignedPilot?: string; // Nom du moniteur diplômé (Jérôme)
   instructor?: string;    // Moniteur diplômé encadrant responsable (Jérôme)
-  pilotsCount?: number;   // Nombre de participants / pilotes inscrits (min 1 si séance validée)
+  pilotsCount?: number;   // Nombre de participants / personnes (1 mono = 1, 1 bi = 2)
+  // --- Dissociation Cycle 1 (Offre commerciale) & Cycle 2 (Pilotage terrain) ---
+  cycle1Status?: 'published' | 'not_published' | 'closed_no_bookings';
+  nonPublishReason?: string;
+  publishedStart?: string; // Horaire Cycle 1 figé à l'ouverture commerciale
+  publishedEnd?: string;
+  cycle2Status?: 'awaiting_booking' | 'confirmed' | 'shifted' | 'merged' | 'cancelled_weather' | 'realized';
+  actualStart?: string;    // Horaire Cycle 2 ajusté si décalé
+  actualEnd?: string;
+  shiftMinutes?: number;
+  mergedIntoKey?: string;
+  mergedLabel?: string;
+  charsCount?: number;     // Nombre de chars engagés (Mono + Bi, max 12 chars / moniteur)
+  monoCount?: number;
+  biCount?: number;
+  rescheduledChars?: number;
+  lostChars?: number;
 }
 
 export interface ValidationDayRecord {
@@ -141,6 +160,7 @@ export interface ValidationDayRecord {
   ts: number;
   k: 'g' | 'o' | 'r' | 'x';
   items: ValidationItem[];
+  cycle1PublishedAt?: number;
 }
 
 export type ValidationsMap = Record<string, ValidationDayRecord>;
@@ -202,13 +222,17 @@ export interface SlotObservation {
   observedWaveH?: number;       // Hauteur de houle réelle (m)
   observedWavePeriod?: number;  // Période de houle (s)
   beachCondition?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
-  // Bilan participants (Séances réalisées ou annulées avec inscrits)
-  participantsCount?: number;           // Pilotes ayant effectivement roulé (si réalisée)
+  // Bilan chars & participants (Séances réalisées ou annulées avec inscrits)
+  charsCount?: number;                  // Nombre total de chars (Mono + Bi, max 12 / moniteur)
+  participantsCount?: number;           // Personnes/pilotes ayant roulé (si réalisée)
   monoCount?: number;
   biCount?: number;
-  bookedParticipantsCount?: number;     // Inscrits prévus sur ce créneau (si annulée)
-  rescheduledCount?: number;            // Dont personnes replacées / reportées sur une autre séance
+  bookedCharsCount?: number;            // Chars prévus sur ce créneau (si annulée Vie 2)
+  bookedParticipantsCount?: number;     // Personnes prévues sur ce créneau (si annulée)
+  rescheduledCount?: number;            // Dont personnes replacées / reportées
   lostCount?: number;                   // Dont personnes définitivement perdues / remboursées
+  rescheduledCharsCount?: number;       // Dont chars replacés
+  lostCharsCount?: number;              // Dont chars perdus
   notes?: string;
   author?: string;
   updatedAt?: number;
@@ -341,4 +365,64 @@ export interface GpsWaterlineLog {
   note?: string;
   createdAt: number;
 }
+
+export interface WindsUpObsRow {
+  time: string;
+  min: number | null;
+  moy: number | null;
+  max: number | null;
+  dir: string;
+  deg: number | null;
+  color: string | null;
+  barPct: number;
+  locked: boolean;
+}
+
+export interface WindsUpSeriesPoint {
+  t: number;
+  y: number;
+  o: string;
+  color: string;
+  locked: boolean;
+}
+
+export interface WindsUpMinMaxPoint {
+  t: number;
+  low: number;
+  high: number;
+}
+
+export interface WindsUpForecastPoint {
+  t: number;
+  y: number;
+  o: string;
+}
+
+export interface WindsUpSpotData {
+  spotId: number;
+  spotName: string;
+  date: string;
+  isToday: boolean;
+  fetchedAt: string;
+  isSubscriber: boolean;
+  isDelayed: boolean;
+  sensorOffline: boolean;
+  latest: {
+    speed: number | null;
+    min: number | null;
+    max: number | null;
+    dir: string;
+    deg: number | null;
+    time: string;
+    color: string | null;
+  };
+  series: {
+    moy: WindsUpSeriesPoint[];
+    minmax: WindsUpMinMaxPoint[];
+    previs: WindsUpForecastPoint[];
+  };
+  rows: WindsUpObsRow[];
+  sourceUrl: string;
+}
+
 

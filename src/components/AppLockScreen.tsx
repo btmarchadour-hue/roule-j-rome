@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ActiveUserSession, AppUser } from '../types';
-import { DEFAULT_USERS, hashPassword, setActiveUser } from '../utils/authUtils';
+import { DEFAULT_USERS, hashPassword, normalizeUserSession, setActiveUser } from '../utils/authUtils';
 import { subscribeToUsers } from '../utils/firebaseSync';
 
 interface AppLockScreenProps {
@@ -61,14 +61,14 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
           (selectedUser.username.toLowerCase() === 'benoît' && plain === 'Maya2103'));
 
       if (isTargetValid) {
-        const session: ActiveUserSession = {
+        const session = normalizeUserSession({
           id: selectedUser.id,
           username: selectedUser.username,
           displayName: selectedUser.displayName,
           role: selectedUser.role,
           isReadOnly: selectedUser.isReadOnly,
           loginTime: Date.now(),
-        };
+        })!;
         setActiveUser(session, rememberDevice);
         setIsLoading(false);
         onUnlock(session);
@@ -86,14 +86,14 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
       if (alternateUser) {
         // Rediriger automatiquement sur le bon profil
         setSelectedUserId(alternateUser.id);
-        const session: ActiveUserSession = {
+        const session = normalizeUserSession({
           id: alternateUser.id,
           username: alternateUser.username,
           displayName: alternateUser.displayName,
           role: alternateUser.role,
           isReadOnly: alternateUser.isReadOnly,
           loginTime: Date.now(),
-        };
+        })!;
         setActiveUser(session, rememberDevice);
         setIsLoading(false);
         onUnlock(session);
@@ -103,14 +103,14 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
       // 3. Fallback sécurité historique ('boutdumonde', 'char2026')
       if (['boutdumonde', 'char2026'].includes(plain.toLowerCase())) {
         const fallbackUser = users[0] || DEFAULT_USERS[0];
-        const session: ActiveUserSession = {
+        const session = normalizeUserSession({
           id: fallbackUser.id,
           username: fallbackUser.username,
           displayName: fallbackUser.displayName,
           role: fallbackUser.role,
           isReadOnly: fallbackUser.isReadOnly,
           loginTime: Date.now(),
-        };
+        })!;
         setActiveUser(session, rememberDevice);
         setIsLoading(false);
         onUnlock(session);

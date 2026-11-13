@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CancellationReason, SlotObservation } from '../types';
+import { CancellationReason, MAX_CHARS_PER_INSTRUCTOR, SlotObservation } from '../types';
 import { CANCELLATION_REASONS_INFO, upsertSlotObservation, deleteSlotObservation } from '../utils/statisticsEngine';
 import { saveObservationToFirestore, deleteObservationFromFirestore } from '../utils/firebaseSync';
 
@@ -132,15 +132,30 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     // En char à voile, les stagiaires/clients au volant sont les "pilotes".
     // Une séance validée ou marquée "Réalisée" DOIT obligatoirement avoir au moins 1 participant (pilote) !
     // Si 0 inscrit, elle relève de "Vie 1 : Faute de réservations" et doit être enregistrée comme Annulée.
+    const computedChars = (Number(monoCount) || 0) + (Number(biCount) || 0);
     if (status === 'realized') {
       const pCount = participantsCount === '' ? 0 : Number(participantsCount);
-      if (pCount <= 0) {
+      if (pCount <= 0 && computedChars <= 0) {
         setErrorMessage(
           '⛔ Règle métier stricte : Une séance ne peut JAMAIS être enregistrée comme "Réalisée" avec 0 participant (pilote) ! S\'il n\'y avait aucun participant inscrit, cochez "Séance Annulée / Non roulée" avec le motif "Vie 1 : Faute de réservations".'
         );
         return;
       }
     }
+
+    const effectiveChars =
+      monoCount !== '' || biCount !== ''
+        ? computedChars
+        : participantsCount !== ''
+        ? Number(participantsCount)
+        : undefined;
+
+    const effectiveParticipants =
+      participantsCount !== ''
+        ? Number(participantsCount)
+        : computedChars > 0
+        ? (Number(monoCount) || 0) + (Number(biCount) || 0) * 2
+        : undefined;
 
     const obs: SlotObservation = {
       id: initialObservation?.id || `obs-${dateStr}-${slotKey}`,
@@ -175,7 +190,8 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       observedWindDir: observedWindDir || undefined,
       observedWaveH: observedWaveH !== '' ? Number(observedWaveH) : undefined,
       beachCondition: status === 'realized' ? beachCondition : undefined,
-      participantsCount: status === 'realized' && participantsCount !== '' ? Number(participantsCount) : undefined,
+      charsCount: status === 'realized' ? effectiveChars : undefined,
+      participantsCount: status === 'realized' ? effectiveParticipants : undefined,
       monoCount: status === 'realized' && monoCount !== '' ? Number(monoCount) : undefined,
       biCount: status === 'realized' && biCount !== '' ? Number(biCount) : undefined,
       notes: notes.trim() || undefined,
@@ -674,86 +690,128 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 </div>
               </div>
 
-              {/* 3. Bilan participants & chars */}
-              <div
-                style={{
-                  background: participantsCount === '' || Number(participantsCount) <= 0 ? '#fff7ed' : '#f8fafc',
-                  border: participantsCount === '' || Number(participantsCount) <= 0 ? '1.5px solid #f97316' : '1.5px solid #cbd5e1',
-                  borderRadius: '8px',
-                  padding: '12px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
-                    👥 Participants (Pilotes au volant) & Chars Sortis
-                  </div>
-                  <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#c2410c', background: '#ffedd5', padding: '2px 7px', borderRadius: '4px' }}>
-                    * Min. 1 pilote obligatoire
-                  </span>
-                </div>
+              {/* 3. Bilan chars & participants (Règle 12 chars max par moniteur) */}
+              {(() => {
+                const liveChars = (Number(monoCount) || 0) + (Number(biCount) || 0);
+                const overLimit = liveChars > MAX_CHARS_PER_INSTRUCTOR;
+                const noCharsYet = liveChars <= 0 && (participantsCount === '' || Number(participantsCount) <= 0);
+                return (
+                  <div
+                    style={{
+                      background: overLimit ? '#fef2f2' : noCharsYet ? '#fff7ed' : '#f8fafc',
+                      border: overLimit ? '1.5px solid #dc2626' : noCharsYet ? '1.5px solid #f97316' : '1.5px solid #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '12px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
+                        🏎️ Chars Sortis (Max {MAX_CHARS_PER_INSTRUCTOR} / moniteur) &amp; Personnes
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 900,
+                          color: overLimit ? '#fff' : liveChars > 0 ? '#166534' : '#c2410c',
+                          background: overLimit ? '#dc2626' : liveChars > 0 ? '#dcfce7' : '#ffedd5',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                        }}
+                      >
+                        {liveChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+                      </span>
+                    </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '2px' }}>
-                      Pilotes ayant roulé <span style={{ color: '#dc2626' }}>*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={participantsCount}
-                      onChange={e => {
-                        setParticipantsCount(e.target.value === '' ? '' : Number(e.target.value));
-                        setErrorMessage(null);
-                      }}
-                      placeholder="ex: 8 (min. 1)"
-                      style={{
-                        width: '100%',
-                        padding: '6px 8px',
-                        borderRadius: '4px',
-                        border: participantsCount === '' || Number(participantsCount) <= 0 ? '2px solid #ea580c' : '1px solid #cbd5e1',
-                        fontSize: '0.85rem',
-                        fontWeight: 700,
-                        background: '#fff',
-                        boxSizing: 'border-box',
-                      }}
-                    />
-                  </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#0369a1', display: 'block', marginBottom: '2px' }}>
+                          Monoplaces (1 char)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={24}
+                          value={monoCount}
+                          onChange={e => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setMonoCount(val);
+                            const nextMono = val === '' ? 0 : val;
+                            const nextBi = biCount === '' ? 0 : Number(biCount);
+                            if (nextMono + nextBi > 0) {
+                              setParticipantsCount(nextMono + nextBi * 2);
+                            }
+                            setErrorMessage(null);
+                          }}
+                          placeholder="ex: 8"
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #7dd3fc', fontSize: '0.82rem', fontWeight: 700, boxSizing: 'border-box' }}
+                        />
+                      </div>
 
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Monoplaces
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={monoCount}
-                      onChange={e => setMonoCount(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="ex: 8"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#0369a1', display: 'block', marginBottom: '2px' }}>
+                          Biplaces (1 char)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={24}
+                          value={biCount}
+                          onChange={e => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setBiCount(val);
+                            const nextMono = monoCount === '' ? 0 : Number(monoCount);
+                            const nextBi = val === '' ? 0 : val;
+                            if (nextMono + nextBi > 0) {
+                              setParticipantsCount(nextMono + nextBi * 2);
+                            }
+                            setErrorMessage(null);
+                          }}
+                          placeholder="ex: 2"
+                          style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #7dd3fc', fontSize: '0.82rem', fontWeight: 700, boxSizing: 'border-box' }}
+                        />
+                      </div>
 
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Biplaces
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={biCount}
-                      onChange={e => setBiCount(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="ex: 1"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                </div>
+                      <div>
+                        <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '2px' }}>
+                          Personnes / Pilotes <span style={{ color: '#dc2626' }}>*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={participantsCount}
+                          onChange={e => {
+                            setParticipantsCount(e.target.value === '' ? '' : Number(e.target.value));
+                            setErrorMessage(null);
+                          }}
+                          placeholder="ex: 12"
+                          style={{
+                            width: '100%',
+                            padding: '5px 8px',
+                            borderRadius: '4px',
+                            border: noCharsYet ? '2px solid #ea580c' : '1px solid #cbd5e1',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            background: '#fff',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                    </div>
 
-                {(participantsCount === '' || Number(participantsCount) <= 0) && (
-                  <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#c2410c', background: '#ffedd5', padding: '6px 10px', borderRadius: '6px', fontWeight: 600 }}>
-                    ⚠️ <strong>Attention Jérôme :</strong> Une séance réalisée doit avoir au moins 1 participant (pilote de char). S'il n'y avait aucun inscrit, passez le statut en « Séance Annulée / Non roulée » avec la cause « Vie 1 : Faute de réservations ».
+                    {overLimit && (
+                      <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#991b1b', background: '#fee2e2', padding: '6px 10px', borderRadius: '6px', fontWeight: 700 }}>
+                        ⚠️ Règle école : pas plus de {MAX_CHARS_PER_INSTRUCTOR} chars par moniteur ({liveChars} chars saisis — nécessite 2 moniteurs ou ajustement).
+                      </div>
+                    )}
+
+                    {noCharsYet && (
+                      <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#c2410c', background: '#ffedd5', padding: '6px 10px', borderRadius: '6px', fontWeight: 600 }}>
+                        ⚠️ <strong>Attention Jérôme :</strong> Une séance réalisée doit avoir au moins 1 char (mono ou bi). S&apos;il n&apos;y avait aucun inscrit, classez en « Séance Annulée » motif « Vie 1 : Faute de réservations ».
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </>
           )}
 

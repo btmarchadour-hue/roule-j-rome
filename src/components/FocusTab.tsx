@@ -4,28 +4,59 @@ import {
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
+  MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
   TidePoint,
   ValidationsMap,
   WindPoint,
 } from '../types';
 import {
+  allDay,
+  COEF,
   dayFocus,
+  dayInfo,
+  dayRow,
+  dayWind,
   exportValidCsv,
   kOf,
   lc,
   maxDs,
   minDs,
-  shf,
-  sigOf,
+  plan,
   tdy,
+  toU,
   VC,
   vstat,
+  wtxt,
 } from '../utils/tides';
+import { AgendaBookingItem } from '../utils/firebaseSync';
+import {
+  buildReservationKey,
+  Cycle2ActionPayload,
+  findMatchingValidationItem,
+  getEffectiveCycle1Status,
+  getEffectiveCycle2Status,
+  getSlotBookingsSummary,
+  getValidationItemChars,
+  hasCycle2Trigger,
+  shiftTimeString,
+} from '../utils/cycleHelpers';
+import { CalendarGrid } from './CalendarGrid';
+import { CurveChart } from './CurveChart';
+import { MarnageChart } from './MarnageChart';
+import { TableView } from './TableView';
+import { WindPanel } from './WindPanel';
 import { WindguruTable } from './WindguruTable';
+import { WindsUpBaliseCard } from './WindsUpBaliseCard';
+import { SlotBookingsModal } from './SlotBookingsModal';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
+import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 
 interface FocusTabProps {
+  year: number;
+  month: number;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
   settings: AppSettings;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
   EX: TidePoint[];
@@ -34,21 +65,18 @@ interface FocusTabProps {
   last: number;
   windList: WindPoint[];
   validations: ValidationsMap;
-  onValidateDay: (ds: string, record: DayFocusData, mode?: 'all' | 'wind_only') => void;
-  onClearValidation?: (ds: string) => void;
-  onToggleSlotValidation?: (record: DayFocusData, slot: SessionItem) => void;
-  onSetSlotDecision?: (
-    record: DayFocusData,
-    slot: SessionItem,
-    decision: 'valid' | 'rejected' | 'pending',
-    reason?: string,
-    pilot?: string,
-    pilotsCount?: number
+  bookingsMap?: Record<string, AgendaBookingItem[]>;
+  onSaveSlotBookings?: (
+    ds: string,
+    slotKey: string,
+    slotStart: string,
+    slotEnd: string,
+    bookings: AgendaBookingItem[]
   ) => void;
+  onCycle2Action?: (record: DayFocusData, slot: SessionItem, payload: Cycle2ActionPayload) => void;
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
-  onOpenPrintAgenda?: () => void;
   onOpenObservationModal?: (slot: {
     dateStr: string;
     slotKey: string;
@@ -58,11 +86,23 @@ interface FocusTabProps {
     customTitle?: string;
   }) => void;
   isReadOnly?: boolean;
-  activeDay?: 'tomorrow' | 'today';
-  onActiveDayChange?: (day: 'tomorrow' | 'today') => void;
+  focusDate?: string;
+  onFocusDateChange?: (ds: string) => void;
 }
 
+const C2_WEATHER_REASONS = [
+  'Vent insuffisant (< 8 nds)',
+  'Vent trop fort / rafales',
+  'Vent mauvais secteur',
+  'État de plage / bâches',
+  'Météo extrême / orage',
+];
+
 export const FocusTab: React.FC<FocusTabProps> = ({
+  year,
+  month,
+  onPrevMonth,
+  onNextMonth,
   settings,
   onUpdateSettings: rawOnUpdateSettings,
   EX,
@@ -71,42 +111,65 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   last,
   windList,
   validations,
-  onValidateDay: rawOnValidateDay,
-  onClearValidation: rawOnClearValidation,
-  onToggleSlotValidation: rawOnToggleSlotValidation,
-  onSetSlotDecision: rawOnSetSlotDecision,
+  bookingsMap = {},
+  onSaveSlotBookings: rawOnSaveSlotBookings,
+  onCycle2Action: rawOnCycle2Action,
   onSelectDayInCalendar,
   customSlotsMap = {},
-  onOpenPrintAgenda,
   onOpenObservationModal,
   isReadOnly = false,
-  activeDay: propActiveDay,
-  onActiveDayChange,
+  focusDate: propFocusDate,
+  onFocusDateChange,
 }) => {
-  const onValidateDay = isReadOnly ? () => {} : rawOnValidateDay;
-  const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
-  const onToggleSlotValidation = isReadOnly ? undefined : rawOnToggleSlotValidation;
-  const onSetSlotDecision = isReadOnly ? undefined : rawOnSetSlotDecision;
+  const onCycle2Action = isReadOnly ? undefined : rawOnCycle2Action;
+  const onSaveSlotBookings = isReadOnly ? undefined : rawOnSaveSlotBookings;
   const onUpdateSettings = (s: Partial<AppSettings>) => {
     if (isReadOnly) return;
     rawOnUpdateSettings(s);
   };
-  const tdRaw = tdy();
-  const td = tdRaw < minDs ? minDs : tdRaw;
-  const tomorrowDs = shf(td, 1);
-  const [internalActiveDay, setInternalActiveDay] = useState<'tomorrow' | 'today'>('tomorrow');
-  const activeDay = propActiveDay ?? internalActiveDay;
 
-  const handleDayChange = (day: 'tomorrow' | 'today') => {
-    setInternalActiveDay(day);
-    onActiveDayChange?.(day);
+  const tdRaw = tdy();
+  const td = tdRaw < minDs ? minDs : tdRaw > maxDs ? maxDs : tdRaw;
+  const [internalFocusDate, setInternalFocusDate] = useState<string>(td);
+
+  // États UI inline pour les actions tactiques Cycle 2 (zéro window.prompt/window.alert)
+  const [activeBookingSlot, setActiveBookingSlot] = useState<{
+    slotKey: string;
+    slotStart: string;
+    slotEnd: string;
+    slotTitle?: string;
+  } | null>(null);
+  const [openTool, setOpenTool] = useState<{
+    slotKey: string;
+    mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather';
+  } | null>(null);
+  const [confirmMono, setConfirmMono] = useState<number>(1);
+  const [confirmBi, setConfirmBi] = useState<number>(0);
+  const [cancelReason, setCancelReason] = useState<string>(C2_WEATHER_REASONS[0]);
+  const [cancelRescheduled, setCancelRescheduled] = useState<number>(0);
+  const [cancelLost, setCancelLost] = useState<number>(0);
+
+  const handleSelectCustomDate = (ds: string) => {
+    setInternalFocusDate(ds);
+    onFocusDateChange?.(ds);
+    setOpenTool(null);
   };
 
-  const fTomorrow = dayFocus(tomorrowDs, settings, tideW, first, last, windList, customSlotsMap);
-  const fToday = dayFocus(td, settings, tideW, first, last, windList, customSlotsMap);
-
-  const currentFocus = activeDay === 'tomorrow' ? fTomorrow : fToday;
+  const targetDs = propFocusDate || internalFocusDate;
+  const currentFocus = dayFocus(targetDs, settings, tideW, first, last, windList, customSlotsMap);
   const currentDs = currentFocus.ds;
+
+  const [cy, cm0, cd] = currentDs.split('-').map(Number);
+  const cm = cm0 - 1;
+  const P = dayInfo(cy, cm, cd, settings, tideW, first, last);
+  const coef = COEF[currentDs];
+  const DW = dayWind(cy, cm, cd, settings, tideW, first, last, windList);
+  const dayStartU = toU(cy, cm, cd, 0);
+  const dayEndU = toU(cy, cm, cd + 1, 0);
+  const R = dayRow(cy, cm, cd, settings, EX, tideW, first, last, windList);
+  const ad = EX.filter(p => p.t >= dayStartU && p.t < dayEndU && p.adj).map(p => p.adj as number);
+  const holiday = getFrenchHolidayInfo(currentDs);
+  const pl = plan(cy, cm, cd, settings, tideW, first, last);
 
   const formatWd = (ds: string) => {
     const [y, m, d] = ds.split('-').map(Number);
@@ -122,60 +185,112 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const renderSessRow = (f: DayFocusData, x: SessionItem, key: string) => {
     const startTimeStr = lc(x.a, f.y, f.m, f.d);
     const endTimeStr = lc(x.b, f.y, f.m, f.d);
-    const t = `${startTimeStr} - ${endTimeStr}`;
     const slotKey = kOf(x);
     const valRecord = validations[f.ds];
 
-    // Recherche multi-niveaux pour synchronisation absolue avec l'archive
-    let valItem = valRecord?.items?.find(item => item.k === slotKey);
-    if (!valItem && valRecord?.items) {
-      valItem = valRecord.items.find(item => item.s === startTimeStr && item.e === endTimeStr);
-    }
-    if (!valItem && valRecord?.items) {
-      valItem = valRecord.items.find(item => item.s === startTimeStr);
-    }
-    if (!valItem && valRecord?.items) {
-      const [sh, sm] = startTimeStr.replace('h', ':').split(':').map(Number);
-      const slotMin = sh * 60 + sm;
-      let closest: (typeof valRecord.items)[0] | null = null;
-      let minDiff = 45;
-      for (const item of valRecord.items) {
-        if (!item.s) continue;
-        const [ih, im] = item.s.replace('h', ':').split(':').map(Number);
-        const diff = Math.abs(slotMin - (ih * 60 + im));
-        if (diff <= minDiff) {
-          minDiff = diff;
-          closest = item;
-        }
-      }
-      if (closest) valItem = closest;
-    }
+    const valItem = findMatchingValidationItem(valRecord, slotKey, startTimeStr, endTimeStr);
+    const effectiveBookingKey =
+      valItem && (bookingsMap[buildReservationKey(f.ds, valItem.k)]?.length ?? 0) > 0
+        ? valItem.k
+        : slotKey;
+    const resKey = buildReservationKey(f.ds, effectiveBookingKey);
+    const slotBookings = bookingsMap[resKey] || [];
+    const bookingSummary = getSlotBookingsSummary(slotBookings);
+    const itemChars = getValidationItemChars(valItem);
 
-    const decision: 'valid' | 'rejected' | 'pending' = valItem
-      ? valItem.status === 'rejected'
-        ? 'rejected'
-        : 'valid'
-      : 'pending';
+    const effectiveChars =
+      bookingSummary.totalChars > 0 ? bookingSummary.totalChars : itemChars.totalChars;
+    const effectiveMono =
+      bookingSummary.totalChars > 0 ? bookingSummary.monoCount : itemChars.mono;
+    const effectiveBi =
+      bookingSummary.totalChars > 0 ? bookingSummary.biCount : itemChars.bi;
+    const effectivePeople =
+      bookingSummary.totalChars > 0 ? bookingSummary.totalPeople : itemChars.people;
+    const isOverCapacity = effectiveChars > MAX_CHARS_PER_INSTRUCTOR;
+
+    const c1Status = getEffectiveCycle1Status(valItem);
+    const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+    const c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
+
+    const displayStart = valItem?.actualStart || startTimeStr;
+    const displayEnd = valItem?.actualEnd || endTimeStr;
+    const isShifted =
+      c2Status === 'shifted' &&
+      Boolean(valItem?.actualStart) &&
+      (valItem?.actualStart !== startTimeStr || valItem?.actualEnd !== endTimeStr);
+
+    const isToolOpen = (mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather') =>
+      openTool?.slotKey === slotKey && openTool.mode === mode;
+
+    // Créneaux candidats pour le regroupement / fusion sur la même journée
+    const mergeTargets = f.list
+      .filter(other => kOf(other) !== slotKey)
+      .map(other => {
+        const oKey = kOf(other);
+        const oStart = lc(other.a, f.y, f.m, f.d);
+        const oEnd = lc(other.b, f.y, f.m, f.d);
+        const oVal = findMatchingValidationItem(valRecord, oKey, oStart, oEnd);
+        const oBook = getSlotBookingsSummary(bookingsMap[buildReservationKey(f.ds, oKey)] || []);
+        const oChars = Math.max(oBook.totalChars, getValidationItemChars(oVal).totalChars);
+        const combined = effectiveChars + oChars;
+        return {
+          slotKey: oKey,
+          label: `${oVal?.actualStart || oStart} - ${oVal?.actualEnd || oEnd}`,
+          oChars,
+          combined,
+          overMax: combined > MAX_CHARS_PER_INSTRUCTOR,
+        };
+      });
 
     const cardBg =
-      decision === 'valid'
-        ? '#f0fdf4'
-        : decision === 'rejected'
+      c2Status === 'cancelled_weather'
         ? '#fef2f2'
+        : c2Status === 'merged'
+        ? '#faf5ff'
+        : c2Status === 'shifted'
+        ? '#fffbeb'
+        : c1Status === 'not_published'
+        ? '#f1f5f9'
+        : c1Status === 'closed_no_bookings'
+        ? '#f8fafc'
+        : inCycle2
+        ? '#f0fdf4'
+        : c1Status === 'published'
+        ? '#f0f9ff'
         : '#ffffff';
 
     const cardBorder =
-      decision === 'valid'
-        ? '2px solid #22c55e'
-        : decision === 'rejected'
+      c2Status === 'cancelled_weather'
         ? '2px solid #ef4444'
+        : c2Status === 'merged'
+        ? '2px solid #a855f7'
+        : c2Status === 'shifted'
+        ? '2px solid #f59e0b'
+        : c1Status === 'not_published'
+        ? '2px solid #64748b'
+        : c1Status === 'closed_no_bookings'
+        ? '1.5px solid #cbd5e1'
+        : inCycle2
+        ? '2px solid #22c55e'
+        : c1Status === 'published'
+        ? '2px solid #0284c7'
         : '2px dashed #cbd5e1';
 
     const cardBarColor =
-      decision === 'valid'
-        ? '#16a34a'
-        : decision === 'rejected'
+      c2Status === 'cancelled_weather'
         ? '#dc2626'
+        : c2Status === 'merged'
+        ? '#7c3aed'
+        : c2Status === 'shifted'
+        ? '#d97706'
+        : c1Status === 'not_published'
+        ? '#475569'
+        : c1Status === 'closed_no_bookings'
+        ? '#64748b'
+        : inCycle2
+        ? '#16a34a'
+        : c1Status === 'published'
+        ? '#0284c7'
         : '#94a3b8';
 
     let chip = <span className="fchip">VENT ?</span>;
@@ -201,182 +316,239 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         } au ${x.side} · à ta discrétion`
       : x.txt || '';
 
+    const needsSmsManualNotice =
+      c2Status === 'shifted' || c2Status === 'merged' || c2Status === 'cancelled_weather';
+
     return (
       <div
         key={key}
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '12px',
+          flexDirection: 'column',
+          gap: '10px',
           padding: '12px 16px',
           borderRadius: '10px',
           marginBottom: '10px',
           backgroundColor: cardBg,
           border: cardBorder,
           borderLeft: `6px solid ${cardBarColor}`,
-          boxShadow:
-            decision === 'valid'
-              ? '0 2px 8px rgba(22, 163, 74, 0.12)'
-              : decision === 'rejected'
-              ? '0 2px 6px rgba(220, 38, 38, 0.08)'
-              : '0 1px 3px rgba(0,0,0,0.04)',
-          transition: 'all 0.15s ease',
+          boxShadow: inCycle2
+            ? '0 2px 8px rgba(22, 163, 74, 0.10)'
+            : '0 1px 3px rgba(0,0,0,0.04)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {decision === 'valid' && (
-            <>
-              <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: '#16a34a',
-                color: '#ffffff',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontWeight: 900,
-                fontSize: '0.78rem',
-                letterSpacing: '0.03em',
-                boxShadow: '0 1px 2px rgba(22, 163, 74, 0.3)',
-              }}
-            >
-              <span>✓</span>
-              <span>SÉANCE VALIDÉE</span>
-            </span>
-
-            {/* BADGE MONITEUR ENCADRANT (Jérôme - Seul Moniteur Diplômé) */}
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: '#dcfce7',
-                border: '1.5px solid #86efac',
-                color: '#166534',
-                padding: '3px 8px',
-                borderRadius: '6px',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-              }}
-            >
-              <span>👨‍🏫 Moniteur :</span>
-              <strong style={{ color: '#0f172a' }}>Jérôme (Moniteur diplômé)</strong>
-            </span>
-
-            {/* BADGE PILOTES / PARTICIPANTS (GARDE-FOU MÉTIER MIN. 1) */}
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: valItem?.pilotsCount ? '#e0f2fe' : '#ffedd5',
-                border: valItem?.pilotsCount ? '1.5px solid #7dd3fc' : '1.5px solid #fdba74',
-                color: valItem?.pilotsCount ? '#0369a1' : '#c2410c',
-                padding: '3px 8px',
-                borderRadius: '6px',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-              }}
-            >
-              <span>👥 Pilotes :</span>
-              <strong style={{ color: valItem?.pilotsCount ? '#0c4a6e' : '#9a3412' }}>
-                {valItem?.pilotsCount ? `${valItem.pilotsCount} inscrits` : '0 pilote !'}
-              </strong>
-              {!isReadOnly && onSetSlotDecision && (
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    const current = valItem?.pilotsCount || 8;
-                    const ans = window.prompt("Nombre de participants / pilotes inscrits :", String(current));
-                    if (ans === null) return;
-                    const parsed = parseInt(ans.trim(), 10);
-                    if (isNaN(parsed) || parsed <= 0) {
-                      window.alert("⛔ Règle métier : Une séance validée doit avoir au moins 1 pilote. S'il n'y a aucun inscrit, classez-le en 'Refusé / Faute d'inscrits'.");
-                      return;
-                    }
-                    onSetSlotDecision(f, x, 'valid', undefined, valItem?.instructor || valItem?.assignedPilot || 'Jérôme', parsed);
-                  }}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          {/* GAUCHE : Statut Cycle 2, Jauge 12 chars, Moniteur */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {inCycle2 ? (
+              <>
+                <span
                   style={{
-                    background: '#ffffff',
-                    border: '1px solid #7dd3fc',
-                    borderRadius: '4px',
-                    padding: '1px 5px',
-                    fontSize: '0.64rem',
-                    fontWeight: 800,
-                    color: '#0369a1',
-                    cursor: 'pointer',
-                    marginLeft: '3px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    background:
+                      c2Status === 'cancelled_weather'
+                        ? '#dc2626'
+                        : c2Status === 'merged'
+                        ? '#7c3aed'
+                        : c2Status === 'shifted'
+                        ? '#d97706'
+                        : '#16a34a',
+                    color: '#ffffff',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    fontWeight: 900,
+                    fontSize: '0.76rem',
+                    letterSpacing: '0.03em',
                   }}
-                  title="Modifier le nombre de pilotes inscrits"
                 >
-                  ✏️ Modifier
-                </button>
-              )}
-            </span>
-          </>
-        )}
+                  <span>
+                    {c2Status === 'cancelled_weather'
+                      ? '⛔'
+                      : c2Status === 'merged'
+                      ? '🔗'
+                      : c2Status === 'shifted'
+                      ? '🕒'
+                      : '⚡'}
+                  </span>
+                  <span>
+                    {c2Status === 'cancelled_weather'
+                      ? `ANNULÉ MÉTÉO (VIE 2)${valItem?.rejectReason ? ` · ${valItem.rejectReason}` : ''}`
+                      : c2Status === 'merged'
+                      ? `REGROUPÉ ➔ ${valItem?.mergedLabel || 'autre créneau'}`
+                      : c2Status === 'shifted'
+                      ? `DÉCALÉ ${valItem?.shiftMinutes ? (valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes) + ' MIN' : ''}`
+                      : c2Status === 'realized'
+                      ? 'CYCLE 2 · RÉALISÉ'
+                      : 'CYCLE 2 · MAINTENU'}
+                  </span>
+                </span>
 
-          {decision === 'rejected' && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: '#dc2626',
-                color: '#ffffff',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontWeight: 900,
-                fontSize: '0.78rem',
-                letterSpacing: '0.03em',
-                boxShadow: '0 1px 2px rgba(220, 38, 38, 0.3)',
-              }}
-            >
-              <span>✕</span>
-              <span>SÉANCE REFUSÉE</span>
-              {valItem?.rejectReason && (
-                <span style={{ fontSize: '0.72rem', opacity: 0.9 }}>· {valItem.rejectReason}</span>
-              )}
-            </span>
-          )}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    background: isOverCapacity ? '#fee2e2' : '#dcfce7',
+                    border: isOverCapacity ? '1.5px solid #ef4444' : '1.5px solid #86efac',
+                    color: isOverCapacity ? '#991b1b' : '#166534',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '0.74rem',
+                    fontWeight: 900,
+                  }}
+                >
+                  <span>🚗</span>
+                  <span>
+                    {effectiveChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+                  </span>
+                  {(effectiveMono > 0 || effectiveBi > 0) && (
+                    <span style={{ fontWeight: 700, opacity: 0.85 }}>
+                      ({effectiveMono} mono + {effectiveBi} bi · {effectivePeople} pilotes/pers.)
+                    </span>
+                  )}
+                </span>
 
-          {decision === 'pending' && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: '#f1f5f9',
-                color: '#475569',
-                border: '1px solid #cbd5e1',
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontWeight: 800,
-                fontSize: '0.74rem',
-              }}
-            >
-              <span>⏳</span>
-              <span>À VALIDER</span>
-            </span>
-          )}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    color: '#334155',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '0.70rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  <span>👨‍🏫 Moniteur :</span>
+                  <strong>Jérôme</strong>
+                </span>
+              </>
+            ) : c1Status === 'published' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 900,
+                  fontSize: '0.74rem',
+                }}
+              >
+                <span>📅</span>
+                <span>CYCLE 1 PUBLIÉ · 0 inscrit (En attente 1er char)</span>
+              </span>
+            ) : c1Status === 'not_published' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#334155',
+                  color: '#ffffff',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 900,
+                  fontSize: '0.74rem',
+                }}
+              >
+                <span>🚫</span>
+                <span>
+                  À NE PAS PUBLIER (CYCLE 1){valItem?.nonPublishReason ? ` · ${valItem.nonPublishReason}` : ''}
+                </span>
+              </span>
+            ) : c1Status === 'closed_no_bookings' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#475569',
+                  color: '#ffffff',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 900,
+                  fontSize: '0.74rem',
+                }}
+              >
+                <span>🌑</span>
+                <span>CLÔTURÉ · FAUTE D&apos;INSCRITS (VIE 1)</span>
+              </span>
+            ) : (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#fffbeb',
+                  color: '#92400e',
+                  border: '1px solid #fcd34d',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  fontWeight: 800,
+                  fontSize: '0.74rem',
+                }}
+              >
+                <span>⏳</span>
+                <span>EN ATTENTE DE VALIDATION (C1)</span>
+              </span>
+            )}
 
-          {chip}
+            {chip}
 
-          {sub && (
-            <small style={{ color: '#64748b', fontSize: '0.72rem' }}>
-              {sub + (x.past ? ' · passée' : '')}
-            </small>
-          )}
-        </div>
+            {sub && (
+              <small style={{ color: '#64748b', fontSize: '0.72rem' }}>
+                {sub + (x.past ? ' · passée' : '')}
+              </small>
+            )}
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          {onSetSlotDecision ? (
-            <div className="slot-decision-group" onClick={e => e.stopPropagation()}>
-              {decision === 'valid' && (
+          {/* DROITE : Boutons Tactiques Cycle 2 + Horaire */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="fbtn"
+                style={{
+                  margin: 0,
+                  padding: '5px 10px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  color: effectiveChars > 0 ? '#166534' : '#0369a1',
+                  background: effectiveChars > 0 ? '#dcfce7' : '#e0f2fe',
+                  border: effectiveChars > 0 ? '1px solid #86efac' : '1px solid #7dd3fc',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+                onClick={() =>
+                  setActiveBookingSlot({
+                    slotKey: effectiveBookingKey,
+                    slotStart: startTimeStr,
+                    slotEnd: endTimeStr,
+                    slotTitle: x.customTitle,
+                  })
+                }
+                title="Ouvrir la fiche numérique des réservations (déclenche Cycle 2 dès 1 char)"
+              >
+                👥 Inscriptions ({effectiveChars}/{MAX_CHARS_PER_INSTRUCTOR})
+              </button>
+
+              {!isReadOnly && onCycle2Action && (
                 <>
                   <button
                     type="button"
@@ -385,132 +557,139 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       margin: 0,
                       padding: '5px 9px',
                       fontSize: '0.72rem',
-                      fontWeight: 700,
-                      color: '#dc2626',
-                      background: '#fff',
-                      border: '1px solid #fca5a5',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
-                    title="Refuser / annuler ce créneau"
-                  >
-                    ✕ Refuser
-                  </button>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '5px 8px',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      color: '#64748b',
-                      background: '#fff',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => onSetSlotDecision(f, x, 'pending')}
-                    title="Remettre en attente"
-                  >
-                    ↩
-                  </button>
-                </>
-              )}
-
-              {decision === 'rejected' && (
-                <>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '5px 9px',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      color: '#16a34a',
-                      background: '#fff',
-                      border: '1px solid #86efac',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => onSetSlotDecision(f, x, 'valid')}
-                    title="Valider et maintenir ce créneau"
-                  >
-                    ✓ Re-valider
-                  </button>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '5px 8px',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      color: '#64748b',
-                      background: '#fff',
-                      border: '1px solid #cbd5e1',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => onSetSlotDecision(f, x, 'pending')}
-                    title="Remettre en attente"
-                  >
-                    ↩
-                  </button>
-                </>
-              )}
-
-              {decision === 'pending' && (
-                <>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '6px 12px',
-                      fontSize: '0.75rem',
                       fontWeight: 800,
                       color: '#fff',
                       background: '#16a34a',
                       border: 'none',
                       borderRadius: '6px',
                       cursor: 'pointer',
-                      boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
                     }}
-                    onClick={() => onSetSlotDecision(f, x, 'valid')}
-                    title="Valider ce créneau"
-                  >
-                    <span>✓</span>
-                    <span>Valider</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '6px 10px',
-                      fontSize: '0.75rem',
-                      fontWeight: 800,
-                      color: '#dc2626',
-                      background: '#fff',
-                      border: '1px solid #fca5a5',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
+                    onClick={() => {
+                      if (effectiveChars >= 1) {
+                        onCycle2Action(f, x, {
+                          type: 'confirm',
+                          monoCount: effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
+                          biCount: effectiveBi,
+                          pilotsCount: effectivePeople || effectiveChars,
+                          instructor: 'Jérôme',
+                        });
+                        setOpenTool(null);
+                      } else {
+                        setConfirmMono(1);
+                        setConfirmBi(0);
+                        setOpenTool(
+                          isToolOpen('confirm_chars') ? null : { slotKey, mode: 'confirm_chars' }
+                        );
+                      }
                     }}
-                    onClick={() => onSetSlotDecision(f, x, 'rejected', x.ok === false ? 'Vent hors plage' : 'Refusé')}
-                    title="Refuser ce créneau"
+                    title="Maintenir la séance (exige au moins 1 char inscrit)"
                   >
-                    <span>✕</span>
-                    <span>Refuser</span>
+                    ✓ Maintenir
                   </button>
+
+                  {inCycle2 && (
+                    <>
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: isToolOpen('shift') ? '#fff' : '#b45309',
+                          background: isToolOpen('shift') ? '#d97706' : '#fef3c7',
+                          border: '1px solid #fcd34d',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() =>
+                          setOpenTool(isToolOpen('shift') ? null : { slotKey, mode: 'shift' })
+                        }
+                        title="Décaler l'horaire en conservant l'heure Cycle 1 d'origine"
+                      >
+                        🕒 Décaler
+                      </button>
+
+                      {mergeTargets.length > 0 && (
+                        <button
+                          type="button"
+                          className="fbtn"
+                          style={{
+                            margin: 0,
+                            padding: '5px 9px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            color: isToolOpen('merge') ? '#fff' : '#6d28d9',
+                            background: isToolOpen('merge') ? '#7c3aed' : '#f3e8ff',
+                            border: '1px solid #d8b4fe',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() =>
+                            setOpenTool(isToolOpen('merge') ? null : { slotKey, mode: 'merge' })
+                          }
+                          title="Regrouper les inscrits sur un autre créneau (max 12 chars)"
+                        >
+                          🔗 Regrouper
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: isToolOpen('cancel_weather') ? '#fff' : '#dc2626',
+                          background: isToolOpen('cancel_weather') ? '#dc2626' : '#fff',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setCancelReason(
+                            x.ok === false ? 'Vent trop fort / rafales' : C2_WEATHER_REASONS[0]
+                          );
+                          setCancelRescheduled(effectiveChars);
+                          setCancelLost(0);
+                          setOpenTool(
+                            isToolOpen('cancel_weather')
+                              ? null
+                              : { slotKey, mode: 'cancel_weather' }
+                          );
+                        }}
+                        title="Annuler la séance pour météo ou terrain (Vie 2)"
+                      >
+                        ⛔ Annuler (Vie 2)
+                      </button>
+
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 8px',
+                          fontSize: '0.70rem',
+                          fontWeight: 700,
+                          color: '#64748b',
+                          background: '#fff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          onCycle2Action(f, x, { type: 'reset_to_cycle1' });
+                          setOpenTool(null);
+                        }}
+                        title="Revenir à l'état Cycle 1 (sans décision tactique)"
+                      >
+                        ↩
+                      </button>
+                    </>
+                  )}
                 </>
               )}
 
@@ -528,60 +707,378 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     border: '1px solid #bae6fd',
                     borderRadius: '6px',
                     cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
                   }}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() =>
                     onOpenObservationModal({
                       dateStr: currentDs,
                       slotKey,
-                      slotStart: startTimeStr,
-                      slotEnd: endTimeStr,
+                      slotStart: displayStart,
+                      slotEnd: displayEnd,
                       isCustom: x.isCustom,
                       customTitle: x.customTitle,
-                    });
-                  }}
-                  title="Noter un relevé terrain ou une cause d'annulation pour les statistiques"
+                    })
+                  }
+                  title="Saisir le REX complet de la séance (hauteurs d'eau, chars, météo)"
                 >
-                  <span>📝</span>
-                  <span>Relevé</span>
+                  📝 REX
                 </button>
               )}
             </div>
-          ) : onToggleSlotValidation ? (
-            <button
-              type="button"
-              className={`slot-toggle-btn ${decision === 'valid' ? 'val-on' : 'val-off'}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSlotValidation(f, x);
-              }}
-            >
-              {decision === 'valid' ? '✓ Validé' : '+ Valider'}
-            </button>
-          ) : null}
 
-          <div
-            style={{
-              fontSize: '1.2rem',
-              fontWeight: 900,
-              letterSpacing: '-0.02em',
-              color:
-                decision === 'valid'
-                  ? '#14532d'
-                  : decision === 'rejected'
-                  ? '#991b1b'
-                  : '#0f172a',
-              textDecoration: decision === 'rejected' ? 'line-through' : 'none',
-              minWidth: '125px',
-              textAlign: 'right',
-            }}
-          >
-            {t}
+            {/* Horaire Cycle 1 / Cycle 2 */}
+            <div style={{ minWidth: '130px', textAlign: 'right' }}>
+              {isShifted && (
+                <div style={{ fontSize: '0.72rem', color: '#64748b', textDecoration: 'line-through', fontWeight: 700 }}>
+                  C1 : {startTimeStr} - {endTimeStr}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: '1.2rem',
+                  fontWeight: 900,
+                  letterSpacing: '-0.02em',
+                  color:
+                    c2Status === 'cancelled_weather'
+                      ? '#991b1b'
+                      : c2Status === 'merged'
+                      ? '#6d28d9'
+                      : c2Status === 'shifted'
+                      ? '#b45309'
+                      : inCycle2
+                      ? '#14532d'
+                      : '#0f172a',
+                  textDecoration:
+                    c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
+                      ? 'line-through'
+                      : 'none',
+                }}
+              >
+                {displayStart} - {displayEnd}
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* ALERTE DÉPASSEMENT 12 CHARS / MONITEUR */}
+        {isOverCapacity && (
+          <div
+            style={{
+              padding: '6px 10px',
+              borderRadius: '6px',
+              background: '#fee2e2',
+              border: '1px solid #fca5a5',
+              color: '#991b1b',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+            }}
+          >
+            ⚠️ Attention : {effectiveChars} chars engagés sur ce créneau, au-dessus de la limite de {MAX_CHARS_PER_INSTRUCTOR} chars max par moniteur.
+          </div>
+        )}
+
+        {/* PANNEAU INLINE 1 : SAISIE RAPIDE MONO/BI SI MAINTENU SANS FICHE CLIENT */}
+        {isToolOpen('confirm_chars') && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: '#f0fdf4',
+              border: '1.5px solid #86efac',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px',
+              fontSize: '0.76rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <strong style={{ color: '#166534' }}>
+                ⚡ Déclencher Cycle 2 (≥ 1 char requis, max {MAX_CHARS_PER_INSTRUCTOR}) :
+              </strong>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
+                Mono :
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={confirmMono}
+                  onChange={e => setConfirmMono(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ width: '54px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
+                />
+              </label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
+                Bi :
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={confirmBi}
+                  onChange={e => setConfirmBi(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ width: '54px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
+                />
+              </label>
+              <span style={{ fontWeight: 800, color: confirmMono + confirmBi > 12 ? '#dc2626' : '#15803d' }}>
+                = {confirmMono + confirmBi} / {MAX_CHARS_PER_INSTRUCTOR} chars ({confirmMono + confirmBi * 2} pers.)
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                disabled={confirmMono + confirmBi < 1}
+                onClick={() => {
+                  const total = confirmMono + confirmBi;
+                  if (total < 1) return;
+                  onCycle2Action(f, x, {
+                    type: 'confirm',
+                    monoCount: confirmMono,
+                    biCount: confirmBi,
+                    pilotsCount: confirmMono + confirmBi * 2,
+                    instructor: 'Jérôme',
+                  });
+                  setOpenTool(null);
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: confirmMono + confirmBi >= 1 ? '#16a34a' : '#94a3b8',
+                  color: '#fff',
+                  fontWeight: 800,
+                  cursor: confirmMono + confirmBi >= 1 ? 'pointer' : 'not-allowed',
+                }}
+              >
+                ✓ Confirmer en Cycle 2
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpenTool(null)}
+                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PANNEAU INLINE 2 : DÉCALAGE HORAIRE */}
+        {isToolOpen('shift') && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: '#fffbeb',
+              border: '1.5px solid #fcd34d',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              fontSize: '0.76rem',
+            }}
+          >
+            <div>
+              <strong style={{ color: '#92400e' }}>
+                🕒 Décaler depuis Cycle 1 ({startTimeStr} – {endTimeStr}) :
+              </strong>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {[-30, -15, 0, 15, 30, 45].map(delta => (
+                <button
+                  key={delta}
+                  type="button"
+                  onClick={() => {
+                    onCycle2Action(f, x, {
+                      type: 'shift',
+                      shiftMinutes: delta,
+                      newStart: shiftTimeString(startTimeStr, delta),
+                      newEnd: shiftTimeString(endTimeStr, delta),
+                    });
+                    setOpenTool(null);
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #f59e0b',
+                    background: delta === 0 ? '#fff' : '#fef3c7',
+                    color: '#92400e',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {delta === 0 ? 'Heure C1 d’origine' : delta > 0 ? `+${delta} min` : `${delta} min`}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setOpenTool(null)}
+                style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PANNEAU INLINE 3 : REGROUPEMENT / FUSION */}
+        {isToolOpen('merge') && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: '#faf5ff',
+              border: '1.5px solid #d8b4fe',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              fontSize: '0.76rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong style={{ color: '#6d28d9' }}>
+                🔗 Regrouper ces {effectiveChars} char(s) sur un autre créneau de la journée (max {MAX_CHARS_PER_INSTRUCTOR} chars) :
+              </strong>
+              <button
+                type="button"
+                onClick={() => setOpenTool(null)}
+                style={{ padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Fermer
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {mergeTargets.map(tgt => (
+                <button
+                  key={tgt.slotKey}
+                  type="button"
+                  onClick={() => {
+                    onCycle2Action(f, x, {
+                      type: 'merge',
+                      targetSlotKey: tgt.slotKey,
+                      targetLabel: tgt.label,
+                    });
+                    setOpenTool(null);
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: tgt.overMax ? '1.5px solid #ef4444' : '1.5px solid #a855f7',
+                    background: tgt.overMax ? '#fef2f2' : '#ffffff',
+                    color: tgt.overMax ? '#991b1b' : '#581c87',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ➔ {tgt.label} ({effectiveChars} + {tgt.oChars} = {tgt.combined}/{MAX_CHARS_PER_INSTRUCTOR} chars{tgt.overMax ? ' ⚠️' : ''})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* PANNEAU INLINE 4 : ANNULATION MÉTÉO / TERRAIN (VIE 2) */}
+        {isToolOpen('cancel_weather') && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: '#fef2f2',
+              border: '1.5px solid #fca5a5',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              fontSize: '0.76rem',
+            }}
+          >
+            <strong style={{ color: '#991b1b' }}>
+              ⛔ Annulation Météo / Terrain (Vie 2) · Bilan commercial des {effectiveChars} char(s) inscrits :
+            </strong>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+                style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #fca5a5', fontWeight: 700, background: '#fff' }}
+              >
+                {C2_WEATHER_REASONS.map(r => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#166534' }}>
+                Chars replacés :
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={cancelRescheduled}
+                  onChange={e => setCancelRescheduled(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ width: '52px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
+                />
+              </label>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#991b1b' }}>
+                Chars perdus :
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={cancelLost}
+                  onChange={e => setCancelLost(Math.max(0, Number(e.target.value) || 0))}
+                  style={{ width: '52px', padding: '4px', borderRadius: '4px', border: '1px solid #fca5a5', fontWeight: 800 }}
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onCycle2Action(f, x, {
+                    type: 'cancel_weather',
+                    reason: cancelReason,
+                    rescheduledChars: cancelRescheduled,
+                    lostChars: cancelLost,
+                  });
+                  setOpenTool(null);
+                }}
+                style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
+              >
+                Confirmer Vie 2
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOpenTool(null)}
+                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* MENTION REPORT SMS VERS FUTUR OUTIL DE RÉSERVATION */}
+        {needsSmsManualNotice && (
+          <div
+            style={{
+              padding: '6px 10px',
+              borderRadius: '6px',
+              background: '#f8fafc',
+              border: '1px dashed #94a3b8',
+              color: '#475569',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>📲</span>
+            <span>
+              SMS clients : En attente de connexion avec le futur outil de réservation (prévenir les inscrits manuellement si besoin).
+            </span>
+          </div>
+        )}
       </div>
     );
   };
@@ -591,18 +1088,26 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     let msg: React.ReactNode = null;
 
     if (v.st === 'none') {
-      msg = <>Proposition non encore validée pour cette journée ({f.list.length} créneau{f.list.length > 1 ? 'x' : ''} disponibles).</>;
+      msg = (
+        <>
+          ⏳ En attente de validation Cycle 1 pour cette journée ({f.list.length} créneau
+          {f.list.length > 1 ? 'x' : ''} proposé{f.list.length > 1 ? 's' : ''}). La validation s&apos;effectue dans l&apos;onglet <b>Validation des créneaux de roulage</b>.
+        </>
+      );
     } else if (v.st === 'ok') {
       msg = (
         <>
-          ✅ <b>{v.valCount} validé{v.valCount > 1 ? 's' : ''}{v.rejCount ? ` · ${v.rejCount} refusé${v.rejCount > 1 ? 's' : ''}` : ''}</b> (sur {v.totalCount}) le {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
-          {v.isPartial && <span style={{ opacity: 0.9 }}> (sélection partielle)</span>}
+          ✅ <b>{v.valCount} à publier (C1)</b>
+          {v.notPublishedCount ? ` · 🚫 ${v.notPublishedCount} non publié${v.notPublishedCount > 1 ? 's' : ''}` : ''}
+          {v.cycle2Count > 0 ? ` · ⚡ ${v.cycle2Count} en Cycle 2` : ''}
+          {v.closedNoBookingsCount > 0 ? ` · 🌑 ${v.closedNoBookingsCount} Vie 1` : ''} (sur {v.totalCount}) le{' '}
+          {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
         </>
       );
     } else {
       msg = (
         <>
-          ⚠️ <b>Prévisions modifiées depuis ton enregistrement</b> du{' '}
+          ⚠️ <b>Cycle 2 impacté : prévisions / marées modifiées</b> depuis l&apos;enregistrement du{' '}
           {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
           {v.add.length > 0 && (
             <>
@@ -630,49 +1135,27 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     }
 
     return (
-      <>
-        <div className="note" style={{ marginTop: '10px' }}>
-          {msg}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
-          <button
-            className="fbtn"
-            type="button"
-            style={{ background: '#0284c7', color: '#fff' }}
-            onClick={() => onValidateDay(f.ds, f, 'wind_only')}
-            title="Valider uniquement les créneaux vent OK et refuser les hors vent"
-          >
-            ⚡ Valider si Vent OK
-          </button>
-          <button
-            className="fbtn"
-            type="button"
-            onClick={() => onValidateDay(f.ds, f, 'all')}
-            title="Valider l'ensemble des créneaux de cette journée sans exception"
-          >
-            ✓ Tout valider
-          </button>
-          {v.st !== 'none' && onClearValidation && (
-            <button
-              className="fbtn"
-              type="button"
-              style={{
-                background: 'transparent',
-                color: '#dc2626',
-                border: '1px solid #fca5a5',
-              }}
-              onClick={() => onClearValidation(f.ds)}
-              title="Supprimer la validation pour cette journée"
-            >
-              ✕ Réinitialiser
-            </button>
-          )}
-        </div>
-      </>
+      <div className="note" style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+        <div>{msg}</div>
+        <button
+          type="button"
+          className="fbtn"
+          style={{
+            margin: 0,
+            background: '#f8fafc',
+            color: '#0369a1',
+            border: '1px solid #bae6fd',
+            fontWeight: 800,
+          }}
+          onClick={() => onSelectDayInCalendar(f.ds)}
+          title="Ouvrir cette journée dans l'onglet Validation des créneaux de roulage (Cycle 1)"
+        >
+          📅 Ouvrir en Validation C1
+        </button>
+      </div>
     );
   };
 
-  // Active alerts
   const alerts: string[] = [];
   if (!windList.length) {
     alerts.push(
@@ -683,14 +1166,45 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     alerts.push("Le vent provient d'un modèle global (indicatif).");
   }
   alerts.push('📡 Balise Winds Up Pentrez (Spot 66) : relais AROME HD Météo-France (1,3 km) actif sur la plage.');
+  alerts.push('📲 Automatisations SMS clients : en attente du futur outil de réservation en ligne.');
 
   return (
     <div id="tab2">
-      {/* Header with Mode toggle restricted to tomorrow by default */}
+      {/* Calendrier en haut du Cycle 2 (exigence Jérôme) */}
+      <CalendarGrid
+        year={year}
+        month={month}
+        selectedDate={currentDs}
+        onSelectDate={handleSelectCustomDate}
+        onPrevMonth={onPrevMonth}
+        onNextMonth={onNextMonth}
+        settings={settings}
+        EX={EX}
+        W={tideW}
+        first={first}
+        last={last}
+        windList={windList}
+        validations={validations}
+        bookingsMap={bookingsMap}
+        customSlotsMap={customSlotsMap}
+      />
+
+      {/* Balise Winds-Up Douarnenez Pentrez (Spot 66) entre le calendrier et le tableau météo */}
+      <WindsUpBaliseCard dateStr={currentDs} settings={settings} />
+
+      {/* Tableau Windguru directement sous la balise */}
+      <WindguruTable
+        dateStr={currentDs}
+        settings={settings}
+        EX={EX}
+        windList={windList}
+      />
+
+      {/* En-tête Cycle 2 : Adaptation aux conditions météo et prise de décisions */}
       <div
         className="card"
         style={{
-          borderLeft: '4px solid var(--ac)',
+          borderLeft: '4px solid #7c3aed',
           display: 'flex',
           flexDirection: 'column',
           gap: '12px',
@@ -698,46 +1212,120 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <div className="fh" style={{ margin: 0, fontWeight: 900, fontSize: '0.9rem' }}>
-              {activeDay === 'tomorrow' ? 'Focus Lendemain (Demain)' : "Focus Aujourd'hui"}
+            <div className="fh" style={{ margin: 0, fontWeight: 900, fontSize: '0.9rem', color: '#6d28d9' }}>
+              Cycle 2 · Adaptation aux conditions météo et prise de décisions (max {MAX_CHARS_PER_INSTRUCTOR} chars/moniteur)
             </div>
             <div style={{ fontSize: '1.05rem', fontWeight: 800, textTransform: 'capitalize' }}>
               {formatWd(currentDs)}
             </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
+              Seuil : {settings.L.toFixed(2).replace('.', 'm')}
+              {settings.mg ? ` − ${settings.mg} cm` : ''} · min. 09h00–{settings.h1}h · Coef {coef ?? '—'}
+              {pl.full.length ? ` · ${pl.full.length} séance${pl.full.length > 1 ? 's' : ''} complète${pl.full.length > 1 ? 's' : ''}` : ''}
+            </div>
           </div>
 
-          {/* View toggle (limited to tomorrow by default, option to view today) */}
-          <div style={{ display: 'flex', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {onOpenObservationModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  const s0 = currentFocus.list[0];
+                  onOpenObservationModal({
+                    dateStr: currentDs,
+                    slotKey: s0 ? kOf(s0) : 'general',
+                    slotStart: s0 ? lc(s0.a, cy, cm, cd) : '09:00',
+                    slotEnd: s0 ? lc(s0.b, cy, cm, cd) : '10:00',
+                    isCustom: s0?.isCustom,
+                    customTitle: s0?.customTitle,
+                  });
+                }}
+                style={{
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '7px 12px',
+                  fontWeight: 800,
+                  fontSize: '0.76rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.30)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+                title="Noter un relevé terrain (hauteurs d'eau, surcote, météo)"
+              >
+                <span style={{ fontWeight: 900 }}>+</span>
+                <span>NOTER UN RELEVÉ</span>
+              </button>
+            )}
+
             <button
               type="button"
               className="fbtn"
               style={{
-                background: activeDay === 'tomorrow' ? 'var(--ac)' : 'var(--cell)',
-                color: activeDay === 'tomorrow' ? '#111' : 'var(--tx)',
-                border: '1px solid var(--bd)',
+                background: '#f8fafc',
+                color: '#0369a1',
+                border: '1px solid #bae6fd',
                 margin: 0,
+                fontWeight: 800,
               }}
-              onClick={() => handleDayChange('tomorrow')}
+              onClick={() => onSelectDayInCalendar(currentDs)}
+              title="Basculer vers cette journée dans Validation des créneaux (Cycle 1)"
             >
-              Demain (recommandé)
-            </button>
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                background: activeDay === 'today' ? 'var(--ac)' : 'var(--cell)',
-                color: activeDay === 'today' ? '#111' : 'var(--tx)',
-                border: '1px solid var(--bd)',
-                margin: 0,
-              }}
-              onClick={() => handleDayChange('today')}
-            >
-              Aujourd'hui
+              📅 Validation (C1)
             </button>
           </div>
         </div>
 
-        {/* ÉTAPE 3 : SÉLECTEUR DE MODE DE PLANIFICATION (THÉORIQUE VS RÉEL) */}
+        {holiday.isHoliday && (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#f8fafc',
+              border: '1.5px solid #cbd5e1',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              fontSize: '0.74rem',
+              alignSelf: 'flex-start',
+              color: '#0f172a',
+            }}
+          >
+            <span>🎒 {holiday.holidayName}</span>
+            <span style={{ fontWeight: 800, color: '#334155' }}>({holiday.zonesLabel})</span>
+            <span style={{ display: 'inline-flex', gap: '3px' }}>
+              {(['A', 'B', 'C'] as const).map(z => {
+                const active =
+                  (z === 'A' && holiday.isZoneA) ||
+                  (z === 'B' && holiday.isZoneB) ||
+                  (z === 'C' && holiday.isZoneC);
+                const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+                return (
+                  <span
+                    key={z}
+                    title={zoneStyle.label}
+                    style={{
+                      padding: '1px 5px',
+                      borderRadius: '3px',
+                      fontSize: '0.62rem',
+                      fontWeight: 900,
+                      color: active ? zoneStyle.text : '#475569',
+                      background: active ? zoneStyle.bg : '#cbd5e1',
+                      opacity: active ? 1 : 0.45,
+                    }}
+                  >
+                    {z}
+                  </span>
+                );
+              })}
+            </span>
+          </div>
+        )}
+
+        {/* SÉLECTEUR DE MODE DE PLANIFICATION (THÉORIQUE VS RÉEL) */}
         {(() => {
           const logsCount = getStoredWaterlineLogs().length;
           const isDemo = typeof window !== 'undefined' && localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
@@ -773,7 +1361,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       fontSize: '0.72rem',
                       fontWeight: currentMode === 'theorique' ? 800 : 600,
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease',
                     }}
                   >
                     📐 Mode Théorique (SHOM)
@@ -783,12 +1370,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     type="button"
                     disabled={!isUnlocked}
                     onClick={() => {
-                      if (!isUnlocked) {
-                        alert(
-                          `🔒 Le Mode Réel est verrouillé (${logsCount}/300 mesures).\n\nEnregistrez 300 relevés GPS terrain dans l'onglet « Étalonnage GPS » pour débloquer le Modèle Empirique.`
-                        );
-                        return;
-                      }
+                      if (!isUnlocked) return;
                       onUpdateSettings({ calculationMode: 'reel' });
                     }}
                     style={{
@@ -800,7 +1382,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       fontSize: '0.72rem',
                       fontWeight: currentMode === 'reel' ? 800 : 600,
                       cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                      transition: 'all 0.15s ease',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '4px',
@@ -818,7 +1399,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 </div>
               </div>
 
-              {/* Statut descriptif du mode actif */}
               <div style={{ fontSize: '0.68rem', color: currentMode === 'reel' ? '#15803d' : '#0369a1', fontWeight: 700 }}>
                 {currentMode === 'reel'
                   ? `✨ Créneaux adaptés selon le modèle empirique (+${settings.empiricalOffsetCm ?? 15} cm de surcote constatée)`
@@ -829,9 +1409,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         })()}
       </div>
 
-      {/* Main Focus Verdict Card */}
+      {/* Main Focus Verdict Card + Graphiques Marée & Vent complets */}
       <div className="card">
-        <div className="fh">Verdict & Décision de roulage</div>
+        <div className="fh">Verdict &amp; Analyse Décisionnelle Complète (Cycle 2)</div>
         <div className="vd" style={{ background: VC[currentFocus.k][0] }}>
           <b>{VC[currentFocus.k][1]}</b>
           <span>
@@ -840,7 +1420,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </span>
         </div>
 
-        <div className="note" style={{ marginTop: '10px', lineHeight: 1.4 }}>
+        <div className="note" style={{ marginTop: '10px', marginBottom: '12px', lineHeight: 1.4 }}>
           {currentFocus.rng ? (
             <>
               💨 <b>Vent prévu sur les créneaux :</b> {currentFocus.rng}{' '}
@@ -851,8 +1431,52 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           )}
         </div>
 
+        {/* Courbe de hauteur d'eau & plage praticable (identique Cycle 1) */}
+        <CurveChart
+          dateStr={currentDs}
+          settings={settings}
+          EX={EX}
+          W={tideW}
+          first={first}
+          last={last}
+        />
+
+        {/* Courbe / Timeline Vent & Rafales heure par heure (identique Cycle 1) */}
+        <WindPanel
+          dateStr={currentDs}
+          settings={settings}
+          W={tideW}
+          first={first}
+          last={last}
+          windList={windList}
+        />
+
+        {/* Plages praticables & coefficient */}
+        {!P.length && (
+          <div className="w">
+            <span className="chip k">AUCUNE PLAGE</span>
+            <span className="chip k">COEF : {coef}</span>
+          </div>
+        )}
+
+        {P.map((p, idx) => (
+          <div key={`c2-pract-${idx}`} className="w">
+            <span className="chip">● PRATICABLE</span>
+            <span className="chip k">COEF : {coef}</span>
+            <span className="hr">
+              {lc(p[0], cy, cm, cd)} - {lc(p[1], cy, cm, cd)}
+            </span>
+          </div>
+        ))}
+
+        {allDay(cy, cm, cd, settings) && (
+          <div className="m">
+            Coef ≤ {settings.cmax} : roulage toute la journée, sans contrainte de marée.
+          </div>
+        )}
+
         <div className="fh" style={{ marginTop: '14px', marginBottom: '6px' }}>
-          Séances proposées ({currentFocus.list.length})
+          Créneaux du jour ({currentFocus.list.length}) · Jauge max {MAX_CHARS_PER_INSTRUCTOR} chars / moniteur
         </div>
 
         {currentFocus.list.length > 0 ? (
@@ -861,25 +1485,89 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           <div className="fs">
             <div>
               <b>Aucune séance possible</b>
-              <small>Marée haute ou hors plage d'ouverture</small>
+              <small>Marée haute ou hors plage d&apos;ouverture</small>
             </div>
           </div>
         )}
 
         {renderVBox(currentFocus)}
+
+        {/* Conditions détaillées vent, soleil, lune, surcote barométrique et PM/BM (identique Cycle 1) */}
+        {DW.P.length > 0 && (
+          <div style={{ marginTop: '12px' }}>
+            {DW.lvl === -1 ? (
+              <div className="m">💨 Vent indisponible (hors ligne ou au-delà de 16 jours)</div>
+            ) : (
+              <>
+                {DW.ws.map((x, i) => (
+                  <div key={`c2-dw-${i}`} className="m">
+                    💨 {lc(DW.P[i][0], cy, cm, cd)}–{lc(DW.P[i][1], cy, cm, cd)} :{' '}
+                    {wtxt(x) || 'pas de donnée'}
+                  </div>
+                ))}
+
+                {DW.ws.some(x => x && x.src === 'G') && (
+                  <div className="m">
+                    Au-delà d&apos;environ 2 jours, le vent vient d&apos;un modèle global (moins précis) : indicatif
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="m" style={{ marginTop: '12px' }}>
+          ☀ Lever {R.lev} · Coucher {R.cou} · lumière retenue {R.lum}
+        </div>
+        <div className="m">
+          🌙 {R.ph} · Lever {R.lr} · Coucher {R.ls}
+        </div>
+
+        {ad.length > 0 && (
+          <div className="m">
+            🌡 Basse pression : +{Math.round(Math.max(...ad) * 100)} cm ajoutés aux hauteurs d&apos;eau (correction automatique)
+          </div>
+        )}
+
+        <div className="m">
+          {EX.filter(p => p.t >= dayStartU && p.t < dayEndU)
+            .map(
+              p =>
+                (p.pm ? 'PM ' : 'BM ') +
+                lc(p.t, cy, cm, cd) +
+                ' ' +
+                (p.hd != null ? p.hd : p.h).toFixed(2).replace('.', ',') +
+                ' m'
+            )
+            .join('   ·   ')}
+        </div>
       </div>
 
-      {/* Windguru-style summary forecast table (Requirement 8) */}
-      <WindguruTable
-        dateStr={currentDs}
+      {/* Tableau mensuel et courbe de marnage cliquable (identiques Cycle 1) */}
+      <TableView
+        year={year}
+        month={month}
         settings={settings}
         EX={EX}
+        W={tideW}
+        first={first}
+        last={last}
         windList={windList}
       />
 
-      {/* Active Alerts */}
+      <div className="card nop">
+        <MarnageChart
+          year={year}
+          month={month}
+          selectedDate={currentDs}
+          onSelectDate={handleSelectCustomDate}
+          settings={settings}
+          EX={EX}
+        />
+      </div>
+
       <div className="card">
-        <div className="fh">Alertes & Conditions</div>
+        <div className="fh">Alertes &amp; Conditions</div>
         {alerts.map((al, idx) => (
           <div key={`al-${idx}`} className="fal">
             {al}
@@ -887,30 +1575,20 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ))}
       </div>
 
-      {/* Export valid days */}
+      {/* Export valid days (100% digital, plus d'impression papier) */}
       <div className="card">
-        <div className="fh">Export du planning validé</div>
+        <div className="fh">Export numérique du planning</div>
         <div className="note">
-          L'export ne contient que les journées que vous avez validées sur cet appareil.
+          L&apos;export CSV reprend les créneaux Cycle 1, horaires Cycle 2 ajustés et le nombre de chars engagés.
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             className="fbtn"
             type="button"
-            onClick={() => exportValidCsv(validations, settings.cap)}
+            onClick={() => exportValidCsv(validations, MAX_CHARS_PER_INSTRUCTOR)}
           >
-            Exporter les jours validés (CSV)
+            📥 Exporter le planning Cycle 1 / Cycle 2 (CSV)
           </button>
-          {onOpenPrintAgenda && (
-            <button
-              className="fbtn"
-              type="button"
-              style={{ background: '#16a34a', color: '#fff' }}
-              onClick={onOpenPrintAgenda}
-            >
-              📋 Imprimer la fiche agenda papier
-            </button>
-          )}
         </div>
       </div>
 
@@ -932,7 +1610,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
       {/* Verdict rules explanation */}
       <div className="card hyp">
-        <b>Règles du verdict</b>
+        <b>Règles du verdict &amp; Cycle 2</b>
         <ul>
           <li>
             <b>Ouvrir</b> : au moins {settings.fmin} séances praticables avec un vent favorable (8 à 25 nds, rafales ≤ 35 nds) et aucune séance hors plage.
@@ -943,8 +1621,34 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           <li>
             <b>Ne pas rouler</b> : aucune séance complète, ou vent trop faible/fort sur tous les créneaux.
           </li>
+          <li>
+            <b>Capacité moniteur</b> : maximum <b>{MAX_CHARS_PER_INSTRUCTOR} chars par moniteur</b> (1 monoplace = 1 char, 1 biplace = 1 char), et minimum <b>1 char inscrit</b> pour activer le Cycle 2.
+          </li>
         </ul>
       </div>
+
+      {activeBookingSlot && (
+        <SlotBookingsModal
+          isOpen={Boolean(activeBookingSlot)}
+          onClose={() => setActiveBookingSlot(null)}
+          dateStr={currentDs}
+          slotKey={activeBookingSlot.slotKey}
+          slotStart={activeBookingSlot.slotStart}
+          slotEnd={activeBookingSlot.slotEnd}
+          slotTitle={activeBookingSlot.slotTitle}
+          bookings={bookingsMap[buildReservationKey(currentDs, activeBookingSlot.slotKey)] || []}
+          onSaveBookings={(sKey, list) => {
+            onSaveSlotBookings?.(
+              currentDs,
+              sKey,
+              activeBookingSlot.slotStart,
+              activeBookingSlot.slotEnd,
+              list
+            );
+          }}
+          isReadOnly={isReadOnly}
+        />
+      )}
     </div>
   );
 };
