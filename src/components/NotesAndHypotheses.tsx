@@ -126,6 +126,31 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const notesList = useMemo<TechNoteItem[]>(() => {
     return [
       {
+        id: 'note-orientation-plage-lestrevet',
+        category: 'topographie',
+        categoryLabel: 'Topographie & Météo',
+        categoryColor: '#0284c7',
+        icon: '🗺️',
+        title: 'Questionnaire QCM Remplissable : Orientation Plage, Balise Pentrez & Zones GPS',
+        subtitle: '6 choix multiples pour caler les secteurs de vent (~335°/155°), la houle OSO et les 3 zones de la baie',
+        summary:
+          'Note interactive issue de l’analyse du plan Pentrez ↔ Lieue de Grève ↔ Lestrevet. Jérôme peut répondre directement aux 6 QCM à l’écran ou exporter le questionnaire en fichier Word (.doc) ou HTML remplissable hors-ligne.',
+        keyPoints: [
+          'Q1 & Q2 · Axe réel ~335°/155° : badges Travers mer / Axe / Vent de terre (Kervennec ENE) et règle éventuelle en vent faible.',
+          'Q3 · Distance ~3–4 km entre Balise Winds-Up (Pentrez Nord) et École (Lestrevet Sud) : relevé d’écart REX et calage AROME.',
+          'Q4 · Étalonnage GPS (Tab 7) : classement automatique en 3 zones (Lestrevet / Lieue de Grève / Pentrez) et suivi des bâches.',
+          'Q5 & Q6 · Pondération de la houle frontale OSO (~245°) et mini-schéma vectoriel plage + vent en Cycle 2.',
+          'Exportable en document remplissable : téléchargement direct Word (.doc), HTML autonome remplissable ou PDF A4.',
+        ],
+        docUrl: '/note_orientation_plage_lestrevet.html',
+        docBtnLabel: '🗺️ Ouvrir le Questionnaire Remplissable (Word / HTML / PDF)',
+        statusBadge: {
+          label: 'À arbitrer avec Jérôme',
+          bg: '#fef3c7',
+          color: '#92400e',
+        },
+      },
+      {
         id: 'note-arbitrage-cycle1-cycle2-digital',
         category: 'reunion',
         categoryLabel: 'Arbitrage Organisation',

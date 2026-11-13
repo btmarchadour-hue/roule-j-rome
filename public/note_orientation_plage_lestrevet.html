@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note QCM Remplissable · Orientation Plage, Balise Pentrez vs Lestrevet &amp; Zones GPS</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 10mm 12mm 10mm 12mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.42;
+      font-size: 11px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn-word { background: #1d4ed8; }
+    .btn-html { background: #16a34a; }
+    .btn-secondary { background: #334155; }
+    .btn-reset { background: #475569; }
+    .toast {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      font-weight: 700;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+      z-index: 2000;
+      display: none;
+      border-left: 4px solid #22c55e;
+    }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      max-width: calc(100% - 20px);
+      margin: 14px auto;
+      padding: 12mm 14mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 6px;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar, .toast { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .q-card { break-inside: avoid; page-break-inside: avoid; }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2.5px solid #0284c7;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-collapse: collapse;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; line-height: 1.25; }
+    .sub { color: #475569; font-size: 9.8px; }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 10px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.5px;
+    }
+    .context-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 10px;
+      margin-bottom: 12px;
+      align-items: stretch;
+    }
+    .context-panel {
+      background: #f0f9ff;
+      border: 1.5px solid #7dd3fc;
+      border-radius: 6px;
+      padding: 9px 11px;
+    }
+    .context-panel h2 {
+      margin: 0 0 5px;
+      font-size: 10.8px;
+      font-weight: 900;
+      color: #0369a1;
+    }
+    .map-frame {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .map-frame img {
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+      display: block;
+      border: 1px solid #e2e8f0;
+    }
+    .q-card {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-left: 4px solid #0284c7;
+      border-radius: 6px;
+      padding: 9px 11px;
+      margin-bottom: 9px;
+    }
+    .q-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .q-title {
+      font-size: 11px;
+      font-weight: 900;
+      color: #0f172a;
+    }
+    .q-tag {
+      font-size: 8.2px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      white-space: nowrap;
+    }
+    .q-desc {
+      margin: 0 0 7px;
+      font-size: 9.8px;
+      color: #475569;
+    }
+    .options-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 7px;
+    }
+    .opt-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 5px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      cursor: pointer;
+      font-size: 9.8px;
+      transition: border-color 0.12s ease, background 0.12s ease;
+    }
+    .opt-label:hover {
+      border-color: #38bdf8;
+      background: #f0f9ff;
+    }
+    .opt-label input {
+      margin-top: 2px;
+      accent-color: #0284c7;
+      transform: scale(1.1);
+      cursor: pointer;
+    }
+    .opt-label.selected {
+      background: #eff6ff;
+      border-color: #0284c7;
+      font-weight: 700;
+    }
+    .comment-input, .meta-input {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-family: inherit;
+      font-size: 9.8px;
+      color: #0f172a;
+      background: #fcfcfc;
+      resize: vertical;
+    }
+    .comment-input:focus, .meta-input:focus {
+      outline: none;
+      border-color: #0284c7;
+      background: #ffffff;
+    }
+    .sign-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+      background: #fffbeb;
+      border: 1.5px solid #fcd34d;
+      border-radius: 6px;
+      padding: 9px 11px;
+    }
+    .footer {
+      margin-top: 10px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+      font-size: 8.5px;
+      color: #64748b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div style="font-weight: 800; font-size: 12.5px;">
+      🗺️ Note QCM Remplissable pour Jérôme · Topographie Plage, Secteurs de Vent &amp; Balise Pentrez
+    </div>
+    <div class="toolbar-actions">
+      <button type="button" class="btn btn-word" onclick="exportFillableWord()">📝 Exporter Word remplissable (.doc)</button>
+      <button type="button" class="btn btn-html" onclick="exportFillableHtml()">💾 Télécharger HTML remplissable (.html)</button>
+      <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer / PDF</button>
+      <button type="button" class="btn btn-reset" onclick="resetQuestionnaire()">↺ Réinitialiser</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div class="sheet" id="printable-note">
+    <table class="header-table">
+      <tr>
+        <td>
+          <span class="title-badge">Questionnaire d'Arbitrage Terrain · Document Remplissable</span>
+          <h1>Affinage Météo, Orientation Plage &amp; Zonage GPS (Pentrez ↔ Lestrevet)</h1>
+          <div class="sub">Validation des règles géographiques et directionnelles à intégrer dans l'application « Ça roule ? »</div>
+        </td>
+        <td style="text-align: right; vertical-align: bottom;">
+          <div style="font-weight: 900; color: #0284c7; font-size: 11.5px;">Char à Voile du Bout du Monde</div>
+          <div style="font-size: 9px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="meta-box">
+      <div><strong>Destinataire :</strong> Jérôme Bouchez (Moniteur titulaire)</div>
+      <div><strong>Proposé par :</strong> Benoît Marchadour (Concepteur)</div>
+      <div>
+        <strong>Date de réponse :</strong>
+        <input id="resp_date" type="date" class="meta-input" style="width: auto; padding: 2px 5px; margin-left: 4px;" />
+      </div>
+    </div>
+
+    <!-- Contexte + Carte réelle -->
+    <div class="context-grid">
+      <div class="context-panel">
+        <h2>📍 Constat issu du plan de la baie (Pentrez ↔ Lestrevet)</h2>
+        <div style="font-size: 9.5px; color: #1e293b; line-height: 1.45;">
+          • <strong>Axe réel de la plage :</strong> NNO ↔ SSE (<strong>~335° / 155°</strong>), orienté face à l'<strong>OSO (~245°)</strong> sur la baie de Douarnenez.<br>
+          • <strong>Arrière-pays :</strong> terres et reliefs de <strong>Kervennec</strong> juste derrière l'école à l'<strong>ENE (~65°)</strong>.<br>
+          • <strong>3 secteurs sur ~3–4 km :</strong> <em>Plage de Pentrez</em> (Nord, où est la balise Winds-Up Spot 66), <em>La Lieue de Grève</em> (Centre) et <em>Plage de Lestrevet / École</em> (Sud).<br>
+          • <strong>Objectif du questionnaire :</strong> coche tes préférences ci-dessous (ou exporte en Word / HTML remplissable) pour calibrer les alertes et l'étalonnage GPS.
+        </div>
+      </div>
+
+      <div class="map-frame">
+        <img src="/assets/aistudio/image_1995386a.png" alt="Plan Plage de Pentrez, La Lieue de Grève et Plage de Lestrevet" />
+        <div style="font-size: 8.5px; color: #64748b; text-align: center; margin-top: 4px;">
+          Axe de roulage ~335°–155° · Face baie OSO (~245°) · Kervennec ENE (~65°)
+        </div>
+      </div>
+    </div>
+
+    <!-- Q1 -->
+    <div class="q-card" data-q="q1">
+      <div class="q-header">
+        <div class="q-title">Question 1 · Qualification de la direction du vent (Axe plage ~335° / 155°)</div>
+        <span class="q-tag">Cycle 2 &amp; Balise Winds-Up</span>
+      </div>
+      <p class="q-desc">
+        Actuellement, le verdict n'évalue que la force du vent (8–25 nds). Souhaites-tu afficher un indicateur sur l'orientation du vent par rapport à l'axe de la plage ?
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="radio" name="q1" value="Oui complet : Travers mer (OSO/O/SO/ONO) · Dans l'axe (NNO/SSE) · Vent de terre (NE/E/ESE)">
+          <span><strong>Option A (Complète) :</strong> Afficher les 3 badges visuels — <em>Travers mer optimal</em> (OSO/O/SO), <em>Dans l'axe de plage</em> (NNO/SSE) et <em>Vent de terre</em> (NE/E/ESE).</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q1" value="Oui simplifié : uniquement une alerte si Vent de terre ou Dans l'axe">
+          <span><strong>Option B (Simplifiée) :</strong> Alerter uniquement quand le secteur est délicat (vent de terre ou plein axe), sans badge quand c'est travers mer.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q1" value="Non : garder uniquement la force en nœuds et la boussole brute">
+          <span><strong>Option C :</strong> Ne pas ajouter de qualification automatique, garder seulement la direction cardinale (NE, OSO…) et la vitesse.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q1_note" rows="2" placeholder="Précision de Jérôme sur les secteurs favorables / défavorables (ex: SSE vs NNO, limites exactes en degrés)…"></textarea>
+    </div>
+
+    <!-- Q2 -->
+    <div class="q-card" data-q="q2">
+      <div class="q-header">
+        <div class="q-title">Question 2 · Gestion du vent de terre (secteur NE / ENE / E / ESE via Kervennec)</div>
+        <span class="q-tag">Dévente &amp; Turbulence</span>
+      </div>
+      <p class="q-desc">
+        Par vent d'Est / Nord-Est passant par-dessus les terres de Kervennec et la dune devant l'école, l'air est souvent plus irrégulier ou freiné en haut de plage. Comment l'outil doit-il réagir ?
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="radio" name="q2" value="Alerte visuelle orange uniquement (« Vent de terre : risque de trous d'air / rafales »)">
+          <span><strong>Option A :</strong> Afficher une alerte informative orange (<em>« Vent de terre : déventes possibles devant l'école »</em>) sans changer le calcul automatique.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q2" value="Majorer automatiquement le vent mini requis (+2 à +3 nds) ou passer le verdict en « Ouvrir avec réserves »">
+          <span><strong>Option B :</strong> Passer le verdict en <em>« Ouvrir avec réserves »</em> si vent faible (&lt; 10–11 nds) par secteur de terre, pour éviter les séances poussives.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q2" value="Aucune règle automatique : je décide au cas par cas sur place">
+          <span><strong>Option C :</strong> Aucune règle particulière sur le vent de terre.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q2_note" rows="2" placeholder="Commentaire de Jérôme (ex: seuil minimum réel par secteur NE/E vs O/OSO)…"></textarea>
+    </div>
+
+    <!-- Q3 -->
+    <div class="q-card" data-q="q3">
+      <div class="q-header">
+        <div class="q-title">Question 3 · Écart géographique entre Balise Pentrez (Spot 66) et École Lestrevet (~3–4 km)</div>
+        <span class="q-tag">Balise vs Terrain</span>
+      </div>
+      <p class="q-desc">
+        La balise Winds-Up Spot 66 est située à Pentrez (au nord du plan), alors que le départ des séances est au sud devant l'école. Et le modèle météo AROME est actuellement centré au milieu (Lieue de Grève).
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="checkbox" name="q3" value="Ajouter dans le REX un choix rapide « Vent à Lestrevet vs Balise Pentrez : Identique / Plus faible / Plus fort »">
+          <span><strong>Choix 1 :</strong> Ajouter dans le REX de séance un clic rapide <em>« Ressenti Lestrevet vs Balise Pentrez (identique / plus faible / plus fort) »</em> pour objectiver les écarts.</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" name="q3" value="Recaler les coordonnées AROME sur Lestrevet Sud (face à l'école)">
+          <span><strong>Choix 2 :</strong> Recaler le point de prévision AROME exactement face à l'école à <strong>Lestrevet Sud</strong> (plutôt qu'au milieu de la Lieue de Grève).</span>
+        </label>
+        <label class="opt-label">
+          <input type="checkbox" name="q3" value="Garder les coordonnées actuelles (Lieue de Grève) représentatives de toute la zone de roulage">
+          <span><strong>Choix 3 :</strong> Garder le point central actuel (Lieue de Grève), représentatif de l'ensemble de la piste.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q3_note" rows="2" placeholder="Constat habituel de Jérôme entre le vent affiché à Pentrez et le vent réel devant le parking de Lestrevet…"></textarea>
+    </div>
+
+    <!-- Q4 -->
+    <div class="q-card" data-q="q4">
+      <div class="q-header">
+        <div class="q-title">Question 4 · Découpage en 3 zones pour l'Étalonnage GPS (Onglet 7) &amp; Bâches</div>
+        <span class="q-tag">Étalonnage GPS</span>
+      </div>
+      <p class="q-desc">
+        Lors des relevés GPS au bord de l'eau (300 mesures pour débloquer le Mode Réel), la topographie et les bâches peuvent varier entre Lestrevet Sud, la Lieue de Grève et Pentrez Nord.
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="radio" name="q4" value="Classer automatiquement chaque point GPS dans la zone (Lestrevet / Lieue de Grève / Pentrez) + estimer la largeur de bande roulable restante">
+          <span><strong>Option A (Recommandée) :</strong> Identifier automatiquement la zone (Lestrevet / Lieue de Grève / Pentrez) d'après le GPS du smartphone + calculer la largeur de bande exploitable devant la dune.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q4" value="Afficher uniquement l'étiquette de zone sur le relevé sans calcul de largeur">
+          <span><strong>Option B :</strong> Juste enregistrer la zone (Lestrevet / Lieue de Grève / Pentrez) pour filtrer les stats et repérer les bâches par secteur.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q4" value="Ne pas découper en 3 zones, rester sur une seule plage globale">
+          <span><strong>Option C :</strong> Garder un étalonnage global unique sans distinction de zone.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q4_note" rows="2" placeholder="Remarques sur les zones de bâches récurrentes, ruissellements ou cailloux…"></textarea>
+    </div>
+
+    <!-- Q5 -->
+    <div class="q-card" data-q="q5">
+      <div class="q-header">
+        <div class="q-title">Question 5 · Impact de la houle de face (secteur OSO ~245°) sur la bande de roulage</div>
+        <span class="q-tag">Marées &amp; Houle</span>
+      </div>
+      <p class="q-desc">
+        La baie s'ouvre plein OSO (~245°). Une houle frontale (O / OSO / SO) déferle perpendiculairement et réduit plus vite la largeur sèche qu'une houle de NO abritée par Crozon.
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="radio" name="q5" value="Afficher une alerte dès que houle frontale (SO/OSO/O) ≥ 1,2 m en marée montante">
+          <span><strong>Option A :</strong> Afficher une alerte Cycle 2 <em>« Houle frontale OSO : jet de rive important »</em> dès que la houle de face dépasse 1,2 m.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q5" value="Proposer une marge indicative (+10 à +15 cm sur le seuil L) quand houle frontale ≥ 1,5 m">
+          <span><strong>Option B :</strong> Proposer automatiquement une marge de sécurité indicative (+10 à +15 cm) dès 1,5 m de houle frontale.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q5" value="Garder l'affichage brut de la houle dans le tableau météo sans règle spécifique">
+          <span><strong>Option C :</strong> Laisser uniquement les chiffres bruts de houle dans le tableau Météo, Vent &amp; Houle.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q5_note" rows="2" placeholder="Hauteur ou période de houle à partir de laquelle tu réduis ou décales habituellement les séances…"></textarea>
+    </div>
+
+    <!-- Q6 -->
+    <div class="q-card" data-q="q6">
+      <div class="q-header">
+        <div class="q-title">Question 6 · Mini-schéma visuel « Axe de plage (335°–155°) + Flèche du vent »</div>
+        <span class="q-tag">Ergonomie Terrain</span>
+      </div>
+      <p class="q-desc">
+        Souhaites-tu intégrer un petit repère visuel montrant le trait de côte réel (Pentrez ↔ Lestrevet) avec la flèche du vent en direct superposée pour visualiser l'angle d'un coup d'œil ?
+      </p>
+      <div class="options-list">
+        <label class="opt-label">
+          <input type="radio" name="q6" value="Oui, juste à côté du relevé en direct Winds-Up dans l'onglet Cycle 2">
+          <span><strong>Option A :</strong> Oui, directement dans l'encart de la balise Winds-Up en Cycle 2 (lecture instantanée avant séance).</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q6" value="Oui, uniquement dans la vue détaillée ou Étalonnage GPS">
+          <span><strong>Option B :</strong> Oui, mais plutôt dans l'onglet Étalonnage GPS / statistiques.</span>
+        </label>
+        <label class="opt-label">
+          <input type="radio" name="q6" value="Non, la flèche directionnelle actuelle suffit">
+          <span><strong>Option C :</strong> Non, la flèche actuelle et l'indication cardinale (NE, OSO…) suffisent.</span>
+        </label>
+      </div>
+      <textarea class="comment-input" id="q6_note" rows="2" placeholder="Autre idée ou besoin terrain suggéré par le plan…"></textarea>
+    </div>
+
+    <!-- Synthèse & Validation -->
+    <div class="sign-grid">
+      <div>
+        <div style="font-weight: 900; font-size: 10px; color: #92400e; margin-bottom: 4px;">
+          ✍️ Remarques libres / Priorités de Jérôme :
+        </div>
+        <textarea class="comment-input" id="general_notes" rows="3" placeholder="Ex : points prioritaires à intégrer en premier avant la saison…"></textarea>
+      </div>
+      <div>
+        <div style="font-weight: 900; font-size: 10px; color: #92400e; margin-bottom: 4px;">
+          👤 Répondant &amp; Validation :
+        </div>
+        <input id="resp_name" type="text" class="meta-input" value="Jérôme Bouchez" style="margin-bottom: 6px; font-weight: 700;" />
+        <div style="font-size: 9px; color: #78350f; line-height: 1.4;">
+          Tu peux cocher directement ici puis cliquer sur <strong>« Télécharger HTML remplissable »</strong> ou <strong>« Exporter Word remplissable (.doc) »</strong> pour conserver ou renvoyer tes choix remplis.
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Application « Ça roule ? » · Char à Voile du Bout du Monde · Lestrevet (Plomodiern)</span>
+      <span>Note QCM Remplissable · Géographie &amp; Météo Plage · Novembre 2026</span>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'cv_note_orientation_qcm_v1';
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => {
+        el.style.display = 'none';
+      }, 3600);
+    }
+
+    function updateLabelStyles() {
+      document.querySelectorAll('.opt-label').forEach(lbl => {
+        const inp = lbl.querySelector('input');
+        if (inp && inp.checked) {
+          lbl.classList.add('selected');
+        } else {
+          lbl.classList.remove('selected');
+        }
+      });
+    }
+
+    function saveState() {
+      const state = { inputs: {}, checks: {} };
+      document.querySelectorAll('input[type="text"], input[type="date"], textarea').forEach(el => {
+        if (el.id) state.inputs[el.id] = el.value;
+      });
+      ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].forEach(name => {
+        const vals = [];
+        document.querySelectorAll('input[name="' + name + '"]:checked').forEach(el => vals.push(el.value));
+        state.checks[name] = vals;
+      });
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {}
+      updateLabelStyles();
+    }
+
+    function loadState() {
+      const dateInp = document.getElementById('resp_date');
+      if (dateInp && !dateInp.value) {
+        dateInp.value = new Date().toISOString().slice(0, 10);
+      }
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          updateLabelStyles();
+          return;
+        }
+        const state = JSON.parse(raw);
+        if (state.inputs) {
+          Object.keys(state.inputs).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = state.inputs[id];
+          });
+        }
+        if (state.checks) {
+          Object.keys(state.checks).forEach(name => {
+            const vals = state.checks[name] || [];
+            document.querySelectorAll('input[name="' + name + '"]').forEach(el => {
+              el.checked = vals.includes(el.value);
+            });
+          });
+        }
+      } catch (e) {}
+      updateLabelStyles();
+    }
+
+    document.addEventListener('change', saveState);
+    document.addEventListener('input', saveState);
+    window.addEventListener('DOMContentLoaded', loadState);
+
+    function resetQuestionnaire() {
+      document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(el => {
+        el.checked = false;
+      });
+      document.querySelectorAll('textarea').forEach(el => {
+        el.value = '';
+      });
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      updateLabelStyles();
+      showToast('Questionnaire remis à zéro (prêt à remplir ou exporter vierge).');
+    }
+
+    function syncFormStateToDomAttributes() {
+      document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(el => {
+        if (el.checked) el.setAttribute('checked', 'checked');
+        else el.removeAttribute('checked');
+      });
+      document.querySelectorAll('input[type="text"], input[type="date"]').forEach(el => {
+        el.setAttribute('value', el.value || '');
+      });
+      document.querySelectorAll('textarea').forEach(el => {
+        el.textContent = el.value || '';
+      });
+    }
+
+    function exportFillableHtml() {
+      syncFormStateToDomAttributes();
+      const cloned = document.documentElement.cloneNode(true);
+      const toastEl = cloned.querySelector('#toast');
+      if (toastEl) toastEl.style.display = 'none';
+      const origImg = document.querySelector('.map-frame img');
+      const clonedImg = cloned.querySelector('.map-frame img');
+      if (origImg && clonedImg && origImg.complete && origImg.naturalWidth > 0) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = origImg.naturalWidth;
+          canvas.height = origImg.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(origImg, 0, 0);
+            clonedImg.setAttribute('src', canvas.toDataURL('image/png'));
+          }
+        } catch (e) {}
+      }
+      const htmlContent = '<!DOCTYPE html>\n' + cloned.outerHTML;
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Note_QCM_Orientation_Plage_Jerome.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Fichier HTML remplissable téléchargé (ouvrable et modifiable hors-ligne) !');
+    }
+
+    function escapeXmlHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function exportFillableWord() {
+      const respName = document.getElementById('resp_name')?.value || 'Jérôme Bouchez';
+      const respDate = document.getElementById('resp_date')?.value || '';
+      const generalNotes = document.getElementById('general_notes')?.value || '';
+
+      let sectionsHtml = '';
+      document.querySelectorAll('.q-card').forEach(card => {
+        const title = card.querySelector('.q-title')?.textContent || '';
+        const tag = card.querySelector('.q-tag')?.textContent || '';
+        const desc = card.querySelector('.q-desc')?.textContent || '';
+        const comment = card.querySelector('textarea')?.value || '';
+
+        let optsHtml = '';
+        card.querySelectorAll('.opt-label').forEach(lbl => {
+          const inp = lbl.querySelector('input');
+          const box = inp && inp.checked ? '☑' : '☐';
+          const text = lbl.querySelector('span')?.innerHTML || '';
+          optsHtml += `
+            <tr>
+              <td style="width:26pt; text-align:center; font-size:13pt; font-weight:bold; color:${inp && inp.checked ? '#0284c7' : '#475569'}; border:1pt solid #e2e8f0; background:${inp && inp.checked ? '#eff6ff' : '#ffffff'};">${box}</td>
+              <td style="padding:5pt 8pt; font-size:9.5pt; border:1pt solid #e2e8f0; background:${inp && inp.checked ? '#eff6ff' : '#ffffff'};">${text}</td>
+            </tr>`;
+        });
+
+        sectionsHtml += `
+          <div style="margin-bottom:12pt; border:1pt solid #cbd5e1; padding:8pt 10pt;">
+            <p style="margin:0 0 3pt; font-size:11pt; font-weight:bold; color:#0f172a;">
+              ${escapeXmlHtml(title)} <span style="font-size:8.5pt; color:#0369a1;">[${escapeXmlHtml(tag)}]</span>
+            </p>
+            <p style="margin:0 0 6pt; font-size:9.5pt; color:#475569;">${escapeXmlHtml(desc)}</p>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:6pt;">${optsHtml}</table>
+            <p style="margin:0; font-size:9pt; color:#334155; background:#f8fafc; padding:5pt 7pt; border:1pt dashed #cbd5e1;">
+              <strong>Commentaire / précision de Jérôme :</strong><br/>
+              ${comment ? escapeXmlHtml(comment).replace(/\n/g, '<br/>') : '&nbsp;<br/>&nbsp;'}
+            </p>
+          </div>`;
+      });
+
+      const docHtml = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:w="urn:schemas-microsoft-com:office:word"
+              xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8" />
+          <title>Note QCM Remplissable - Orientation Plage Lestrevet</title>
+          <style>
+            body { font-family: Calibri, Arial, sans-serif; color: #0f172a; font-size: 10.5pt; }
+            h1 { font-size: 15pt; color: #0284c7; margin: 0 0 4pt; }
+          </style>
+        </head>
+        <body>
+          <h1>Questionnaire d'Arbitrage : Orientation Plage, Balise Pentrez &amp; Zonage GPS</h1>
+          <p style="margin:0 0 8pt; color:#475569; font-size:9.5pt;">
+            Char à Voile du Bout du Monde · Plage de Lestrevet (29550 Plomodiern)
+          </p>
+          <table style="width:100%; border-collapse:collapse; margin-bottom:10pt; background:#f8fafc;">
+            <tr>
+              <td style="border:1pt solid #cbd5e1; padding:5pt 8pt; font-size:9.5pt;"><strong>Destinataire :</strong> ${escapeXmlHtml(respName)}</td>
+              <td style="border:1pt solid #cbd5e1; padding:5pt 8pt; font-size:9.5pt;"><strong>Proposé par :</strong> Benoît Marchadour</td>
+              <td style="border:1pt solid #cbd5e1; padding:5pt 8pt; font-size:9.5pt;"><strong>Date :</strong> ${escapeXmlHtml(respDate || '____ / ____ / 2026')}</td>
+            </tr>
+          </table>
+          <div style="background:#f0f9ff; border:1pt solid #7dd3fc; padding:7pt 10pt; margin-bottom:10pt; font-size:9.5pt;">
+            <strong>Repères du plan (Pentrez ↔ Lestrevet) :</strong><br/>
+            • Axe de la plage : <strong>NNO ↔ SSE (~335° / 155°)</strong>, ouvert face à l'<strong>OSO (~245°)</strong> sur la baie de Douarnenez.<br/>
+            • Arrière-pays : terres de <strong>Kervennec</strong> à l'<strong>ENE (~65°)</strong>.<br/>
+            • 3 zones sur ~3–4 km : <strong>Plage de Pentrez</strong> (Nord · Balise Winds-Up Spot 66), <strong>La Lieue de Grève</strong> (Centre) et <strong>Plage de Lestrevet / École</strong> (Sud).
+          </div>
+          ${sectionsHtml}
+          <div style="background:#fffbeb; border:1pt solid #fcd34d; padding:8pt 10pt; margin-top:8pt;">
+            <p style="margin:0 0 4pt; font-weight:bold; color:#92400e; font-size:10pt;">Remarques libres &amp; priorités de Jérôme :</p>
+            <p style="margin:0; font-size:9.5pt;">${generalNotes ? escapeXmlHtml(generalNotes).replace(/\n/g, '<br/>') : '&nbsp;<br/>&nbsp;<br/>&nbsp;'}</p>
+          </div>
+        </body>
+        </html>`;
+
+      const blob = new Blob(['\ufeff', docHtml], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Note_QCM_Orientation_Plage_Jerome.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Document Word remplissable (.doc) téléchargé !');
+    }
+  </script>
+</body>
+</html>
