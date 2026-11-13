@@ -398,9 +398,8 @@ function parseWindsUpHtml(html: string, requestedDate: string, parisToday: strin
 
 async function fetchWindsUpSpot66(dateParam: string | undefined, forceRefresh: boolean): Promise<WindsUpSpotData> {
   const parisToday = getParisToday();
-  const parsedDate =
+  const targetDate =
     dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : parisToday;
-  const targetDate = parsedDate > parisToday ? parisToday : parsedDate;
   const isToday = targetDate === parisToday;
 
   const cached = spotCache.get(targetDate);

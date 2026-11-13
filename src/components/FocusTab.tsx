@@ -1189,8 +1189,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         customSlotsMap={customSlotsMap}
       />
 
-      {/* Balise Winds-Up Douarnenez Pentrez (Spot 66) entre le calendrier et le tableau météo */}
-      <WindsUpBaliseCard dateStr={currentDs} settings={settings} />
+      {/* Balise Winds-Up Douarnenez Pentrez (Spot 66) : affichée uniquement à la date du jour (modèle de relevé temps réel) */}
+      {currentDs === tdRaw && (
+        <WindsUpBaliseCard dateStr={currentDs} settings={settings} />
+      )}
 
       {/* Tableau Windguru directement sous la balise */}
       <WindguruTable

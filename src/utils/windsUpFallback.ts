@@ -72,8 +72,7 @@ export async function fetchPublicWindsUpSpot66Fallback(dateStr: string): Promise
     day: '2-digit',
   }).format(new Date());
 
-  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : parisToday;
-  const effectiveDate = parsedDate > parisToday ? parisToday : parsedDate;
+  const effectiveDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : parisToday;
   const isToday = effectiveDate === parisToday;
   const url = isToday
     ? 'https://www.winds-up.com/spot/66'
