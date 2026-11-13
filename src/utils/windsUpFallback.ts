@@ -72,12 +72,14 @@ export async function fetchPublicWindsUpSpot66Fallback(dateStr: string): Promise
     day: '2-digit',
   }).format(new Date());
 
-  const isToday = dateStr === parisToday;
+  const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : parisToday;
+  const effectiveDate = parsedDate > parisToday ? parisToday : parsedDate;
+  const isToday = effectiveDate === parisToday;
   const url = isToday
     ? 'https://www.winds-up.com/spot/66'
-    : `https://www.winds-up.com/spot/66/?date=${encodeURIComponent(dateStr)}`;
+    : `https://www.winds-up.com/spot/66/?date=${encodeURIComponent(effectiveDate)}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }

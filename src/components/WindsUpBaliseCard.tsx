@@ -120,23 +120,22 @@ export const WindsUpBaliseCard: React.FC<WindsUpBaliseCardProps> = ({
       setError(null);
       const query = `?date=${encodeURIComponent(dateStr)}${forceRefresh ? '&refresh=1' : ''}`;
       try {
-        const res = await fetch(`./api/windsup/spot66${query}`);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
+        let res: Response | null = null;
+        try {
+          res = await fetch(`./api/windsup/spot66${query}`, { credentials: 'same-origin' });
+        } catch {
+          res = null;
+        }
+        const contentType = res?.headers.get('content-type') || '';
+        if (res && res.ok && contentType.includes('application/json')) {
           const json: WindsUpSpotData = await res.json();
           setData(json);
           return;
         }
-        // Fallback vers le flux public Winds-Up (CORS autorisé) si le relais serveur est absent (ex. hébergement statique)
         const fallbackData = await fetchPublicWindsUpSpot66Fallback(dateStr);
         setData(fallbackData);
       } catch (err) {
-        try {
-          const fallbackData = await fetchPublicWindsUpSpot66Fallback(dateStr);
-          setData(fallbackData);
-        } catch {
-          setError(err instanceof Error ? err.message : 'Balise indisponible');
-        }
+        setError(err instanceof Error ? err.message : 'Balise indisponible');
       } finally {
         setLoading(false);
       }
