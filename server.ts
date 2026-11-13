@@ -483,7 +483,11 @@ async function startServer(): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     const distDir = path.resolve(__dirname, 'dist');
     app.use(express.static(distDir));
-    app.get('*', (_req: Request, res: Response) => {
+    app.use((req: Request, res: Response, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+        next();
+        return;
+      }
       res.sendFile(path.join(distDir, 'index.html'));
     });
   } else {

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppSettings, WindsUpSpotData } from '../types';
+import { fetchPublicWindsUpSpot66Fallback } from '../utils/windsUpFallback';
 
 interface WindsUpBaliseCardProps {
   dateStr: string;
@@ -117,17 +118,25 @@ export const WindsUpBaliseCard: React.FC<WindsUpBaliseCardProps> = ({
     async (forceRefresh = false) => {
       setLoading(true);
       setError(null);
+      const query = `?date=${encodeURIComponent(dateStr)}${forceRefresh ? '&refresh=1' : ''}`;
       try {
-        const res = await fetch(
-          `/api/windsup/spot66?date=${encodeURIComponent(dateStr)}${forceRefresh ? '&refresh=1' : ''}`
-        );
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+        const res = await fetch(`./api/windsup/spot66${query}`);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const json: WindsUpSpotData = await res.json();
+          setData(json);
+          return;
         }
-        const json: WindsUpSpotData = await res.json();
-        setData(json);
+        // Fallback vers le flux public Winds-Up (CORS autorisé) si le relais serveur est absent (ex. hébergement statique)
+        const fallbackData = await fetchPublicWindsUpSpot66Fallback(dateStr);
+        setData(fallbackData);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Balise indisponible');
+        try {
+          const fallbackData = await fetchPublicWindsUpSpot66Fallback(dateStr);
+          setData(fallbackData);
+        } catch {
+          setError(err instanceof Error ? err.message : 'Balise indisponible');
+        }
       } finally {
         setLoading(false);
       }
