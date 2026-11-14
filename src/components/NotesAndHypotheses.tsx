@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, ensureAuth } from '../firebase';
 import { APP_VERSION_INFO } from '../version';
@@ -40,6 +40,25 @@ interface TechNoteItem {
 const LOCAL_STORAGE_KEY = 'cv_processed_tech_notes_cache';
 const QCM_STORAGE_KEY = 'cv_qcm_tech_notes_cache';
 
+const safeReadStorageMap = <T,>(key: string): Record<string, T> => {
+  try {
+    const cached = localStorage.getItem(key);
+    if (!cached) return {};
+    const parsed = JSON.parse(cached);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, T>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+};
+
+const resolveDocUrl = (url: string): string => {
+  if (!url) return '';
+  return url.startsWith('/') ? `.${url}` : url;
+};
+
 export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }) => {
   const [customPassword, setCustomPassword] = useState('');
   const [currentCloudPassword, setCurrentCloudPassword] = useState<string | null>(null);
@@ -52,24 +71,18 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const [statusFilter, setStatusFilter] = useState<'active' | 'processed' | 'all'>('active');
 
   // Gestionnaire de statut traité / archivé (Synchronisé Firestore + fallback local)
-  const [processedMap, setProcessedMap] = useState<ProcessedTechNotesMap>(() => {
-    try {
-      const cached = localStorage.getItem(LOCAL_STORAGE_KEY);
-      return cached ? JSON.parse(cached) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [processedMap, setProcessedMap] = useState<ProcessedTechNotesMap>(() =>
+    safeReadStorageMap(LOCAL_STORAGE_KEY)
+  );
 
   // Réponses aux QCM intégrés dans l'app (Synchronisées Firestore + fallback local)
-  const [qcmMap, setQcmMap] = useState<TechNoteQcmMap>(() => {
-    try {
-      const cached = localStorage.getItem(QCM_STORAGE_KEY);
-      return cached ? JSON.parse(cached) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [qcmMap, setQcmMap] = useState<TechNoteQcmMap>(() =>
+    safeReadStorageMap(QCM_STORAGE_KEY)
+  );
+
+  // Lecteur intégré de note (ouvre la fiche HTML dans l'app pour éviter le blocage des popups/iframes)
+  const [viewingNote, setViewingNote] = useState<TechNoteItem | null>(null);
+  const noteIframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // Modale de réponse au QCM dans l'application
   const [activeQcmDef, setActiveQcmDef] = useState<TechNoteQcmDefinition | null>(null);
@@ -87,6 +100,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const [resolvingAuthor, setResolvingAuthor] = useState<string>(() => getActiveInstructor());
   const [resolutionNote, setResolutionNote] = useState<string>('');
   const [isSubmittingResolution, setIsSubmittingResolution] = useState<boolean>(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   // Charger le mot de passe cloud actif
   useEffect(() => {
@@ -137,6 +151,19 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
     });
     return () => unsubscribe();
   }, []);
+
+  // Fermeture par touche Échap des modales ouvertes
+  useEffect(() => {
+    if (!viewingNote && !activeQcmDef && !resolvingNote) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (viewingNote) setViewingNote(null);
+      else if (activeQcmDef && !isSavingQcm) setActiveQcmDef(null);
+      else if (resolvingNote && !isSubmittingResolution) setResolvingNote(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewingNote, activeQcmDef, isSavingQcm, resolvingNote, isSubmittingResolution]);
 
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -493,11 +520,13 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const handleOpenResolveModal = (note: TechNoteItem) => {
     setResolvingNote(note);
     setResolutionNote('');
+    setResolveError(null);
   };
 
   const handleConfirmResolve = async () => {
     if (!resolvingNote) return;
     setIsSubmittingResolution(true);
+    setResolveError(null);
     try {
       await setTechNoteProcessedInFirestore(
         resolvingNote.id,
@@ -507,7 +536,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
       );
       setResolvingNote(null);
     } catch (err) {
-      alert('Erreur lors de la mise à jour de la note : ' + (err as Error).message);
+      setResolveError('Erreur lors de la mise à jour de la note : ' + ((err as Error)?.message || 'erreur réseau'));
     } finally {
       setIsSubmittingResolution(false);
     }
@@ -526,8 +555,12 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
     const def = TECH_NOTE_QCMS[noteId];
     if (!def) return;
     const existing = qcmMap[noteId];
-    setQcmDraftAnswers(existing?.answers ? { ...existing.answers } : {});
-    setQcmDraftNotes(existing?.notes ? { ...existing.notes } : {});
+    setQcmDraftAnswers(
+      existing?.answers && typeof existing.answers === 'object' ? { ...existing.answers } : {}
+    );
+    setQcmDraftNotes(
+      existing?.notes && typeof existing.notes === 'object' ? { ...existing.notes } : {}
+    );
     if (existing?.respondent) {
       setQcmRespondent(existing.respondent);
     } else {
@@ -881,9 +914,17 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
             const processedInfo = processedMap[note.id];
             const qcmDef = TECH_NOTE_QCMS[note.id];
             const qcmSubmission = qcmMap[note.id];
-            const hasQcmAnswers = Boolean(qcmSubmission && qcmSubmission.answeredCount > 0);
+            const safeQcmAnswers =
+              qcmSubmission?.answers && typeof qcmSubmission.answers === 'object'
+                ? qcmSubmission.answers
+                : {};
+            const safeAnsweredCount =
+              typeof qcmSubmission?.answeredCount === 'number'
+                ? qcmSubmission.answeredCount
+                : Object.values(safeQcmAnswers).filter(v => Array.isArray(v) && v.length > 0).length;
+            const hasQcmAnswers = Boolean(qcmSubmission && safeAnsweredCount > 0);
             const isQcmComplete = Boolean(
-              qcmDef && qcmSubmission && qcmSubmission.answeredCount >= qcmDef.questions.length
+              qcmDef && qcmSubmission && safeAnsweredCount >= qcmDef.questions.length
             );
 
             return (
@@ -970,15 +1011,18 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontWeight: 800 }}>
                         <span>
-                          {isQcmComplete ? '✅' : '📝'} QCM rempli par <strong>{qcmSubmission.respondent}</strong> ({qcmSubmission.answeredCount}/{qcmDef.questions.length})
+                          {isQcmComplete ? '✅' : '📝'} QCM rempli par <strong>{qcmSubmission.respondent || 'Jérôme'}</strong> ({safeAnsweredCount}/{qcmDef.questions.length})
                         </span>
-                        <span style={{ fontSize: '0.66rem', opacity: 0.85 }}>
-                          le {new Date(qcmSubmission.submittedAt).toLocaleDateString('fr-FR')}
-                        </span>
+                        {qcmSubmission.submittedAt && (
+                          <span style={{ fontSize: '0.66rem', opacity: 0.85 }}>
+                            le {new Date(qcmSubmission.submittedAt).toLocaleDateString('fr-FR')}
+                          </span>
+                        )}
                       </div>
                       <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '0.68rem', color: '#334155' }}>
                         {qcmDef.questions.slice(0, 3).map((q, idx) => {
-                          const chosenIds = qcmSubmission.answers?.[q.id] || [];
+                          const rawIds = safeQcmAnswers[q.id];
+                          const chosenIds = Array.isArray(rawIds) ? rawIds : [];
                           if (chosenIds.length === 0) return null;
                           const chosenText = chosenIds
                             .map(id => q.options.find(o => o.id === id)?.label || id)
@@ -989,7 +1033,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                             </div>
                           );
                         })}
-                        {qcmDef.questions.length > 3 && qcmSubmission.answeredCount > 3 && (
+                        {qcmDef.questions.length > 3 && safeAnsweredCount > 3 && (
                           <div style={{ fontSize: '0.65rem', color: '#475569', fontStyle: 'italic' }}>
                             + autres réponses enregistrées (cliquer sur « Voir / Modifier réponses »)
                           </div>
@@ -1045,8 +1089,8 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                         ? '✓ Traitée'
                         : hasQcmAnswers
                         ? isQcmComplete
-                          ? `✓ Répondu (${qcmSubmission?.answeredCount}/${qcmDef?.questions.length})`
-                          : `📝 ${qcmSubmission?.answeredCount}/${qcmDef?.questions.length} rép.`
+                          ? `✓ Répondu (${safeAnsweredCount}/${qcmDef?.questions.length})`
+                          : `📝 ${safeAnsweredCount}/${qcmDef?.questions.length} rép.`
                         : note.statusBadge.label}
                     </span>
                   </div>
@@ -1105,17 +1149,16 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                       <span>{hasQcmAnswers ? '👁️' : '✍️'}</span>
                       <span>
                         {hasQcmAnswers
-                          ? `Voir / Modifier les réponses dans l’app (${qcmSubmission?.answeredCount}/${qcmDef.questions.length})`
+                          ? `Voir / Modifier les réponses dans l’app (${safeAnsweredCount}/${qcmDef.questions.length})`
                           : 'Répondre au QCM directement dans l’app'}
                       </span>
                     </button>
                   )}
 
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <a
-                      href={note.docUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setViewingNote(note)}
                       style={{
                         flex: 1,
                         display: 'inline-flex',
@@ -1125,19 +1168,19 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                         background: qcmDef ? '#f8fafc' : isProcessed ? '#64748b' : note.categoryColor,
                         color: qcmDef ? '#334155' : '#ffffff',
                         border: qcmDef ? '1.5px solid #cbd5e1' : 'none',
-                        textDecoration: 'none',
                         padding: '9px 12px',
                         borderRadius: '8px',
                         fontSize: qcmDef ? '0.72rem' : '0.76rem',
                         fontWeight: 800,
                         textAlign: 'center',
+                        cursor: 'pointer',
                         boxShadow: qcmDef || isProcessed ? 'none' : `0 3px 10px ${note.categoryColor}30`,
                         transition: 'opacity 0.15s ease',
                       }}
                     >
                       <span>{qcmDef ? '📄 Version imprimable (Word / PDF)' : note.docBtnLabel}</span>
                       <span style={{ fontSize: '0.85rem' }}>➔</span>
-                    </a>
+                    </button>
 
                     {!isProcessed ? (
                       <button
@@ -1282,6 +1325,24 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                 }}
               />
             </div>
+
+            {/* Erreur éventuelle */}
+            {resolveError && (
+              <div
+                style={{
+                  marginBottom: '14px',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#b91c1c',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                }}
+              >
+                {resolveError}
+              </div>
+            )}
 
             {/* Boutons d'action */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
@@ -1745,6 +1806,157 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LECTEUR INTÉGRÉ DES NOTES HTML (OUVRE DIRECTEMENT DANS L'APPLI) */}
+      {viewingNote && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '10px',
+          }}
+          onClick={() => setViewingNote(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '1080px',
+              height: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 24px 56px rgba(0, 0, 0, 0.35)',
+              border: `2px solid ${viewingNote.categoryColor}`,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Barre supérieure du lecteur */}
+            <div
+              style={{
+                background: '#0f172a',
+                color: '#ffffff',
+                padding: '10px 14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '10px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: '1.15rem', flexShrink: 0 }}>{viewingNote.icon}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: '0.88rem',
+                      fontWeight: 900,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {viewingNote.title}
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>
+                    {viewingNote.categoryLabel} · Document complet interactif
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const win = noteIframeRef.current?.contentWindow;
+                    if (win) {
+                      win.focus();
+                      win.print();
+                    }
+                  }}
+                  style={{
+                    background: '#0284c7',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '7px',
+                    padding: '7px 11px',
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <span>🖨️</span>
+                  <span>Imprimer / PDF</span>
+                </button>
+
+                <a
+                  href={resolveDocUrl(viewingNote.docUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    background: '#1e293b',
+                    color: '#e2e8f0',
+                    border: '1px solid #475569',
+                    borderRadius: '7px',
+                    padding: '6px 10px',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <span>↗️</span>
+                  <span>Nouvel onglet</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => setViewingNote(null)}
+                  aria-label="Fermer la note"
+                  style={{
+                    background: '#334155',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '7px',
+                    padding: '7px 11px',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕ Fermer
+                </button>
+              </div>
+            </div>
+
+            {/* Contenu de la note HTML */}
+            <iframe
+              ref={noteIframeRef}
+              src={resolveDocUrl(viewingNote.docUrl)}
+              title={viewingNote.title}
+              style={{
+                flex: 1,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                background: '#ffffff',
+              }}
+            />
           </div>
         </div>
       )}
