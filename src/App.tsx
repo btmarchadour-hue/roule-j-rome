@@ -69,6 +69,7 @@ import {
   buildReservationKey,
   Cycle1SlotAction,
   Cycle2ActionPayload,
+  getEffectiveCycle1Status,
   getSlotBookingsSummary,
   getValidationItemChars,
   hasCycle2Trigger,
@@ -1213,6 +1214,17 @@ export const App: React.FC = () => {
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
       const existingItem = currentItems.find(it => it.k === slotKey);
+      const bookingChars = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(ds, existingItem ? existingItem.k : slotKey)] || []
+      ).totalChars;
+      const isValidatedC1 =
+        (existingItem && getEffectiveCycle1Status(existingItem) === 'published') ||
+        hasCycle2Trigger(existingItem, bookingChars);
+      if (!isValidatedC1) {
+        notifySync('⛔ Créneau non validé en Cycle 1 : publiez-le d’abord dans Validation (C1)');
+        return;
+      }
+
       const existingCounts = getValidationItemChars(existingItem);
       const instructor = getActiveInstructor() || 'Jérôme';
 
@@ -1378,7 +1390,7 @@ export const App: React.FC = () => {
         items: nextItems,
       });
     },
-    [isReadOnly, validations, persistDayValidation]
+    [isReadOnly, validations, bookingsMap, persistDayValidation]
   );
 
   const handleOpenCycle2FromCalendar = useCallback((ds: string) => {

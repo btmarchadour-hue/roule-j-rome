@@ -182,13 +182,22 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     });
   };
 
-  const renderSessRow = (f: DayFocusData, x: SessionItem, key: string) => {
+  const renderSessRow = (
+    f: DayFocusData,
+    x: SessionItem,
+    key: string,
+    preMatchedValItem?: ReturnType<typeof findMatchingValidationItem>,
+    validatedMergeKeys?: Set<string>
+  ) => {
     const startTimeStr = lc(x.a, f.y, f.m, f.d);
     const endTimeStr = lc(x.b, f.y, f.m, f.d);
     const slotKey = kOf(x);
     const valRecord = validations[f.ds];
 
-    const valItem = findMatchingValidationItem(valRecord, slotKey, startTimeStr, endTimeStr);
+    const valItem =
+      preMatchedValItem !== undefined
+        ? preMatchedValItem
+        : findMatchingValidationItem(valRecord, slotKey, startTimeStr, endTimeStr);
     const effectiveBookingKey =
       valItem && (bookingsMap[buildReservationKey(f.ds, valItem.k)]?.length ?? 0) > 0
         ? valItem.k
@@ -222,9 +231,18 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     const isToolOpen = (mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather') =>
       openTool?.slotKey === slotKey && openTool.mode === mode;
 
-    // Créneaux candidats pour le regroupement / fusion sur la même journée
+    // Créneaux candidats pour le regroupement / fusion sur la même journée (uniquement parmi les créneaux validés Cycle 1)
     const mergeTargets = f.list
-      .filter(other => kOf(other) !== slotKey)
+      .filter(other => {
+        const oKey = kOf(other);
+        if (oKey === slotKey) return false;
+        if (validatedMergeKeys) return validatedMergeKeys.has(oKey);
+        const oStart = lc(other.a, f.y, f.m, f.d);
+        const oEnd = lc(other.b, f.y, f.m, f.d);
+        const oVal = findMatchingValidationItem(valRecord, oKey, oStart, oEnd);
+        const oBook = getSlotBookingsSummary(bookingsMap[buildReservationKey(f.ds, oKey)] || []);
+        return getEffectiveCycle1Status(oVal) === 'published' || hasCycle2Trigger(oVal, oBook.totalChars);
+      })
       .map(other => {
         const oKey = kOf(other);
         const oStart = lc(other.a, f.y, f.m, f.d);
@@ -1519,20 +1537,155 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         )}
 
-        <div className="fh" style={{ marginTop: '14px', marginBottom: '6px' }}>
-          Créneaux du jour ({currentFocus.list.length}) · Jauge max {MAX_CHARS_PER_INSTRUCTOR} chars / moniteur
-        </div>
+        {(() => {
+          const valRecordForDay = validations[currentFocus.ds];
+          const matchedValKeys = new Set<string>();
+          const cycle1ValidatedSlots: Array<{
+            x: SessionItem;
+            slotKey: string;
+            valItem: ReturnType<typeof findMatchingValidationItem>;
+          }> = [];
 
-        {currentFocus.list.length > 0 ? (
-          currentFocus.list.map((x, idx) => renderSessRow(currentFocus, x, `f-${idx}`))
-        ) : (
-          <div className="fs">
-            <div>
-              <b>Aucune séance possible</b>
-              <small>Marée haute ou hors plage d&apos;ouverture</small>
-            </div>
-          </div>
-        )}
+          for (const x of currentFocus.list) {
+            const startTimeStr = lc(x.a, currentFocus.y, currentFocus.m, currentFocus.d);
+            const endTimeStr = lc(x.b, currentFocus.y, currentFocus.m, currentFocus.d);
+            const slotKey = kOf(x);
+            const valItem = findMatchingValidationItem(
+              valRecordForDay,
+              slotKey,
+              startTimeStr,
+              endTimeStr,
+              matchedValKeys
+            );
+            if (valItem) {
+              matchedValKeys.add(valItem.k);
+            }
+            const effectiveBookingKey =
+              valItem && (bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)]?.length ?? 0) > 0
+                ? valItem.k
+                : slotKey;
+            const bookingSummary = getSlotBookingsSummary(
+              bookingsMap[buildReservationKey(currentFocus.ds, effectiveBookingKey)] || []
+            );
+            const c1Status = getEffectiveCycle1Status(valItem);
+            const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+
+            if (c1Status === 'published' || inCycle2) {
+              cycle1ValidatedSlots.push({ x, slotKey, valItem });
+            }
+          }
+
+          const validatedKeySet = new Set(cycle1ValidatedSlots.map(item => item.slotKey));
+          const hiddenSlotsCount = currentFocus.list.length - cycle1ValidatedSlots.length;
+
+          return (
+            <>
+              <div className="fh" style={{ marginTop: '14px', marginBottom: '6px' }}>
+                Créneaux validés Cycle 1 ({cycle1ValidatedSlots.length}
+                {hiddenSlotsCount > 0 ? ` / ${currentFocus.list.length}` : ''}) · Jauge max{' '}
+                {MAX_CHARS_PER_INSTRUCTOR} chars / moniteur
+              </div>
+
+              {cycle1ValidatedSlots.length > 0 ? (
+                <>
+                  {cycle1ValidatedSlots.map((item, idx) =>
+                    renderSessRow(currentFocus, item.x, `f-${idx}`, item.valItem, validatedKeySet)
+                  )}
+                  {hiddenSlotsCount > 0 && (
+                    <div
+                      style={{
+                        fontSize: '0.74rem',
+                        color: '#64748b',
+                        background: '#f8fafc',
+                        border: '1px dashed #cbd5e1',
+                        borderRadius: '8px',
+                        padding: '8px 12px',
+                        marginTop: '6px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                      }}
+                    >
+                      <span>
+                        ℹ️ {hiddenSlotsCount} créneau{hiddenSlotsCount > 1 ? 'x' : ''} non validé
+                        {hiddenSlotsCount > 1 ? 's' : ''} ou non publié
+                        {hiddenSlotsCount > 1 ? 's' : ''} en Cycle 1 masqué
+                        {hiddenSlotsCount > 1 ? 's' : ''}.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onSelectDayInCalendar(currentDs)}
+                        style={{
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          color: '#0369a1',
+                          borderRadius: '6px',
+                          padding: '3px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Gérer en Cycle 1 ➔
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : currentFocus.list.length > 0 ? (
+                <div
+                  style={{
+                    background: '#fffbeb',
+                    border: '1.5px dashed #f59e0b',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: '0.88rem', color: '#92400e' }}>
+                      ⏳ Aucun créneau validé en Cycle 1 pour cette journée
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#78350f', marginTop: '3px', lineHeight: 1.4 }}>
+                      Seuls les créneaux préalablement publiés/validés en Cycle 1 apparaissent en Cycle 2 ({currentFocus.list.length} créneau{currentFocus.list.length > 1 ? 'x' : ''} non validé{currentFocus.list.length > 1 ? 's' : ''} ou fermé{currentFocus.list.length > 1 ? 's' : ''} ce jour).
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="fbtn"
+                    style={{
+                      margin: 0,
+                      background: '#0284c7',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '8px 14px',
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+                    }}
+                    onClick={() => onSelectDayInCalendar(currentDs)}
+                  >
+                    📅 Valider les créneaux en Cycle 1
+                  </button>
+                </div>
+              ) : (
+                <div className="fs">
+                  <div>
+                    <b>Aucune séance possible</b>
+                    <small>Marée haute ou hors plage d&apos;ouverture</small>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {renderVBox(currentFocus)}
 
