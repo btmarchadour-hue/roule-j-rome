@@ -49,6 +49,8 @@ import { WindPanel } from './WindPanel';
 import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
+import { CustomSlotsManager } from './CustomSlotsManager';
+import { DayCycle1Banner } from './DayCycle1Banner';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 
@@ -77,6 +79,14 @@ interface FocusTabProps {
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
+  onValidateDay?: (
+    dateStr: string,
+    focusData: DayFocusData,
+    mode: 'all' | 'not_published',
+    reason?: string
+  ) => void;
+  onClearValidation?: (dateStr: string) => void;
+  onAddCustomNonPublishReason?: (reason: string) => void;
   onOpenObservationModal?: (slot: {
     dateStr: string;
     slotKey: string;
@@ -116,6 +126,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onCycle2Action: rawOnCycle2Action,
   onSelectDayInCalendar,
   customSlotsMap = {},
+  onUpdateCustomSlots,
+  onValidateDay,
+  onClearValidation,
+  onAddCustomNonPublishReason,
   onOpenObservationModal,
   isReadOnly = false,
   focusDate: propFocusDate,
@@ -148,6 +162,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const [cancelReason, setCancelReason] = useState<string>(C2_WEATHER_REASONS[0]);
   const [cancelRescheduled, setCancelRescheduled] = useState<number>(0);
   const [cancelLost, setCancelLost] = useState<number>(0);
+  const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState<boolean>(false);
 
   const handleSelectCustomDate = (ds: string) => {
     setInternalFocusDate(ds);
@@ -159,6 +174,16 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const currentFocus = dayFocus(targetDs, settings, tideW, first, last, windList, customSlotsMap);
   const currentDs = currentFocus.ds;
 
+  const shiftFocusDate = (deltaDays: number) => {
+    const [sy, sm0, sd] = currentDs.split('-').map(Number);
+    const next = new Date(Date.UTC(sy, sm0 - 1, sd + deltaDays));
+    const nextDs = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(
+      next.getUTCDate()
+    ).padStart(2, '0')}`;
+    if (nextDs < minDs || nextDs > maxDs) return;
+    handleSelectCustomDate(nextDs);
+  };
+
   const [cy, cm0, cd] = currentDs.split('-').map(Number);
   const cm = cm0 - 1;
   const P = dayInfo(cy, cm, cd, settings, tideW, first, last);
@@ -169,7 +194,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const R = dayRow(cy, cm, cd, settings, EX, tideW, first, last, windList);
   const ad = EX.filter(p => p.t >= dayStartU && p.t < dayEndU && p.adj).map(p => p.adj as number);
   const holiday = getFrenchHolidayInfo(currentDs);
-  const pl = plan(cy, cm, cd, settings, tideW, first, last);
 
   const formatWd = (ds: string) => {
     const [y, m, d] = ds.split('-').map(Number);
@@ -1188,6 +1212,28 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
   return (
     <div id="tab2">
+      {onValidateDay && onClearValidation && (
+        <DayCycle1Banner
+          selectedDate={currentDs}
+          settings={settings}
+          W={tideW}
+          first={first}
+          last={last}
+          windList={windList}
+          customSlotsMap={customSlotsMap}
+          validations={validations}
+          onValidateDay={onValidateDay}
+          onClearValidation={onClearValidation}
+          onAddCustomNonPublishReason={reason => onAddCustomNonPublishReason?.(reason)}
+          onNavigateDay={shiftFocusDate}
+          canPrevDay={currentDs > minDs}
+          canNextDay={currentDs < maxDs}
+          hideOpenCycle2Button={true}
+          onOpenCycle1Detail={onSelectDayInCalendar}
+          isReadOnly={isReadOnly}
+        />
+      )}
+
       {/* Calendrier en haut du Cycle 2 (exigence Jérôme) */}
       <CalendarGrid
         year={year}
@@ -1220,32 +1266,112 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         windList={windList}
       />
 
-      {/* En-tête Cycle 2 : Adaptation aux conditions météo et prise de décisions */}
-      <div
-        className="card"
-        style={{
-          borderLeft: '4px solid #7c3aed',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+      {/* Main Focus Verdict Card + Graphiques Marée & Vent complets */}
+      <div className="card">
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '10px',
+            marginBottom: '10px',
+          }}
+        >
           <div>
-            <div className="fh" style={{ margin: 0, fontWeight: 900, fontSize: '0.9rem', color: '#6d28d9' }}>
-              Cycle 2 · Adaptation aux conditions météo et prise de décisions (max {MAX_CHARS_PER_INSTRUCTOR} chars/moniteur)
+            <div className="fh" style={{ margin: 0, color: '#6d28d9' }}>
+              Cycle 2 · Verdict &amp; Analyse Décisionnelle
             </div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 800, textTransform: 'capitalize' }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 800, textTransform: 'capitalize', marginTop: '2px' }}>
               {formatWd(currentDs)}
-            </div>
-            <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
-              Seuil : {settings.L.toFixed(2).replace('.', 'm')}
-              {settings.mg ? ` − ${settings.mg} cm` : ''} · min. 09h00–{settings.h1}h · Coef {coef ?? '—'}
-              {pl.full.length ? ` · ${pl.full.length} séance${pl.full.length > 1 ? 's' : ''} complète${pl.full.length > 1 ? 's' : ''}` : ''}
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {(() => {
+              const logsCount = getStoredWaterlineLogs().length;
+              const isDemo =
+                typeof window !== 'undefined' &&
+                localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
+              const isUnlocked = logsCount >= 300 || isDemo;
+              if (!isUnlocked) return null;
+              const currentMode = settings.calculationMode || 'theorique';
+              return (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    background: 'var(--cell)',
+                    padding: '2px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--bd)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ calculationMode: 'theorique' })}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: currentMode === 'theorique' ? '#0f172a' : 'transparent',
+                      color: currentMode === 'theorique' ? '#fff' : 'var(--tx)',
+                      fontSize: '0.72rem',
+                      fontWeight: currentMode === 'theorique' ? 800 : 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📐 Théorique
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ calculationMode: 'reel' })}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: currentMode === 'reel' ? '#16a34a' : 'transparent',
+                      color: currentMode === 'reel' ? '#fff' : 'var(--tx)',
+                      fontSize: '0.72rem',
+                      fontWeight: currentMode === 'reel' ? 800 : 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✨ Mode Réel
+                  </button>
+                </div>
+              );
+            })()}
+
+            {!isReadOnly && currentDs >= tdRaw && onUpdateCustomSlots && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomSlotsOpen(true);
+                  requestAnimationFrame(() => {
+                    const el = document.getElementById('custom-slots-section');
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  });
+                }}
+                style={{
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1.5px solid #0284c7',
+                  borderRadius: '8px',
+                  padding: '5px 10px',
+                  fontWeight: 800,
+                  fontSize: '0.74rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+                title="Créer un créneau sur mesure ou modifier manuellement les créneaux du jour"
+              >
+                <span>✏️</span>
+                <span>Créneaux sur mesure</span>
+              </button>
+            )}
+
             {onOpenObservationModal && (
               <button
                 type="button"
@@ -1265,11 +1391,11 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',
-                  padding: '7px 12px',
+                  padding: '6px 11px',
                   fontWeight: 800,
-                  fontSize: '0.76rem',
+                  fontSize: '0.74rem',
                   cursor: 'pointer',
-                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.30)',
+                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.28)',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '5px',
@@ -1277,25 +1403,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 title="Noter un relevé terrain (hauteurs d'eau, surcote, météo)"
               >
                 <span style={{ fontWeight: 900 }}>+</span>
-                <span>NOTER UN RELEVÉ</span>
+                <span>Noter un relevé</span>
               </button>
             )}
-
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                background: '#f8fafc',
-                color: '#0369a1',
-                border: '1px solid #bae6fd',
-                margin: 0,
-                fontWeight: 800,
-              }}
-              onClick={() => onSelectDayInCalendar(currentDs)}
-              title="Basculer vers cette journée dans Validation des créneaux (Cycle 1)"
-            >
-              📅 Validation (C1)
-            </button>
           </div>
         </div>
 
@@ -1311,7 +1421,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               padding: '3px 8px',
               borderRadius: '6px',
               fontSize: '0.74rem',
-              alignSelf: 'flex-start',
+              marginBottom: '10px',
               color: '#0f172a',
             }}
           >
@@ -1387,93 +1497,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         )}
 
-        {/* SÉLECTEUR DE MODE DE PLANIFICATION (THÉORIQUE VS RÉEL) */}
-        {(() => {
-          const logsCount = getStoredWaterlineLogs().length;
-          const isDemo = typeof window !== 'undefined' && localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
-          const isUnlocked = logsCount >= 300 || isDemo;
-          const currentMode = settings.calculationMode || 'theorique';
-
-          return (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '8px',
-                paddingTop: '10px',
-                borderTop: '1px solid var(--bd)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--mu)', textTransform: 'uppercase' }}>
-                  Modèle de calcul :
-                </span>
-                <div style={{ display: 'inline-flex', background: 'var(--cell)', padding: '2px', borderRadius: '8px', border: '1px solid var(--bd)' }}>
-                  <button
-                    type="button"
-                    onClick={() => onUpdateSettings({ calculationMode: 'theorique' })}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: 'none',
-                      background: currentMode === 'theorique' ? '#0f172a' : 'transparent',
-                      color: currentMode === 'theorique' ? '#fff' : 'var(--tx)',
-                      fontSize: '0.72rem',
-                      fontWeight: currentMode === 'theorique' ? 800 : 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    📐 Mode Théorique (SHOM)
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={!isUnlocked}
-                    onClick={() => {
-                      if (!isUnlocked) return;
-                      onUpdateSettings({ calculationMode: 'reel' });
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: 'none',
-                      background: currentMode === 'reel' ? '#16a34a' : 'transparent',
-                      color: !isUnlocked ? '#94a3b8' : currentMode === 'reel' ? '#fff' : 'var(--tx)',
-                      fontSize: '0.72rem',
-                      fontWeight: currentMode === 'reel' ? 800 : 600,
-                      cursor: isUnlocked ? 'pointer' : 'not-allowed',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      opacity: isUnlocked ? 1 : 0.65,
-                    }}
-                    title={
-                      isUnlocked
-                        ? 'Activer le Mode Réel calibré sur la plage de Pentrez / Lestrevet'
-                        : `Verrouillé (${logsCount}/300 mesures GPS requises)`
-                    }
-                  >
-                    <span>{isUnlocked ? '✨' : '🔒'}</span>
-                    <span>Mode Réel {isUnlocked ? '(Empirique)' : `(bloqué ${logsCount}/300)`}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ fontSize: '0.68rem', color: currentMode === 'reel' ? '#15803d' : '#0369a1', fontWeight: 700 }}>
-                {currentMode === 'reel'
-                  ? `✨ Créneaux adaptés selon le modèle empirique (+${settings.empiricalOffsetCm ?? 15} cm de surcote constatée)`
-                  : `Seuil nominal SHOM : ${settings.L} m`}
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* Main Focus Verdict Card + Graphiques Marée & Vent complets */}
-      <div className="card">
-        <div className="fh">Verdict &amp; Analyse Décisionnelle Complète (Cycle 2)</div>
         <div className="vd" style={{ background: VC[currentFocus.k][0] }}>
           <b>{VC[currentFocus.k][1]}</b>
           <span>
@@ -1683,11 +1706,39 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   </div>
                 </div>
               )}
+              {(cycle1ValidatedSlots.length > 0 || Boolean(validations[currentFocus.ds])) && renderVBox(currentFocus)}
             </>
           );
         })()}
 
-        {renderVBox(currentFocus)}
+        {onUpdateCustomSlots && (
+          <CustomSlotsManager
+            dateStr={currentDs}
+            settings={settings}
+            windList={windList}
+            customSlotsMap={customSlotsMap}
+            onUpdateCustomSlots={onUpdateCustomSlots}
+            defaultSlots={(() => {
+              const pl = plan(cy, cm, cd, settings, tideW, first, last);
+              return pl.full
+                .map((x, idx) => ({
+                  start: lc(x[0], cy, cm, cd),
+                  end: lc(x[1], cy, cm, cd),
+                  title: `Séance ${idx + 1}`,
+                }))
+                .concat(
+                  pl.extra.map(x => ({
+                    start: lc(x[0], cy, cm, cd),
+                    end: lc(x[1], cy, cm, cd),
+                    title: `Optionnel (+${x[3]} min)`,
+                  }))
+                );
+            })()}
+            isOpenControlled={isCustomSlotsOpen}
+            onToggleOpen={() => setIsCustomSlotsOpen(prev => !prev)}
+            isReadOnly={isReadOnly || currentDs < tdRaw}
+          />
+        )}
 
         {/* Conditions détaillées vent, soleil, lune, surcote barométrique et PM/BM (identique Cycle 1) */}
         {DW.P.length > 0 && (

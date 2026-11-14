@@ -17,14 +17,11 @@ import {
   dayInfo,
   dayRow,
   dayWind,
-  exportValidCsv,
   lc,
   p2,
   plan,
   sw,
   toU,
-  VC,
-  vstat,
   tdy,
   wtxt,
 } from '../utils/tides';
@@ -42,6 +39,7 @@ import {
 } from '../utils/cycleHelpers';
 import { CurveChart } from './CurveChart';
 import { CustomSlotsManager } from './CustomSlotsManager';
+import { DayCycle1Banner } from './DayCycle1Banner';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { WindPanel } from './WindPanel';
@@ -149,9 +147,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     slotEnd: string;
     slotTitle?: string;
   } | null>(null);
-  const [dayNonPublishOpen, setDayNonPublishOpen] = useState(false);
-  const [selectedDayReason, setSelectedDayReason] = useState<string>(DEFAULT_NON_PUBLISH_REASONS[0]);
-  const [customDayReasonInput, setCustomDayReasonInput] = useState('');
   const [activeSlotReasonIdx, setActiveSlotReasonIdx] = useState<number | null>(null);
   const [customSlotReasonInput, setCustomSlotReasonInput] = useState('');
 
@@ -263,7 +258,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   }
 
   const focusData = dayFocus(selectedDate, settings, tideW, first, last, windList, customSlotsMap);
-  const valInfo = vstat(focusData, validations);
   const isPast = selectedDate < tdy();
 
   const holiday = getFrenchHolidayInfo(selectedDate);
@@ -436,8 +430,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               type="button"
               onClick={() => {
                 setIsCustomSlotsOpen(true);
-                const el = document.getElementById('custom-slots-section');
-                el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                requestAnimationFrame(() => {
+                  const el = document.getElementById('custom-slots-section');
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
               }}
               style={{
                 background: '#ffffff',
@@ -454,10 +450,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                 boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
                 transition: 'all 0.15s ease',
               }}
-              title="Redéfinir manuellement les créneaux prédéfinis pour une souplesse totale"
+              title="Créer un créneau sur mesure ou redéfinir manuellement les créneaux prédéfinis"
             >
               <span>✏️</span>
-              <span>MODIFIER LES CRÉNEAUX</span>
+              <span>CRÉNEAUX SUR MESURE</span>
             </button>
           )}
         </div>
@@ -592,507 +588,24 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         </div>
       )}
 
-      {/* Bloc Cycle 1 : Offre Commerciale Jour par Jour */}
-      <div
-        style={{
-          marginTop: '16px',
-          marginBottom: '14px',
-          padding: '12px 14px',
-          borderRadius: '10px',
-          background:
-            valInfo.st === 'ok'
-              ? 'var(--okbg, #f0fdf4)'
-              : !isPast && valInfo.st === 'chg'
-              ? '#fffbeb'
-              : 'var(--card, #fff)',
-          border:
-            valInfo.st === 'ok'
-              ? '2px solid var(--ok, #16a34a)'
-              : !isPast && valInfo.st === 'chg'
-              ? '2px solid #f59e0b'
-              : '1px solid var(--bd, #e5e7eb)',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '10px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '1.25rem' }}>
-              {isPast
-                ? valInfo.st === 'ok'
-                  ? '📜'
-                  : '⏳'
-                : valInfo.cycle2Count > 0
-                ? '⚡'
-                : valInfo.st === 'ok'
-                ? '📅'
-                : valInfo.st === 'chg'
-                ? '⚠️'
-                : '📋'}
-            </span>
-            <div>
-              <div
-                style={{
-                  fontWeight: 900,
-                  fontSize: '0.88rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                {isPast
-                  ? valInfo.st === 'ok'
-                    ? `Archive · ${valInfo.valCount} publié${valInfo.valCount > 1 ? 's' : ''}${
-                        valInfo.notPublishedCount ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}` : ''
-                      }${
-                        valInfo.closedNoBookingsCount ? ` · ${valInfo.closedNoBookingsCount} Vie 1` : ''
-                      } (sur ${valInfo.totalCount})`
-                    : 'Journée passée'
-                  : valInfo.st === 'chg'
-                  ? `Cycle 2 impacté : Prévisions / marées modifiées (${valInfo.cycle2Count} créneau${valInfo.cycle2Count > 1 ? 'x' : ''} inscrit${valInfo.cycle2Count > 1 ? 's' : ''})`
-                  : valInfo.st === 'ok'
-                  ? `Cycle 1 · ${valInfo.valCount} à publier${
-                      valInfo.notPublishedCount ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}` : ''
-                    }${
-                      valInfo.cycle2Count ? ` · ⚡ ${valInfo.cycle2Count} en Cycle 2` : ''
-                    }${valInfo.closedNoBookingsCount ? ` · 🌑 ${valInfo.closedNoBookingsCount} Vie 1` : ''}`
-                  : 'Cycle 1 · En attente de validation (C1)'}
-              </div>
-              {!isPast && valInfo.st === 'none' && (
-                <div style={{ marginTop: '4px' }}>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      background: '#fffbeb',
-                      color: '#92400e',
-                      border: '1px solid #fcd34d',
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                      fontWeight: 800,
-                      fontSize: '0.72rem',
-                    }}
-                  >
-                    <span>⏳</span>
-                    <span>EN ATTENTE DE VALIDATION (C1)</span>
-                  </span>
-                </div>
-              )}
-              <div style={{ fontSize: '0.74rem', color: 'var(--mu, #666)' }}>
-                {isPast
-                  ? valInfo.st === 'ok'
-                    ? `Journée passée (verrouillée) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })}`
-                    : 'Journée passée · Archive non modifiable en Cycle 1'
-                  : valInfo.st === 'ok'
-                  ? `Publié le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })} · Repositionnable tant qu'il y a 0 inscrit · Bascule Cycle 2 dès 1 char`
-                  : valInfo.st === 'chg'
-                  ? `Créneaux engagés (Cycle 2) modifiés · Basculez vers Adaptation météo & décisions pour ajuster`
-                  : `${allSlots.length} créneau${allSlots.length > 1 ? 'x' : ''} calculé${
-                      allSlots.length > 1 ? 's' : ''
-                    } selon la marée · Ajustable pendant toute la vie du Cycle 1 (0 inscrit)`}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-            {isReadOnly && (
-              <span
-                style={{
-                  background: '#fffbeb',
-                  border: '1.5px solid #fde68a',
-                  color: '#92400e',
-                  padding: '5px 11px',
-                  borderRadius: '6px',
-                  fontSize: '0.74rem',
-                  fontWeight: 800,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <span>🔒</span>
-                <span>Mode Moniteur : Lecture seule</span>
-              </span>
-            )}
-
-            {isPast && (
-              <span
-                style={{
-                  background: '#f1f5f9',
-                  border: '1.5px solid #cbd5e1',
-                  color: '#475569',
-                  padding: '5px 11px',
-                  borderRadius: '6px',
-                  fontSize: '0.74rem',
-                  fontWeight: 800,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <span>🔒</span>
-                <span>Journée passée · Verrouillée en Cycle 1</span>
-              </span>
-            )}
-
-            {!isPast && onValidateDay && allSlots.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  className="fbtn"
-                  style={{
-                    margin: 0,
-                    background:
-                      valInfo.st === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0
-                        ? '#16a34a'
-                        : valInfo.st === 'chg'
-                        ? '#f59e0b'
-                        : 'var(--ac, #ffc40d)',
-                    color:
-                      (valInfo.st === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0) || valInfo.st === 'chg'
-                        ? '#fff'
-                        : '#111',
-                    fontWeight: 800,
-                    fontSize: '0.75rem',
-                    padding: '7px 11px',
-                    borderRadius: '6px',
-                  }}
-                  onClick={() => {
-                    setDayNonPublishOpen(false);
-                    onValidateDay(selectedDate, focusData, 'all');
-                  }}
-                  title="Marquer tous les créneaux de cette journée « À publier » en Cycle 1"
-                >
-                  ✅ Tout à publier (C1)
-                </button>
-
-                <button
-                  type="button"
-                  className="fbtn"
-                  style={{
-                    margin: 0,
-                    background: dayNonPublishOpen || (valInfo.notPublishedCount > 0 && valInfo.valCount === 0) ? '#334155' : '#fff',
-                    color: dayNonPublishOpen || (valInfo.notPublishedCount > 0 && valInfo.valCount === 0) ? '#fff' : '#334155',
-                    border: '1.5px solid #475569',
-                    fontWeight: 800,
-                    fontSize: '0.75rem',
-                    padding: '7px 11px',
-                    borderRadius: '6px',
-                  }}
-                  onClick={() => setDayNonPublishOpen(prev => !prev)}
-                  title="Marquer cette journée « À ne pas publier » et choisir la raison (Réunion, Vacances...) pour vos statistiques d'absentéisme"
-                >
-                  🚫 À ne pas publier
-                </button>
-
-                {onNavigateDay && canNextDay && (
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      background: '#0284c7',
-                      color: '#fff',
-                      fontWeight: 800,
-                      fontSize: '0.75rem',
-                      padding: '7px 12px',
-                      borderRadius: '6px',
-                    }}
-                    onClick={() => {
-                      setDayNonPublishOpen(false);
-                      onValidateDay(selectedDate, focusData, 'all');
-                      onNavigateDay(1);
-                    }}
-                    title="Publier toute cette journée en Cycle 1 puis passer immédiatement au jour suivant"
-                  >
-                    ✅ À publier &amp; Jour suiv. ➔
-                  </button>
-                )}
-              </>
-            )}
-
-            {(allSlots.length === 0 || isPast) && onNavigateDay && canNextDay && (
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  background: '#0284c7',
-                  color: '#fff',
-                  fontWeight: 800,
-                  fontSize: '0.75rem',
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                }}
-                onClick={() => onNavigateDay(1)}
-                title="Passer directement au jour suivant"
-              >
-                {allSlots.length === 0 ? 'Jour suiv. (aucun créneau) ▶' : 'Jour suiv. ▶'}
-              </button>
-            )}
-
-            {valInfo.cycle2Count > 0 && onOpenCycle2 && (
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  background: '#7c3aed',
-                  color: '#fff',
-                  fontWeight: 800,
-                  fontSize: '0.74rem',
-                  padding: '7px 11px',
-                  borderRadius: '6px',
-                }}
-                onClick={() => onOpenCycle2(selectedDate)}
-                title="Basculer vers Adaptation météo & décisions (Cycle 2)"
-              >
-                ⚡ Ouvrir en Cycle 2
-              </button>
-            )}
-
-            {!isPast && valInfo.st !== 'none' && onClearValidation && (
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  background: 'transparent',
-                  color: '#dc2626',
-                  border: '1px solid #fca5a5',
-                  fontWeight: 700,
-                  fontSize: '0.72rem',
-                  padding: '7px 9px',
-                  borderRadius: '6px',
-                }}
-                onClick={() => onClearValidation(selectedDate)}
-                title="Réinitialiser toutes les publications et décisions de cette journée"
-              >
-                ✕ Réinitialiser
-              </button>
-            )}
-
-            {validations && Object.keys(validations).length > 0 && (
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  background: 'var(--cell, #f3f4f6)',
-                  color: 'var(--tx, #111)',
-                  border: '1px solid var(--bd, #e5e7eb)',
-                  fontWeight: 700,
-                  fontSize: '0.72rem',
-                  padding: '7px 9px',
-                  borderRadius: '6px',
-                }}
-                onClick={() => exportValidCsv(validations, MAX_CHARS_PER_INSTRUCTOR)}
-                title="Exporter toutes les séances enregistrées (CSV)"
-              >
-                📥 Exporter CSV
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Sélecteur de raison de non-publication sur toute la journée */}
-        {!isPast && dayNonPublishOpen && onValidateDay && allSlots.length > 0 && (
-          <div
-            style={{
-              marginTop: '12px',
-              padding: '12px 14px',
-              background: '#f8fafc',
-              border: '1.5px solid #475569',
-              borderRadius: '8px',
-            }}
-          >
-            <div style={{ fontSize: '0.78rem', fontWeight: 900, color: '#0f172a', marginBottom: '8px' }}>
-              🚫 Raison de non-publication pour la journée (comptabilisée en absentéisme plage hors météo/clients/plage) :
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-              {availableNonPublishReasons.map(reason => {
-                const isSel = selectedDayReason === reason;
-                return (
-                  <button
-                    key={reason}
-                    type="button"
-                    onClick={() => setSelectedDayReason(reason)}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      border: isSel ? '1.5px solid #0f172a' : '1px solid #cbd5e1',
-                      background: isSel ? '#334155' : '#fff',
-                      color: isSel ? '#fff' : '#334155',
-                      fontSize: '0.74rem',
-                      fontWeight: isSel ? 800 : 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {reason}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-              <input
-                type="text"
-                value={customDayReasonInput}
-                onChange={e => setCustomDayReasonInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && customDayReasonInput.trim()) {
-                    e.preventDefault();
-                    const trimmed = customDayReasonInput.trim();
-                    onAddCustomNonPublishReason?.(trimmed);
-                    setSelectedDayReason(trimmed);
-                    setCustomDayReasonInput('');
-                  }
-                }}
-                placeholder="Ajouter une nouvelle raison (ex: Formation BPJEPS, RDV pro...)"
-                style={{
-                  flex: '1 1 220px',
-                  padding: '6px 10px',
-                  fontSize: '0.76rem',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                }}
-              />
-              <button
-                type="button"
-                disabled={!customDayReasonInput.trim()}
-                onClick={() => {
-                  const trimmed = customDayReasonInput.trim();
-                  if (!trimmed) return;
-                  onAddCustomNonPublishReason?.(trimmed);
-                  setSelectedDayReason(trimmed);
-                  setCustomDayReasonInput('');
-                }}
-                style={{
-                  padding: '6px 11px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: customDayReasonInput.trim() ? '#0284c7' : '#cbd5e1',
-                  color: '#fff',
-                  fontSize: '0.74rem',
-                  fontWeight: 800,
-                  cursor: customDayReasonInput.trim() ? 'pointer' : 'not-allowed',
-                }}
-              >
-                + Ajouter raison
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  onValidateDay(selectedDate, focusData, 'not_published', selectedDayReason);
-                  setDayNonPublishOpen(false);
-                }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#334155',
-                  color: '#fff',
-                  fontSize: '0.76rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                🚫 Confirmer « À ne pas publier » ({selectedDayReason})
-              </button>
-
-              {onNavigateDay && canNextDay && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onValidateDay(selectedDate, focusData, 'not_published', selectedDayReason);
-                    setDayNonPublishOpen(false);
-                    onNavigateDay(1);
-                  }}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: '#0f172a',
-                    color: '#fff',
-                    fontSize: '0.76rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  🚫 Appliquer &amp; Jour suiv. ➔
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setDayNonPublishOpen(false)}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  color: '#475569',
-                  fontSize: '0.74rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Alerte uniquement si Cycle 2 actif ou dérive horaire de marée (Cycle 1 pur reste immunisé) */}
-        {!isPast && valInfo.st === 'chg' && (valInfo.cycle2Count > 0 || valInfo.rem.length > 0) && (
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '8px 10px',
-              background: '#fef3c7',
-              borderRadius: '6px',
-              fontSize: '0.76rem',
-              color: '#92400e',
-              lineHeight: 1.4,
-            }}
-          >
-            <b>Alerte Cycle 2 (créneaux avec inscrits ou horaires modifiés) :</b>
-            {valInfo.add.length > 0 && (
-              <div>
-                ➕ Ajout :{' '}
-                {valInfo.add.map(x => `${lc(x.a, y, m, d)} - ${lc(x.b, y, m, d)}`).join(' ; ')}
-              </div>
-            )}
-            {valInfo.rem.length > 0 && (
-              <div>
-                ➖ Retiré : {valInfo.rem.map(x => `${x.s} - ${x.e}`).join(' ; ')}
-              </div>
-            )}
-            {valInfo.kchg && (
-              <div>
-                Verdict météo : {VC[valInfo.V.k][1]} → {VC[focusData.k][1]}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {onValidateDay && onClearValidation && (
+        <DayCycle1Banner
+          selectedDate={selectedDate}
+          settings={settings}
+          W={tideW}
+          first={first}
+          last={last}
+          windList={windList}
+          customSlotsMap={customSlotsMap}
+          validations={validations}
+          onValidateDay={onValidateDay}
+          onClearValidation={onClearValidation}
+          onAddCustomNonPublishReason={reason => onAddCustomNonPublishReason?.(reason)}
+          onOpenCycle2={onOpenCycle2}
+          embedded={true}
+          isReadOnly={isReadOnly}
+        />
+      )}
 
       {/* Sessions list */}
       <div className="ps" style={{ marginTop: '12px' }}>

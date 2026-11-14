@@ -1652,6 +1652,9 @@ export const App: React.FC = () => {
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
+            onValidateDay={handleValidateDay}
+            onClearValidation={handleClearValidation}
+            onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
             isReadOnly={isReadOnly}
             focusDate={focusDate}

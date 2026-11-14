@@ -161,14 +161,14 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                 color: '#0f172a',
               }}
             >
-              Gestion manuelle des créneaux ({customSlots.length > 0 ? `${customSlots.length} sur mesure` : 'automatique'})
+              Créneaux sur mesure &amp; modification manuelle ({customSlots.length > 0 ? `${customSlots.length} sur mesure` : 'automatique'})
             </b>
             <div style={{ fontSize: '0.70rem', color: '#64748b' }}>
               {customSlots.length > 0
                 ? replaceDefault
                   ? '🔒 Créneaux manuels personnalisés (remplacent le calcul automatique)'
                   : '➕ Créneaux complémentaires ajoutés aux créneaux automatiques'
-                : 'Redéfinir, décaler ou remplacer manuellement les créneaux de cette journée'}
+                : 'Créer un créneau sur mesure ou redéfinir manuellement les créneaux de cette journée'}
             </div>
           </div>
         </div>
@@ -187,7 +187,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
               cursor: 'pointer',
             }}
           >
-            {isOpen ? 'Masquer ▲' : 'Gérer manuellement ▼'}
+            {isOpen ? 'Masquer ▲' : 'Créer / modifier ▼'}
           </button>
         </div>
       </div>
