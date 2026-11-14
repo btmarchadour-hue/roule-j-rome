@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { AppSettings, CustomSlotsMap, TidePoint, ValidationsMap, WindPoint } from '../types';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import { getSlotBookingsSummary } from '../utils/cycleHelpers';
-import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
-import { dayFocus, dayWind, getDayKeyTide, maxDs, minDs, MOIS, p2, plan, tdy, vstat } from '../utils/tides';
+import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
+import { dayFocus, dayWind, getDayKeyTide, kOf, lc, maxDs, minDs, MOIS, p2, plan, tdy, vstat } from '../utils/tides';
 
 interface CalendarGridProps {
   year: number;
@@ -21,6 +21,8 @@ interface CalendarGridProps {
   validations?: ValidationsMap;
   customSlotsMap?: CustomSlotsMap;
   bookingsMap?: Record<string, AgendaBookingItem[]>;
+  isReadOnly?: boolean;
+  onValidateRange?: (dates: string[], scopeLabel: string) => void;
 }
 
 export const CalendarGrid: React.FC<CalendarGridProps> = ({
@@ -39,7 +41,10 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
   validations = {},
   customSlotsMap = {},
   bookingsMap = {},
+  isReadOnly = false,
+  onValidateRange,
 }) => {
+  const [confirmScope, setConfirmScope] = useState<'week' | 'month' | null>(null);
   const dayNames = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
   const firstDayOffset = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
   const numDays = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
@@ -126,6 +131,9 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       }
       if (holiday.publicHolidayName) {
         dayTooltip += ` · ⭐ Férié : ${holiday.publicHolidayName}`;
+      }
+      if (holiday.isBridgeWeek && holiday.bridgeHolidayLabel) {
+        dayTooltip += ` · 🌉 Pont possible : ${holiday.bridgeHolidayLabel}`;
       }
 
       if (dayBookedChars > 0) {
@@ -223,26 +231,57 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             {keyTideLabel}
           </span>
         )}
-        {holiday.isHoliday && (
+        {(holiday.isHoliday || holiday.isPublicHoliday || holiday.isBridgeWeek) && (
           <span
             className="cal-holiday-corner"
-            aria-label={`Vacances scolaires : ${holiday.zonesLabel}`}
+            aria-label={[
+              holiday.isPublicHoliday ? `Jour férié : ${holiday.publicHolidayName}` : '',
+              holiday.isBridgeWeek ? `Pont possible : ${holiday.bridgeHolidayLabel}` : '',
+              holiday.isHoliday ? `Vacances scolaires : ${holiday.zonesLabel}` : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           >
-            {holiday.zones.map(z => {
-              const zoneStyle = HOLIDAY_ZONE_COLORS[z];
-              return (
-                <span
-                  key={z}
-                  className="cal-holiday-zone"
-                  style={{
-                    backgroundColor: zoneStyle.bg,
-                    color: zoneStyle.text,
-                  }}
-                >
-                  {z}
-                </span>
-              );
-            })}
+            {holiday.isPublicHoliday && (
+              <span
+                className="cal-holiday-zone"
+                style={{
+                  backgroundColor: CALENDAR_INDICATOR_COLORS.F.bg,
+                  color: CALENDAR_INDICATOR_COLORS.F.text,
+                }}
+                title={`Jour férié : ${holiday.publicHolidayName}`}
+              >
+                {CALENDAR_INDICATOR_COLORS.F.code}
+              </span>
+            )}
+            {holiday.isBridgeWeek && (
+              <span
+                className="cal-holiday-zone"
+                style={{
+                  backgroundColor: CALENDAR_INDICATOR_COLORS.P.bg,
+                  color: CALENDAR_INDICATOR_COLORS.P.text,
+                }}
+                title={`Pont possible : ${holiday.bridgeHolidayLabel}`}
+              >
+                {CALENDAR_INDICATOR_COLORS.P.code}
+              </span>
+            )}
+            {holiday.isHoliday &&
+              holiday.zones.map(z => {
+                const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+                return (
+                  <span
+                    key={z}
+                    className="cal-holiday-zone"
+                    style={{
+                      backgroundColor: zoneStyle.bg,
+                      color: zoneStyle.text,
+                    }}
+                  >
+                    {z}
+                  </span>
+                );
+              })}
           </span>
         )}
       </button>
@@ -305,7 +344,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       </div>
 
       <div className="cal-holiday-legend">
-        <span style={{ fontWeight: 700 }}>Vacances (bas droit) :</span>
+        <span style={{ fontWeight: 700 }}>Repères (bas droit) :</span>
         {(['B', 'C', 'A'] as const).map(z => {
           const zoneStyle = HOLIDAY_ZONE_COLORS[z];
           return (
@@ -325,7 +364,319 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             </span>
           );
         })}
+        {(['F', 'P'] as const).map(code => {
+          const ind = CALENDAR_INDICATOR_COLORS[code];
+          return (
+            <span key={code} className="cal-holiday-legend-item">
+              <span
+                className="cal-holiday-swatch"
+                style={{
+                  backgroundColor: ind.bg,
+                  color: ind.text,
+                }}
+              >
+                {ind.code}
+              </span>
+              <span>
+                {ind.colorName} · {ind.label}
+              </span>
+            </span>
+          );
+        })}
       </div>
+
+      {!isReadOnly && onValidateRange && (
+        <BatchCycle1Bar
+          year={year}
+          month={month}
+          numDays={numDays}
+          selectedDate={selectedDate}
+          settings={settings}
+          tideW={tideW}
+          first={first}
+          last={last}
+          windList={windList}
+          customSlotsMap={customSlotsMap}
+          validations={validations}
+          confirmScope={confirmScope}
+          setConfirmScope={setConfirmScope}
+          onValidateRange={onValidateRange}
+        />
+      )}
+    </div>
+  );
+};
+
+interface BatchCycle1BarProps {
+  year: number;
+  month: number;
+  numDays: number;
+  selectedDate: string;
+  settings: AppSettings;
+  tideW: [number, number][];
+  first: number;
+  last: number;
+  windList: WindPoint[];
+  customSlotsMap: CustomSlotsMap;
+  validations: ValidationsMap;
+  confirmScope: 'week' | 'month' | null;
+  setConfirmScope: React.Dispatch<React.SetStateAction<'week' | 'month' | null>>;
+  onValidateRange: (dates: string[], scopeLabel: string) => void;
+}
+
+const BatchCycle1Bar: React.FC<BatchCycle1BarProps> = ({
+  year,
+  month,
+  numDays,
+  selectedDate,
+  settings,
+  tideW,
+  first,
+  last,
+  windList,
+  customSlotsMap,
+  validations,
+  confirmScope,
+  setConfirmScope,
+  onValidateRange,
+}) => {
+  const todayStr = tdy();
+
+  const { weekDates, weekPendingCount, weekLabel, monthDates, monthPendingCount, monthLabel } = useMemo(() => {
+    const countPending = (datesList: string[]) => {
+      let pending = 0;
+      for (const ds of datesList) {
+        if (ds < todayStr || ds < minDs || ds > maxDs) continue;
+        const fDay = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
+        if (!fDay || fDay.list.length === 0) continue;
+        const rec = validations[ds];
+        if (!rec) {
+          pending++;
+          continue;
+        }
+        if (rec.items.length > 0 && rec.items.every(it => it.cycle1Status === 'not_published')) {
+          continue;
+        }
+        const covered = fDay.list.filter(x => {
+          const sk = kOf(x);
+          const sStr = lc(x.a, fDay.y, fDay.m, fDay.d);
+          const eStr = lc(x.b, fDay.y, fDay.m, fDay.d);
+          return rec.items.some(it => it.k === sk || (it.s === sStr && it.e === eStr));
+        }).length;
+        if (covered < fDay.list.length) pending++;
+      }
+      return pending;
+    };
+
+    // Liste des jours du mois affiché (>= aujourd'hui)
+    const mDates: string[] = [];
+    for (let d = 1; d <= numDays; d++) {
+      const ds = `${year}-${p2(month + 1)}-${p2(d)}`;
+      if (ds >= todayStr && ds >= minDs && ds <= maxDs) {
+        mDates.push(ds);
+      }
+    }
+
+    // Calcul de la semaine (Lundi -> Dimanche) contenant le jour sélectionné (s'il est dans ce mois), sinon le 1er jour ouvrable du mois
+    const displayedPrefix = `${year}-${p2(month + 1)}-`;
+    const anchorDs =
+      selectedDate.startsWith(displayedPrefix) && selectedDate >= todayStr
+        ? selectedDate
+        : mDates[0] || `${year}-${p2(month + 1)}-01`;
+    const [ay, am, ad] = anchorDs.split('-').map(Number);
+    const anchorUtc = new Date(Date.UTC(ay, am - 1, ad));
+    const offsetMonday = (anchorUtc.getUTCDay() + 6) % 7;
+    const mondayUtc = new Date(anchorUtc.getTime() - offsetMonday * 86400000);
+    const sundayUtc = new Date(mondayUtc.getTime() + 6 * 86400000);
+
+    const wDates: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const dObj = new Date(mondayUtc.getTime() + i * 86400000);
+      const ds = `${dObj.getUTCFullYear()}-${p2(dObj.getUTCMonth() + 1)}-${p2(dObj.getUTCDate())}`;
+      if (ds >= todayStr && ds >= minDs && ds <= maxDs) {
+        wDates.push(ds);
+      }
+    }
+
+    const fmtShort = (dObj: Date) => `${p2(dObj.getUTCDate())}/${p2(dObj.getUTCMonth() + 1)}`;
+    const wLabel = `Semaine du ${fmtShort(mondayUtc)} au ${fmtShort(sundayUtc)}`;
+    const mLabel = `${MOIS[month]} ${year}`;
+
+    return {
+      weekDates: wDates,
+      weekPendingCount: countPending(wDates),
+      weekLabel: wLabel,
+      monthDates: mDates,
+      monthPendingCount: countPending(mDates),
+      monthLabel: mLabel,
+    };
+  }, [year, month, numDays, selectedDate, todayStr, settings, tideW, first, last, windList, customSlotsMap, validations]);
+
+  const activeConfirmDates = confirmScope === 'week' ? weekDates : monthDates;
+  const activeConfirmCount = confirmScope === 'week' ? weekPendingCount : monthPendingCount;
+  const activeConfirmLabel = confirmScope === 'week' ? weekLabel : monthLabel;
+
+  return (
+    <div
+      style={{
+        marginTop: '10px',
+        paddingTop: '10px',
+        borderTop: '1px dashed var(--bd, #cbd5e1)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}
+      >
+        <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#334155' }}>
+          📅 Publication rapide Cycle 1 :
+          <span style={{ fontWeight: 600, color: '#64748b', marginLeft: '6px' }}>
+            (en complément du jour par jour)
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          <button
+            type="button"
+            disabled={weekPendingCount === 0}
+            onClick={() => setConfirmScope(prev => (prev === 'week' ? null : 'week'))}
+            style={{
+              padding: '5px 10px',
+              borderRadius: '6px',
+              border: weekPendingCount > 0 ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+              background:
+                confirmScope === 'week'
+                  ? '#0284c7'
+                  : weekPendingCount > 0
+                  ? '#f0f9ff'
+                  : '#f8fafc',
+              color:
+                confirmScope === 'week'
+                  ? '#ffffff'
+                  : weekPendingCount > 0
+                  ? '#0369a1'
+                  : '#94a3b8',
+              fontSize: '0.70rem',
+              fontWeight: 800,
+              cursor: weekPendingCount > 0 ? 'pointer' : 'not-allowed',
+            }}
+            title={
+              weekPendingCount > 0
+                ? `Publier en Cycle 1 les ${weekPendingCount} jour(s) ouvrable(s) en attente sur : ${weekLabel}`
+                : `${weekLabel} déjà entièrement publiée`
+            }
+          >
+            {weekPendingCount > 0
+              ? `📆 Valider la semaine (${weekLabel.replace('Semaine ', '')} · ${weekPendingCount} j)`
+              : `✓ ${weekLabel} validée`}
+          </button>
+
+          <button
+            type="button"
+            disabled={monthPendingCount === 0}
+            onClick={() => setConfirmScope(prev => (prev === 'month' ? null : 'month'))}
+            style={{
+              padding: '5px 10px',
+              borderRadius: '6px',
+              border: monthPendingCount > 0 ? '1.5px solid #16a34a' : '1px solid #cbd5e1',
+              background:
+                confirmScope === 'month'
+                  ? '#16a34a'
+                  : monthPendingCount > 0
+                  ? '#f0fdf4'
+                  : '#f8fafc',
+              color:
+                confirmScope === 'month'
+                  ? '#ffffff'
+                  : monthPendingCount > 0
+                  ? '#15803d'
+                  : '#94a3b8',
+              fontSize: '0.70rem',
+              fontWeight: 800,
+              cursor: monthPendingCount > 0 ? 'pointer' : 'not-allowed',
+            }}
+            title={
+              monthPendingCount > 0
+                ? `Publier en Cycle 1 les ${monthPendingCount} jour(s) en attente sur tout ${monthLabel}`
+                : `Tout ${monthLabel} est déjà validé`
+            }
+          >
+            {monthPendingCount > 0
+              ? `🗓️ Valider le mois (${monthLabel} · ${monthPendingCount} j)`
+              : `✓ Mois ${monthLabel} validé`}
+          </button>
+        </div>
+      </div>
+
+      {confirmScope && activeConfirmCount > 0 && (
+        <div
+          style={{
+            background: '#fffbeb',
+            border: '1.5px solid #fcd34d',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.72rem', color: '#78350f', lineHeight: 1.4 }}>
+            <strong>Confirmer la publication Cycle 1 :</strong> {activeConfirmLabel} ({activeConfirmCount} journée
+            {activeConfirmCount > 1 ? 's' : ''} avec créneaux).
+            <br />
+            <span style={{ fontSize: '0.67rem', color: '#92400e' }}>
+              Les jours passés, les journées marquées « À ne pas publier » et les créneaux déjà en Cycle 2 sont préservés.
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              onClick={() => setConfirmScope(null)}
+              style={{
+                padding: '5px 10px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#475569',
+                fontSize: '0.70rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onValidateRange(activeConfirmDates, activeConfirmLabel);
+                setConfirmScope(null);
+              }}
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#16a34a',
+                color: '#ffffff',
+                fontSize: '0.70rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              ✓ Confirmer ({activeConfirmCount} j)
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

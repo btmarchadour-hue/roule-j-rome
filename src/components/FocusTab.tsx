@@ -50,7 +50,7 @@ import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
-import { getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
+import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 
 interface FocusTabProps {
   year: number;
@@ -1281,10 +1281,11 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         </div>
 
-        {holiday.isHoliday && (
+        {(holiday.isHoliday || holiday.isPublicHoliday || holiday.isBridgeWeek) && (
           <div
             style={{
               display: 'inline-flex',
+              flexWrap: 'wrap',
               alignItems: 'center',
               gap: '6px',
               background: '#f8fafc',
@@ -1296,34 +1297,75 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               color: '#0f172a',
             }}
           >
-            <span>🎒 {holiday.holidayName}</span>
-            <span style={{ fontWeight: 800, color: '#334155' }}>({holiday.zonesLabel})</span>
-            <span style={{ display: 'inline-flex', gap: '3px' }}>
-              {(['A', 'B', 'C'] as const).map(z => {
-                const active =
-                  (z === 'A' && holiday.isZoneA) ||
-                  (z === 'B' && holiday.isZoneB) ||
-                  (z === 'C' && holiday.isZoneC);
-                const zoneStyle = HOLIDAY_ZONE_COLORS[z];
-                return (
-                  <span
-                    key={z}
-                    title={zoneStyle.label}
-                    style={{
-                      padding: '1px 5px',
-                      borderRadius: '3px',
-                      fontSize: '0.62rem',
-                      fontWeight: 900,
-                      color: active ? zoneStyle.text : '#475569',
-                      background: active ? zoneStyle.bg : '#cbd5e1',
-                      opacity: active ? 1 : 0.45,
-                    }}
-                  >
-                    {z}
-                  </span>
-                );
-              })}
-            </span>
+            {holiday.isPublicHoliday && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
+                <span
+                  style={{
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    fontSize: '0.62rem',
+                    fontWeight: 900,
+                    background: CALENDAR_INDICATOR_COLORS.F.bg,
+                    color: CALENDAR_INDICATOR_COLORS.F.text,
+                  }}
+                >
+                  F
+                </span>
+                <span>{holiday.publicHolidayName}</span>
+              </span>
+            )}
+            {holiday.isBridgeWeek && (
+              <span
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#5b21b6' }}
+                title={`Semaine avec jour férié le ${holiday.bridgeHolidayWeekday}`}
+              >
+                <span
+                  style={{
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    fontSize: '0.62rem',
+                    fontWeight: 900,
+                    background: CALENDAR_INDICATOR_COLORS.P.bg,
+                    color: CALENDAR_INDICATOR_COLORS.P.text,
+                  }}
+                >
+                  P
+                </span>
+                <span>Pont possible ({holiday.bridgeHolidayLabel})</span>
+              </span>
+            )}
+            {holiday.isHoliday && (
+              <>
+                <span>🎒 {holiday.holidayName}</span>
+                <span style={{ fontWeight: 800, color: '#334155' }}>({holiday.zonesLabel})</span>
+                <span style={{ display: 'inline-flex', gap: '3px' }}>
+                  {(['A', 'B', 'C'] as const).map(z => {
+                    const active =
+                      (z === 'A' && holiday.isZoneA) ||
+                      (z === 'B' && holiday.isZoneB) ||
+                      (z === 'C' && holiday.isZoneC);
+                    const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+                    return (
+                      <span
+                        key={z}
+                        title={zoneStyle.label}
+                        style={{
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          fontSize: '0.62rem',
+                          fontWeight: 900,
+                          color: active ? zoneStyle.text : '#475569',
+                          background: active ? zoneStyle.bg : '#cbd5e1',
+                          opacity: active ? 1 : 0.45,
+                        }}
+                      >
+                        {z}
+                      </span>
+                    );
+                  })}
+                </span>
+              </>
+            )}
           </div>
         )}
 

@@ -21,6 +21,7 @@ import {
   AgendaBookingItem,
   subscribeToValidations,
   saveValidationToFirestore,
+  saveValidationsBatchToFirestore,
   deleteValidationFromFirestore,
   subscribeToCustomSlots,
   saveCustomSlotsToFirestore,
@@ -758,6 +759,98 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const buildCycle1DayRecord = useCallback(
+    (
+      ds: string,
+      record: DayFocusData,
+      existingRecord: ValidationDayRecord | undefined,
+      mode: 'all' | 'wind_only' | 'not_published' = 'all',
+      nonPublishReason?: string
+    ): ValidationDayRecord => {
+      const items: ValidationItem[] = record.list.map(x => {
+        const slotKey = kOf(x);
+        const startTimeStr = lc(x.a, record.y, record.m, record.d);
+        const endTimeStr = lc(x.b, record.y, record.m, record.d);
+        const existingItem = existingRecord?.items?.find(
+          it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
+        );
+        const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
+        const bookingChars = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
+            bookingsMap[buildReservationKey(ds, slotKey)] ||
+            []
+        ).totalChars;
+
+        // Préserver intact tout créneau déjà engagé en Cycle 2 (>= 1 char ou action terrain)
+        if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
+          return {
+            ...existingItem,
+            publishedStart: existingItem.publishedStart || startTimeStr,
+            publishedEnd: existingItem.publishedEnd || endTimeStr,
+            cycle1Status: 'published',
+          };
+        }
+
+        if (mode === 'not_published') {
+          const cleanReason = nonPublishReason?.trim() || 'Indisponibilité personnelle';
+          return {
+            k: slotKey,
+            s: startTimeStr,
+            e: endTimeStr,
+            publishedStart: startTimeStr,
+            publishedEnd: endTimeStr,
+            opt: x.opt,
+            over: x.over,
+            lim: x.lim,
+            customTitle: x.customTitle,
+            status: 'rejected',
+            rejectReason: `Non publié (C1) : ${cleanReason}`,
+            cycle1Status: 'not_published',
+            nonPublishReason: cleanReason,
+            cycle2Status: undefined,
+            charsCount: 0,
+            monoCount: 0,
+            biCount: 0,
+            pilotsCount: 0,
+          };
+        }
+
+        const isBadWind = x.ok === false;
+        const closeInC1 = mode === 'wind_only' && isBadWind;
+
+        return {
+          k: slotKey,
+          s: startTimeStr,
+          e: endTimeStr,
+          publishedStart: startTimeStr,
+          publishedEnd: endTimeStr,
+          opt: x.opt,
+          over: x.over,
+          lim: x.lim,
+          customTitle: x.customTitle,
+          status: closeInC1 ? 'rejected' : 'valid',
+          rejectReason: closeInC1 ? 'Fermé Cycle 1 (vent hors plage, 0 inscrit)' : undefined,
+          cycle1Status: closeInC1 ? 'closed_no_bookings' : 'published',
+          nonPublishReason: undefined,
+          cycle2Status: closeInC1 ? undefined : 'awaiting_booking',
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        };
+      });
+
+      return {
+        sig: sigOf(record),
+        ts: Date.now(),
+        k: record.k,
+        cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+        items,
+      };
+    },
+    [bookingsMap]
+  );
+
   // CYCLE 1 : Publication commerciale ou Non-publication motivée jour par jour (préserve les créneaux déjà en Cycle 2)
   const handleValidateDay = (
     ds: string,
@@ -774,86 +867,7 @@ export const App: React.FC = () => {
       return;
     }
     const existingRecord = validations[ds];
-    const items: ValidationItem[] = record.list.map(x => {
-      const slotKey = kOf(x);
-      const startTimeStr = lc(x.a, record.y, record.m, record.d);
-      const endTimeStr = lc(x.b, record.y, record.m, record.d);
-      const existingItem = existingRecord?.items?.find(
-        it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
-      );
-      const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
-      const bookingChars = getSlotBookingsSummary(
-        bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
-          bookingsMap[buildReservationKey(ds, slotKey)] ||
-          []
-      ).totalChars;
-
-      // Préserver intact tout créneau déjà engagé en Cycle 2 (>= 1 char ou action terrain)
-      if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
-        return {
-          ...existingItem,
-          publishedStart: existingItem.publishedStart || startTimeStr,
-          publishedEnd: existingItem.publishedEnd || endTimeStr,
-          cycle1Status: 'published',
-        };
-      }
-
-      if (mode === 'not_published') {
-        const cleanReason = nonPublishReason?.trim() || 'Indisponibilité personnelle';
-        return {
-          k: slotKey,
-          s: startTimeStr,
-          e: endTimeStr,
-          publishedStart: startTimeStr,
-          publishedEnd: endTimeStr,
-          opt: x.opt,
-          over: x.over,
-          lim: x.lim,
-          customTitle: x.customTitle,
-          status: 'rejected',
-          rejectReason: `Non publié (C1) : ${cleanReason}`,
-          cycle1Status: 'not_published',
-          nonPublishReason: cleanReason,
-          cycle2Status: undefined,
-          charsCount: 0,
-          monoCount: 0,
-          biCount: 0,
-          pilotsCount: 0,
-        };
-      }
-
-      const isBadWind = x.ok === false;
-      const closeInC1 = mode === 'wind_only' && isBadWind;
-
-      return {
-        k: slotKey,
-        s: startTimeStr,
-        e: endTimeStr,
-        publishedStart: startTimeStr,
-        publishedEnd: endTimeStr,
-        opt: x.opt,
-        over: x.over,
-        lim: x.lim,
-        customTitle: x.customTitle,
-        status: closeInC1 ? 'rejected' : 'valid',
-        rejectReason: closeInC1 ? "Fermé Cycle 1 (vent hors plage, 0 inscrit)" : undefined,
-        cycle1Status: closeInC1 ? 'closed_no_bookings' : 'published',
-        nonPublishReason: undefined,
-        cycle2Status: closeInC1 ? undefined : 'awaiting_booking',
-        charsCount: 0,
-        monoCount: 0,
-        biCount: 0,
-        pilotsCount: 0,
-      };
-    });
-
-    const nextRecord: ValidationDayRecord = {
-      sig: sigOf(record),
-      ts: Date.now(),
-      k: record.k,
-      cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
-      items,
-    };
+    const nextRecord = buildCycle1DayRecord(ds, record, existingRecord, mode, nonPublishReason);
 
     persistDayValidation(ds, nextRecord);
     notifySync(
@@ -862,6 +876,92 @@ export const App: React.FC = () => {
         : '📅 Cycle 1 publié (créneaux ouverts sans impact météo court-terme)'
     );
   };
+
+  // CYCLE 1 : Publication groupée sur une semaine ou un mois entier (préserve jours passés, jours "À ne pas publier" et Cycle 2)
+  const handleValidateDateRange = useCallback(
+    (dates: string[], scopeLabel: string) => {
+      if (isReadOnly) {
+        notifySync('🔒 Mode Lecture seule actif : publications réservées aux administrateurs');
+        return;
+      }
+      const todayStr = tdy();
+      const batchEntries: Array<{ dateStr: string; data: ValidationDayRecord }> = [];
+
+      for (const ds of dates) {
+        if (ds < todayStr || ds < minDs || ds > maxDs) continue;
+        const record = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
+        if (!record || record.list.length === 0) continue;
+
+        const existingRecord = validations[ds];
+        // Respecter toute journée déjà explicitement marquée "À ne pas publier"
+        if (
+          existingRecord &&
+          existingRecord.items.length > 0 &&
+          existingRecord.items.every(it => it.cycle1Status === 'not_published')
+        ) {
+          continue;
+        }
+
+        // Ne pas écraser une journée dont tous les créneaux ont déjà une décision Cycle 1
+        const alreadyCoveredCount = existingRecord
+          ? record.list.filter(x => {
+              const sk = kOf(x);
+              const sStr = lc(x.a, record.y, record.m, record.d);
+              const eStr = lc(x.b, record.y, record.m, record.d);
+              return existingRecord.items.some(it => it.k === sk || (it.s === sStr && it.e === eStr));
+            }).length
+          : 0;
+        if (alreadyCoveredCount >= record.list.length && existingRecord) {
+          continue;
+        }
+
+        const built = buildCycle1DayRecord(ds, record, existingRecord, 'all');
+        // Si certains créneaux étaient déjà marqués individuellement "not_published" ou "closed_no_bookings", les préserver
+        if (existingRecord) {
+          built.items = built.items.map(it => {
+            const prevIt = existingRecord.items.find(
+              old => old.k === it.k || (old.s === it.s && old.e === it.e)
+            );
+            if (
+              prevIt &&
+              (prevIt.cycle1Status === 'not_published' || prevIt.cycle1Status === 'closed_no_bookings')
+            ) {
+              return prevIt;
+            }
+            return it;
+          });
+        }
+
+        batchEntries.push({ dateStr: ds, data: built });
+      }
+
+      if (batchEntries.length === 0) {
+        notifySync(`✓ ${scopeLabel} : toutes les journées ouvrables sont déjà publiées`);
+        return;
+      }
+
+      setValidations(prev => {
+        const updated = { ...prev };
+        for (const entry of batchEntries) {
+          updated[entry.dateStr] = entry.data;
+        }
+        try {
+          localStorage.setItem(VK, JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+
+      saveValidationsBatchToFirestore(batchEntries).catch(err =>
+        console.warn('Erreur Firestore batch validation:', err)
+      );
+      notifySync(
+        `📅 ${scopeLabel} : ${batchEntries.length} journée${batchEntries.length > 1 ? 's' : ''} publiée${batchEntries.length > 1 ? 's' : ''} en Cycle 1`
+      );
+    },
+    [isReadOnly, settings, tideW, first, last, windList, customSlotsMap, validations, buildCycle1DayRecord]
+  );
 
   const handleClearValidation = useCallback((ds: string) => {
     if (isReadOnly) {
@@ -1387,6 +1487,8 @@ export const App: React.FC = () => {
               validations={validations}
               bookingsMap={bookingsMap}
               customSlotsMap={customSlotsMap}
+              isReadOnly={isReadOnly}
+              onValidateRange={handleValidateDateRange}
             />
 
             {/* Météo au format Windguru directement sous le calendrier */}

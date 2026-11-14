@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint } from '../types';
 import { computeCadreGeometry, evaluatePointAgainstCadre } from '../utils/beachCadreEngine';
 import { hAt } from '../utils/tides';
@@ -27,8 +27,14 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
     Number(currentTideHeight.toFixed(2))
   );
 
-  // Marge de sable sec/mou en haut de plage (paramétrable, PAS de décision figée imposée !)
-  const [softSandMarginM, setSoftSandMarginM] = useState<number>(50);
+  // Marge de sable sec/mou en haut de plage (synchronisée avec le Cadre de Roulage, fixée à 50 m par défaut)
+  const [softSandMarginM, setSoftSandMarginM] = useState<number>(activeCadre?.softSandMarginM ?? 50);
+
+  useEffect(() => {
+    if (typeof activeCadre?.softSandMarginM === 'number') {
+      setSoftSandMarginM(activeCadre.softSandMarginM);
+    }
+  }, [activeCadre?.softSandMarginM]);
 
   // Mode d'affichage visuel : 'aerial' (Vue du dessus / Piste de char) ou 'profile' (Coupe transversale)
   const [viewMode, setViewMode] = useState<'aerial' | 'profile'>('aerial');
@@ -607,7 +613,7 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
             style={{ width: '100%', marginTop: '6px', cursor: 'pointer' }}
           />
           <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: '4px', lineHeight: 1.35 }}>
-            <strong>Curseur ajustable :</strong> Ne pas figer cette valeur arbitrairement. À arbitrer avec Jérôme selon l'état du haut de plage.
+            <strong>Réglage acté : 50 m</strong> (synchronisé avec le Cadre de Roulage ci-dessus ; curseur libre si vous souhaitez tester un autre scénario).
           </div>
         </div>
 

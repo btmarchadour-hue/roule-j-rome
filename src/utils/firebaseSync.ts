@@ -180,6 +180,37 @@ export const saveValidationToFirestore = async (
   }
 };
 
+export const saveValidationsBatchToFirestore = async (
+  entries: Array<{ dateStr: string; data: any }>
+) => {
+  if (entries.length === 0) return;
+  try {
+    await ensureAuth();
+    const author = getActiveInstructor();
+    const now = Date.now();
+    // Découper par lots de 400 (limite Firestore batch = 500)
+    for (let i = 0; i < entries.length; i += 400) {
+      const chunk = entries.slice(i, i + 400);
+      const batch = writeBatch(db);
+      for (const entry of chunk) {
+        const docRef = doc(db, 'validations', entry.dateStr);
+        const payload = cleanForFirestore({
+          ...entry.data,
+          author: entry.data?.author || author,
+          updatedAt: now,
+        });
+        batch.set(docRef, payload);
+      }
+      await batch.commit();
+    }
+    notifySync(`✓ ${entries.length} journée${entries.length > 1 ? 's' : ''} Cycle 1 synchronisée${entries.length > 1 ? 's' : ''} dans le Cloud`);
+  } catch (error) {
+    console.error('Erreur batch validation Firestore:', error);
+    notifySync('⚠️ Erreur envoi lot Cycle 1 au Cloud');
+    throw error;
+  }
+};
+
 export const deleteValidationFromFirestore = async (dateStr: string) => {
   try {
     await ensureAuth();
@@ -749,12 +780,16 @@ export const subscribeToTeamNotes = (
     snapshot => {
       const list: TeamNote[] = [];
       snapshot.forEach(docSnap => {
+        // Ignorer les documents techniques d'état et de QCM des notes (stockés dans team_notes)
+        if (docSnap.id === 'status_tech_notes' || docSnap.id === 'qcm_tech_notes') return;
         const d = docSnap.data();
+        const text = typeof d.content === 'string' ? d.content.trim() : '';
+        if (!text) return;
         list.push({
           id: docSnap.id,
           author: d.author || 'Benoît',
           category: d.category || 'organisation',
-          content: d.content || '',
+          content: d.content,
           createdAt: d.createdAt || Date.now(),
           isResolved: Boolean(d.isResolved),
           resolvedAt: d.resolvedAt,
@@ -1057,5 +1092,66 @@ export const setTechNoteProcessedInFirestore = async (
     throw error;
   }
 };
+
+export interface TechNoteQcmSubmission {
+  noteId: string;
+  answers: Record<string, string[]>;
+  notes: Record<string, string>;
+  respondent: string;
+  submittedAt: number;
+  answeredCount: number;
+  totalQuestions: number;
+}
+
+export type TechNoteQcmMap = Record<string, TechNoteQcmSubmission>;
+
+export const subscribeToTechNoteQcms = (
+  onData: (data: TechNoteQcmMap) => void,
+  onError?: (err: Error) => void
+) => {
+  const docRef = doc(db, 'team_notes', 'qcm_tech_notes');
+  return onSnapshot(
+    docRef,
+    snap => {
+      if (snap.exists()) {
+        const raw = snap.data();
+        const clean: TechNoteQcmMap = {};
+        Object.entries(raw).forEach(([k, v]) => {
+          if (k !== 'updatedAt' && v && typeof v === 'object') {
+            clean[k] = v as TechNoteQcmSubmission;
+          }
+        });
+        onData(clean);
+      } else {
+        onData({});
+      }
+    },
+    error => {
+      console.warn('Erreur écoute QCM notes techniques Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const saveTechNoteQcmToFirestore = async (
+  noteId: string,
+  submission: TechNoteQcmSubmission
+): Promise<void> => {
+  const path = 'team_notes/qcm_tech_notes';
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', 'qcm_tech_notes');
+    const updatePayload = {
+      [noteId]: cleanForFirestore(submission),
+      updatedAt: Date.now(),
+    };
+    await setDoc(docRef, updatePayload, { merge: true });
+    notifySync('✓ Réponses QCM enregistrées et synchronisées');
+  } catch (error) {
+    notifySync('⚠️ Erreur de sauvegarde du QCM');
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
 
 

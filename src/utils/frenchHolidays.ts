@@ -31,6 +31,23 @@ export const HOLIDAY_ZONE_COLORS = {
   },
 } as const;
 
+export const CALENDAR_INDICATOR_COLORS = {
+  F: {
+    code: 'F' as const,
+    colorName: 'Vert',
+    bg: '#059669',
+    text: '#ffffff',
+    label: 'Jour férié',
+  },
+  P: {
+    code: 'P' as const,
+    colorName: 'Violet',
+    bg: '#7c3aed',
+    text: '#ffffff',
+    label: 'Pont possible (férié mar/mer/jeu)',
+  },
+} as const;
+
 export interface HolidayInfo {
   isHoliday: boolean;
   holidayName?: string;
@@ -40,7 +57,12 @@ export interface HolidayInfo {
   isZoneB: boolean; // Académie de Rennes (Bretagne / Finistère)
   isZoneA: boolean;
   isZoneC: boolean;
+  isPublicHoliday: boolean;
   publicHolidayName?: string;
+  isBridgeWeek: boolean;
+  bridgeHolidayName?: string;
+  bridgeHolidayWeekday?: string;
+  bridgeHolidayLabel?: string;
   weekNumber: number;
   label: string;
   shortLabel: string;
@@ -138,6 +160,19 @@ export function getISOWeekNumber(d: Date): number {
   return 1 + Math.ceil((firstThursday - target.getTime()) / 604800000);
 }
 
+const BRIDGE_WEEKDAYS: Record<number, string> = {
+  2: 'mardi',
+  3: 'mercredi',
+  4: 'jeudi',
+};
+
+function formatUtcDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /**
  * Returns holiday and calendar info for a date string YYYY-MM-DD
  */
@@ -146,10 +181,38 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
   const dateObj = new Date(Date.UTC(y, m - 1, d));
   const weekNumber = getISOWeekNumber(dateObj);
   const publicHolidayName = PUBLIC_HOLIDAYS[dateStr];
+  const isPublicHoliday = Boolean(publicHolidayName);
+
+  // Detect bridge week ("Pont possible"): Mon-Sun week containing a public holiday on Tue (2), Wed (3), or Thu (4)
+  const offsetMonday = (dateObj.getUTCDay() + 6) % 7;
+  const mondayMs = dateObj.getTime() - offsetMonday * 86400000;
+  const bridgeHolidays: { name: string; weekday: string }[] = [];
+  for (let i = 0; i < 7; i++) {
+    const cur = new Date(mondayMs + i * 86400000);
+    const dow = cur.getUTCDay();
+    const weekdayLabel = BRIDGE_WEEKDAYS[dow];
+    if (!weekdayLabel) continue;
+    const curStr = formatUtcDate(cur);
+    const curHolidayName = PUBLIC_HOLIDAYS[curStr];
+    if (curHolidayName) {
+      bridgeHolidays.push({ name: curHolidayName, weekday: weekdayLabel });
+    }
+  }
+  const isBridgeWeek = bridgeHolidays.length > 0;
+  const bridgeHolidayName = isBridgeWeek ? bridgeHolidays.map(b => b.name).join(' & ') : undefined;
+  const bridgeHolidayWeekday = isBridgeWeek ? bridgeHolidays.map(b => b.weekday).join(' & ') : undefined;
+  const bridgeHolidayLabel = isBridgeWeek
+    ? bridgeHolidays.map(b => `${b.name} (${b.weekday})`).join(' · ')
+    : undefined;
 
   const matching = HOLIDAY_PERIODS.filter(p => dateStr >= p.start && dateStr <= p.end);
 
   if (matching.length === 0) {
+    const labelParts: string[] = [];
+    if (publicHolidayName) labelParts.push(`Férié : ${publicHolidayName}`);
+    if (bridgeHolidayLabel) labelParts.push(`Pont possible : ${bridgeHolidayLabel}`);
+    labelParts.push('Période scolaire');
+
     return {
       isHoliday: false,
       zones: [],
@@ -157,10 +220,19 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
       isZoneB: false,
       isZoneA: false,
       isZoneC: false,
+      isPublicHoliday,
       publicHolidayName,
+      isBridgeWeek,
+      bridgeHolidayName,
+      bridgeHolidayWeekday,
+      bridgeHolidayLabel,
       weekNumber,
-      label: publicHolidayName ? `Férié : ${publicHolidayName} · Période scolaire` : 'Période scolaire',
-      shortLabel: publicHolidayName ? `Férié ${publicHolidayName}` : 'Scolaire',
+      label: labelParts.join(' · '),
+      shortLabel: publicHolidayName
+        ? `Férié ${publicHolidayName}`
+        : isBridgeWeek
+        ? 'Pont possible'
+        : 'Scolaire',
     };
   }
 
@@ -191,6 +263,9 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
   if (publicHolidayName) {
     label += ` · Férié : ${publicHolidayName}`;
   }
+  if (bridgeHolidayLabel) {
+    label += ` · Pont possible : ${bridgeHolidayLabel}`;
+  }
 
   return {
     isHoliday: true,
@@ -201,7 +276,12 @@ export function getFrenchHolidayInfo(dateStr: string): HolidayInfo {
     isZoneB,
     isZoneA,
     isZoneC,
+    isPublicHoliday,
     publicHolidayName,
+    isBridgeWeek,
+    bridgeHolidayName,
+    bridgeHolidayWeekday,
+    bridgeHolidayLabel,
     weekNumber,
     label,
     shortLabel: holidayName.replace('Vacances de la ', '').replace('Vacances de ', '').replace("Vacances d'", ''),

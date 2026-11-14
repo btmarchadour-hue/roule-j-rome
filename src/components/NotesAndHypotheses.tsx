@@ -5,9 +5,14 @@ import { APP_VERSION_INFO } from '../version';
 import {
   getActiveInstructor,
   ProcessedTechNotesMap,
+  saveTechNoteQcmToFirestore,
   setTechNoteProcessedInFirestore,
   subscribeToProcessedTechNotes,
+  subscribeToTechNoteQcms,
+  TechNoteQcmMap,
+  TechNoteQcmSubmission,
 } from '../utils/firebaseSync';
+import { TECH_NOTE_QCMS, TechNoteQcmDefinition } from '../data/techNoteQcms';
 
 interface NotesAndHypothesesProps {
   onLock?: () => void;
@@ -33,6 +38,7 @@ interface TechNoteItem {
 }
 
 const LOCAL_STORAGE_KEY = 'cv_processed_tech_notes_cache';
+const QCM_STORAGE_KEY = 'cv_qcm_tech_notes_cache';
 
 export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }) => {
   const [customPassword, setCustomPassword] = useState('');
@@ -54,6 +60,27 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
       return {};
     }
   });
+
+  // Réponses aux QCM intégrés dans l'app (Synchronisées Firestore + fallback local)
+  const [qcmMap, setQcmMap] = useState<TechNoteQcmMap>(() => {
+    try {
+      const cached = localStorage.getItem(QCM_STORAGE_KEY);
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Modale de réponse au QCM dans l'application
+  const [activeQcmDef, setActiveQcmDef] = useState<TechNoteQcmDefinition | null>(null);
+  const [qcmDraftAnswers, setQcmDraftAnswers] = useState<Record<string, string[]>>({});
+  const [qcmDraftNotes, setQcmDraftNotes] = useState<Record<string, string>>({});
+  const [qcmRespondent, setQcmRespondent] = useState<string>(() => {
+    const cur = getActiveInstructor();
+    return cur === 'Benoît' ? 'Benoît' : 'Jérôme';
+  });
+  const [isSavingQcm, setIsSavingQcm] = useState(false);
+  const [qcmSaveError, setQcmSaveError] = useState<string | null>(null);
 
   // Modale de traitement d'une note
   const [resolvingNote, setResolvingNote] = useState<TechNoteItem | null>(null);
@@ -91,6 +118,19 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
       setProcessedMap(remoteMap);
       try {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remoteMap));
+      } catch {
+        // ignore
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Écoute temps réel Firestore des réponses aux QCM intégrés
+  useEffect(() => {
+    const unsubscribe = subscribeToTechNoteQcms(remoteMap => {
+      setQcmMap(remoteMap);
+      try {
+        localStorage.setItem(QCM_STORAGE_KEY, JSON.stringify(remoteMap));
       } catch {
         // ignore
       }
@@ -156,14 +196,14 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryColor: '#6366f1',
         icon: '💡',
         title: 'Note · Axes d’Amélioration & Évolutions Futures',
-        subtitle: 'Backlog vivant : bâches & ruissellements (ex-Q3), précision GPS/Litto3D, capteurs locaux et billetterie',
+        subtitle: 'Backlog vivant : bâches (ex-Q3), heures moniteur & stats, précision GPS/Litto3D, capteurs et billetterie',
         summary:
-          'Registre évolutif regroupant les sujets trop complexes pour être figés a priori (comme les bâches et rigoles à Lestrevet) ou volontairement planifiés en phase 2 après les premiers retours terrain (REX).',
+          'Registre évolutif regroupant les sujets trop complexes pour être figés a priori (comme les bâches à Lestrevet) ou volontairement planifiés en phase 2 après les premiers retours terrain (heures moniteur, statistiques avancées, capteurs locaux).',
         keyPoints: [
-          'Bâches & ruissellements Lestrevet (ex-Q3 Cadrage Terrain) : jugé trop multifactoriel par Jérôme ; suivi via tag GPS « Bâches » + REX avant toute modélisation.',
+          'Bâches & ruissellements Lestrevet (ex-Q3 Cadrage Terrain) : suivi via tag GPS « Bâches » + REX avant toute modélisation.',
+          'Heures moniteur & Stats avancées (ex-Évolution Majeure) : heures estran + préparation/convoyage, pertes par secteur vent et fréquentation par coef.',
           'Précision & Modèle Plage : polyligne de dune (3–5 pts), watchPosition 1/σ², raster Litto3D 1 m, ou ZED-F9P Centipède RTK à long terme.',
-          'Météo & Cycle 2 : correctif empirique balise Pentrez ↔ Lestrevet, balise club locale / baromètre, pondération houle OSO et schéma vectoriel.',
-          'Billetterie Deux Ponts : connexion automatique des inscrits et reports SMS une fois le logiciel de réservation choisi.',
+          'Météo, Cycle 2 & Billetterie : correctif Pentrez ↔ Lestrevet, balise club locale, houle OSO, schéma vectoriel et connexion Deux Ponts / SMS.',
         ],
         docUrl: '/note_axes_amelioration.html',
         docBtnLabel: '💡 Ouvrir la Note Axes d’Amélioration (A4 / Word)',
@@ -171,6 +211,30 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
           label: 'Évolutif · Backlog',
           bg: '#ede9fe',
           color: '#5b21b6',
+        },
+      },
+      {
+        id: 'note-creneaux-simultanes-ete',
+        category: 'reunion',
+        categoryLabel: 'Organisation Été',
+        categoryColor: '#7c3aed',
+        icon: '☀️',
+        title: 'Questionnaire QCM Remplissable : Créneaux Simultanés d’Été & Multi-Moniteurs',
+        subtitle: '6 choix multiples pour caler les séances parallèles (ex. 15h Jérôme + Katleen), le parc chars et l’affichage',
+        summary:
+          'Note interactive pour trancher avec Jérôme l’organisation de la haute saison lorsque deux moniteurs roulent sur la même tranche horaire : architecture des séances parallèles, plafond du parc matériel simultané, bouton de dédoublement, accès Katleen et comptage d’heures.',
+        keyPoints: [
+          'Q1 & Q2 · 2 séances distinctes sur la même heure (ex. 15h Jérôme / 15h Katleen) vs créneau double, horaires identiques ou souples.',
+          'Q3 · Jauge moniteur (12 chars) vs plafond total du parc matériel roulant en simultané (monoplaces + biplaces).',
+          'Q4 & Q5 · Liste de prénoms simple vs accès dédié Katleen, et bouton « + Doubler ce créneau » ou mode Haute Saison.',
+          'Q6 · Badges moniteur, filtre rapide et préparation du comptage d’heures séparé par moniteur (export Word / HTML / PDF).',
+        ],
+        docUrl: '/note_creneaux_simultanes_ete.html',
+        docBtnLabel: '☀️ Ouvrir le QCM Été Multi-Moniteurs (Word / HTML / PDF)',
+        statusBadge: {
+          label: 'À arbitrer avec Jérôme',
+          bg: '#fef3c7',
+          color: '#92400e',
         },
       },
       {
@@ -205,22 +269,21 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryColor: '#7c3aed',
         icon: '⚡',
         title: 'Note Jérôme : Cycle 1 / Cycle 2, Règle des 12 Chars & Passage au 100 % Digital',
-        subtitle: 'Dissociation offre/terrain, abandon du papier, SMS reportés & question sur la cadence Cycle 1',
+        subtitle: 'Dissociation offre/terrain, abandon du papier, SMS reportés & boutons Semaine / Mois actifs',
         summary:
-          'Point de cadrage et question directe à Jérôme suite au passage à l’organisation 100 % digitale : capacité fixée à 12 chars max/moniteur (mono + bi), Cycle 2 déclenché dès la 1ère inscription, et arbitrage long terme sur l’ouverture Cycle 1 jour par jour vs semaine/mois.',
+          'Tous les points sont désormais actés et en production : capacité fixée à 12 chars max/moniteur (mono + bi), Cycle 2 déclenché dès la 1ère inscription, 100 % digital et publication Cycle 1 disponible au choix jour par jour, à la semaine ou au mois complet.',
         keyPoints: [
-          'Cycle 1 (Offre commerciale) : maintenu jour par jour, protégé contre les alertes météo tant que 0 char inscrit.',
+          'Cycle 1 (Offre commerciale) : protégé contre les alertes météo tant que 0 char inscrit · validation possible jour par jour, à la semaine ou au mois.',
           'Cycle 2 (Pilotage terrain) : déclenché dès le 1er char inscrit (Maintenir, Décaler, Regrouper, Vie 2, REX).',
           'Capacité : règle officielle en nombre de chars (1 mono = 1 char, 1 bi = 1 char, max 12 chars / moniteur).',
           '100 % Digital : suppression définitive de la Fiche Agenda Papier · SMS clients reportés au nouvel outil de résa.',
-          'Question pour Jérôme : garder uniquement le « jour par jour » en Cycle 1 ou ajouter une option semaine/mois ?',
         ],
         docUrl: '/note_arbitrage_cycle1_cycle2_digital.html',
         docBtnLabel: '⚡ Ouvrir la Note d’Arbitrage pour Jérôme (A4 / Word)',
         statusBadge: {
-          label: 'À arbitrer avec Jérôme',
-          bg: '#fef3c7',
-          color: '#92400e',
+          label: '100 % Appliquée · Prête à archiver',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {
@@ -230,22 +293,21 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryColor: '#dc2626',
         icon: '🚀',
         title: 'Note Stratégique : Les 2 Temps, le Cycle en 6 Étapes & Nouveaux Modules',
-        subtitle: 'Anticipation vs Tactique, Décalage/Regroupement, Sauvetage SMS, Heures Moniteur & Coupe Litto3D',
+        subtitle: 'Anticipation vs Tactique, Décalage/Regroupement, Garde-fou 0 pilote, Litto3D · Heures & Stats transférées',
         summary:
-          'Synthèse complète des notes de cadrage de Benoît : organisation en 2 temps, cycle de vie en 6 étapes (définition, positionnement résa, ajustement/décalage/regroupement dynamique, rétroaction résa, REX sincère, couplage gestion & GPS), gestion des heures moniteur et calage altimétrique Litto3D.',
+          'Synthèse clôturée : l’organisation en 2 temps, le décalage/regroupement, le garde-fou 0 pilote, la séparation Vie 1 / Vie 2 et Litto3D/GPS sont en production. Les SMS suivent le chantier Billetterie, et les volets Heures moniteur + Statistiques avancées ont été transférés dans « Axes d’Amélioration ».',
         keyPoints: [
-          'Cycle Opérationnel en 6 étapes : De la physique des marées à la synchronisation bidirectionnelle résa.',
-          'Ajustement dynamique : Possibilité de décalage horaire (+30 min) et regroupement de créneaux sous-remplis.',
-          'Sauvetage Commercial en 1 clic : SMS automatisés d’alerte J-1 (18h) et proposition de 5 reports (taux 75-80%).',
-          'Garde-fou Métier Inviolable : Interdiction formelle de valider une séance avec 0 participant (pilote).',
-          'Nouveaux Modules pour Jeudi : Gestion des heures moniteur (Jérôme) et échelle altimétrique en ordonnée Litto3D.',
+          'Cycle Opérationnel & Ajustements (En prod) : Cycle 1 / Cycle 2, décalage horaire, fusion de créneaux et séparation Vie 1 / Vie 2.',
+          'Garde-fou Métier Inviolable (En prod) : aucun passage en séance réalisée à 0 pilote inscrit (12 chars max/moniteur).',
+          'Topographie Litto3D & GPS (En prod) : coupe altimétrique NGF + module d’étalonnage plage.',
+          'Transférés en Axes d’Amélioration / Phase 2 : Heures moniteur (estran + prépa), Stats complémentaires et automatisations SMS billetterie.',
         ],
         docUrl: '/note_evolution_majeure_deux_temps.html',
         docBtnLabel: '🚀 Ouvrir la Note Évolution Majeure (2 Pages A4 / Word)',
         statusBadge: {
-          label: 'Priorité Réunion Jeudi',
-          bg: '#fee2e2',
-          color: '#991b1b',
+          label: 'Clôturée · Prête à archiver',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {
@@ -279,21 +341,21 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         categoryColor: '#16a34a',
         icon: '🏖️',
         title: 'Note Cadrage Lestrevet : Pente Litto3D & Piste Utile',
-        subtitle: 'Modèle Lidar IGN/SHOM, pente 1,15 % · Q1 cadrée (Dune), Q3 transférée en Améliorations, reste Q2',
+        subtitle: 'Modèle Lidar IGN/SHOM, pente 1,15 % · Q1 & Q2 (50 m) cadrées, Q3 transférée en Améliorations',
         summary:
-          'Utilisation des données altimétriques publiques de haute précision Litto3D Finistère (économie géomètre : ~4 000 €). La Question 1 (référence Pied de dune + procédure GPS) est cadrée et la Question 3 (bâches) a été basculée dans « Axes d’amélioration ».',
+          'Utilisation des données altimétriques publiques de haute précision Litto3D Finistère (économie géomètre : ~4 000 €). Les arbitrages sont posés : référence au Pied de dune (Q1), marge haute fixée à 50 m (Q2) et bâches/ruissellements transférés dans Axes d’amélioration (Q3). Il ne reste plus que la prise des points GPS sur la plage avec le Guide de mesure.',
         keyPoints: [
           'Pente réelle moyenne d’estran : 1,15 % (1 cm vertical d’eau = ~87 cm à 1 m de sable praticable mangé).',
           'Question 1 (Actée sur le principe) : référence au Pied de dune + bornes Gauche/Droite (à relever sur place via le Guide de mesure).',
-          'Question 2 (Reste à arbitrer) : marge haute de sable sec/mou — valeur fixe (30–50 m) ou laisse de pleine mer + synchro avec Litto3D.',
+          'Question 2 (Actée : 50 m fixes) : marge haute de sable sec/mou fixée à 50 mètres, synchronisée entre le Cadre de Roulage et Litto3D.',
           'Question 3 (Transférée ➔ Axes d’amélioration) : bâches & ruissellements trop complexes à modéliser sans historique REX.',
         ],
         docUrl: '/note_cadrage_lestrevet_jerome.html',
         docBtnLabel: '📝 Ouvrir la Note Lestrevet (1 page A4)',
         statusBadge: {
-          label: 'À arbitrer avec Jérôme',
-          bg: '#fef3c7',
-          color: '#92400e',
+          label: 'Arbitrages clos · Prête à archiver',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {
@@ -454,8 +516,79 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
   const handleRestoreNote = async (noteId: string) => {
     try {
       await setTechNoteProcessedInFirestore(noteId, false);
+    } catch {
+      // Erreur déjà journalisée
+    }
+  };
+
+  // Ouverture et sauvegarde du QCM dans l'app
+  const handleOpenQcmModal = (noteId: string) => {
+    const def = TECH_NOTE_QCMS[noteId];
+    if (!def) return;
+    const existing = qcmMap[noteId];
+    setQcmDraftAnswers(existing?.answers ? { ...existing.answers } : {});
+    setQcmDraftNotes(existing?.notes ? { ...existing.notes } : {});
+    if (existing?.respondent) {
+      setQcmRespondent(existing.respondent);
+    } else {
+      const cur = getActiveInstructor();
+      setQcmRespondent(cur === 'Benoît' ? 'Benoît' : 'Jérôme');
+    }
+    setQcmSaveError(null);
+    setActiveQcmDef(def);
+  };
+
+  const handleToggleQcmOption = (questionId: string, optionId: string, type: 'radio' | 'checkbox') => {
+    setQcmDraftAnswers(prev => {
+      const current = prev[questionId] || [];
+      if (type === 'radio') {
+        return { ...prev, [questionId]: [optionId] };
+      }
+      const exists = current.includes(optionId);
+      return {
+        ...prev,
+        [questionId]: exists ? current.filter(id => id !== optionId) : [...current, optionId],
+      };
+    });
+  };
+
+  const handleSaveQcm = async () => {
+    if (!activeQcmDef) return;
+    setIsSavingQcm(true);
+    setQcmSaveError(null);
+    const totalQuestions = activeQcmDef.questions.length;
+    const answeredCount = activeQcmDef.questions.filter(
+      q => (qcmDraftAnswers[q.id]?.length || 0) > 0
+    ).length;
+
+    const submission: TechNoteQcmSubmission = {
+      noteId: activeQcmDef.noteId,
+      answers: qcmDraftAnswers,
+      notes: qcmDraftNotes,
+      respondent: qcmRespondent || 'Jérôme',
+      submittedAt: Date.now(),
+      answeredCount,
+      totalQuestions,
+    };
+
+    try {
+      await saveTechNoteQcmToFirestore(activeQcmDef.noteId, submission);
+      setQcmMap(prev => {
+        const next = { ...prev, [activeQcmDef.noteId]: submission };
+        try {
+          localStorage.setItem(QCM_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+      setActiveQcmDef(null);
     } catch (err) {
-      alert('Erreur lors de la réactivation de la note : ' + (err as Error).message);
+      setQcmSaveError(
+        'Impossible d’enregistrer les réponses pour le moment : ' + ((err as Error)?.message || 'erreur réseau')
+      );
+    } finally {
+      setIsSavingQcm(false);
     }
   };
 
@@ -746,6 +879,12 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
           {filteredNotes.map(note => {
             const isProcessed = Boolean(processedMap[note.id]?.isProcessed);
             const processedInfo = processedMap[note.id];
+            const qcmDef = TECH_NOTE_QCMS[note.id];
+            const qcmSubmission = qcmMap[note.id];
+            const hasQcmAnswers = Boolean(qcmSubmission && qcmSubmission.answeredCount > 0);
+            const isQcmComplete = Boolean(
+              qcmDef && qcmSubmission && qcmSubmission.answeredCount >= qcmDef.questions.length
+            );
 
             return (
               <div
@@ -816,6 +955,49 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                     </div>
                   )}
 
+                  {/* Bandeau réponses QCM synchronisées dans l'app */}
+                  {qcmDef && hasQcmAnswers && qcmSubmission && (
+                    <div
+                      style={{
+                        background: isQcmComplete ? '#ecfdf5' : '#eff6ff',
+                        border: `1.5px solid ${isQcmComplete ? '#6ee7b7' : '#93c5fd'}`,
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        marginBottom: '10px',
+                        fontSize: '0.72rem',
+                        color: isQcmComplete ? '#065f46' : '#1e40af',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontWeight: 800 }}>
+                        <span>
+                          {isQcmComplete ? '✅' : '📝'} QCM rempli par <strong>{qcmSubmission.respondent}</strong> ({qcmSubmission.answeredCount}/{qcmDef.questions.length})
+                        </span>
+                        <span style={{ fontSize: '0.66rem', opacity: 0.85 }}>
+                          le {new Date(qcmSubmission.submittedAt).toLocaleDateString('fr-FR')}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '0.68rem', color: '#334155' }}>
+                        {qcmDef.questions.slice(0, 3).map((q, idx) => {
+                          const chosenIds = qcmSubmission.answers?.[q.id] || [];
+                          if (chosenIds.length === 0) return null;
+                          const chosenText = chosenIds
+                            .map(id => q.options.find(o => o.id === id)?.label || id)
+                            .join(' + ');
+                          return (
+                            <div key={q.id} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              <strong>Q{idx + 1} :</strong> {chosenText}
+                            </div>
+                          );
+                        })}
+                        {qcmDef.questions.length > 3 && qcmSubmission.answeredCount > 3 && (
+                          <div style={{ fontSize: '0.65rem', color: '#475569', fontStyle: 'italic' }}>
+                            + autres réponses enregistrées (cliquer sur « Voir / Modifier réponses »)
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* En-tête de la carte */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <span
@@ -843,11 +1025,29 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                         fontWeight: 800,
                         padding: '2px 8px',
                         borderRadius: '4px',
-                        background: isProcessed ? '#dcfce7' : note.statusBadge.bg,
-                        color: isProcessed ? '#166534' : note.statusBadge.color,
+                        background: isProcessed
+                          ? '#dcfce7'
+                          : hasQcmAnswers
+                          ? isQcmComplete
+                            ? '#dcfce7'
+                            : '#dbeafe'
+                          : note.statusBadge.bg,
+                        color: isProcessed
+                          ? '#166534'
+                          : hasQcmAnswers
+                          ? isQcmComplete
+                            ? '#166534'
+                            : '#1d4ed8'
+                          : note.statusBadge.color,
                       }}
                     >
-                      {isProcessed ? '✓ Traitée' : note.statusBadge.label}
+                      {isProcessed
+                        ? '✓ Traitée'
+                        : hasQcmAnswers
+                        ? isQcmComplete
+                          ? `✓ Répondu (${qcmSubmission?.answeredCount}/${qcmDef?.questions.length})`
+                          : `📝 ${qcmSubmission?.answeredCount}/${qcmDef?.questions.length} rép.`
+                        : note.statusBadge.label}
                     </span>
                   </div>
 
@@ -879,77 +1079,110 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                   </div>
                 </div>
 
-                {/* Barre d'action inférieure : Bouton A4 + Bouton Marquer comme traitée / Supprimer */}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', alignItems: 'center' }}>
-                  <a
-                    href={note.docUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      flex: 1,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      background: isProcessed ? '#64748b' : note.categoryColor,
-                      color: '#ffffff',
-                      textDecoration: 'none',
-                      padding: '9px 12px',
-                      borderRadius: '8px',
-                      fontSize: '0.76rem',
-                      fontWeight: 800,
-                      textAlign: 'center',
-                      boxShadow: isProcessed ? 'none' : `0 3px 10px ${note.categoryColor}30`,
-                      transition: 'opacity 0.15s ease',
-                    }}
-                  >
-                    <span>{note.docBtnLabel}</span>
-                    <span style={{ fontSize: '0.85rem' }}>➔</span>
-                  </a>
-
-                  {!isProcessed ? (
+                {/* Barre d'action inférieure : Bouton QCM in-app (si QCM), Bouton A4/Word + Marquer traitée */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                  {qcmDef && (
                     <button
                       type="button"
-                      onClick={() => handleOpenResolveModal(note)}
-                      title="Marquer cette note comme traitée / décidée avec Jérôme"
+                      onClick={() => handleOpenQcmModal(note.id)}
                       style={{
-                        background: '#ffffff',
-                        border: '1.5px solid #22c55e',
-                        color: '#15803d',
-                        borderRadius: '8px',
-                        padding: '9px 12px',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
+                        width: '100%',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '5px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <span>✓</span>
-                      <span>Traitée</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleRestoreNote(note.id)}
-                      title="Remettre cette note dans la liste des actives"
-                      style={{
-                        background: '#ffffff',
-                        border: '1.5px solid #cbd5e1',
-                        color: '#475569',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        background: hasQcmAnswers ? '#0f766e' : note.categoryColor,
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '10px 14px',
                         borderRadius: '8px',
-                        padding: '9px 12px',
-                        fontSize: '0.74rem',
-                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        fontWeight: 900,
                         cursor: 'pointer',
-                        whiteSpace: 'nowrap',
+                        boxShadow: `0 3px 10px ${(hasQcmAnswers ? '#0f766e' : note.categoryColor)}35`,
                       }}
                     >
-                      <span>↩️ Réactiver</span>
+                      <span>{hasQcmAnswers ? '👁️' : '✍️'}</span>
+                      <span>
+                        {hasQcmAnswers
+                          ? `Voir / Modifier les réponses dans l’app (${qcmSubmission?.answeredCount}/${qcmDef.questions.length})`
+                          : 'Répondre au QCM directement dans l’app'}
+                      </span>
                     </button>
                   )}
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <a
+                      href={note.docUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        flex: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        background: qcmDef ? '#f8fafc' : isProcessed ? '#64748b' : note.categoryColor,
+                        color: qcmDef ? '#334155' : '#ffffff',
+                        border: qcmDef ? '1.5px solid #cbd5e1' : 'none',
+                        textDecoration: 'none',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        fontSize: qcmDef ? '0.72rem' : '0.76rem',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                        boxShadow: qcmDef || isProcessed ? 'none' : `0 3px 10px ${note.categoryColor}30`,
+                        transition: 'opacity 0.15s ease',
+                      }}
+                    >
+                      <span>{qcmDef ? '📄 Version imprimable (Word / PDF)' : note.docBtnLabel}</span>
+                      <span style={{ fontSize: '0.85rem' }}>➔</span>
+                    </a>
+
+                    {!isProcessed ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenResolveModal(note)}
+                        title="Marquer cette note comme traitée / décidée avec Jérôme"
+                        style={{
+                          background: '#ffffff',
+                          border: '1.5px solid #22c55e',
+                          color: '#15803d',
+                          borderRadius: '8px',
+                          padding: '9px 12px',
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <span>✓</span>
+                        <span>Traitée</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreNote(note.id)}
+                        title="Remettre cette note dans la liste des actives"
+                        style={{
+                          background: '#ffffff',
+                          border: '1.5px solid #cbd5e1',
+                          color: '#475569',
+                          borderRadius: '8px',
+                          padding: '9px 12px',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <span>↩️ Réactiver</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1091,6 +1324,426 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
                 <span>✓</span>
                 <span>{isSubmittingResolution ? 'Archivage…' : 'Confirmer et archiver'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE QCM INTERACTIF DANS L'APPLI (SYNCHRONISÉE CLOUD) */}
+      {activeQcmDef && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.78)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '12px',
+          }}
+          onClick={() => !isSavingQcm && setActiveQcmDef(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '760px',
+              width: '100%',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 24px 48px rgba(0, 0, 0, 0.3)',
+              border: `2px solid ${activeQcmDef.accentColor}`,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* En-tête fixe */}
+            <div
+              style={{
+                background: '#0f172a',
+                color: '#ffffff',
+                padding: '14px 18px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      background: activeQcmDef.accentColor,
+                      color: '#ffffff',
+                      fontSize: '0.66rem',
+                      fontWeight: 900,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    QCM Synchronisé Cloud
+                  </span>
+                  <span style={{ fontSize: '0.70rem', color: '#cbd5e1', fontWeight: 700 }}>
+                    {
+                      activeQcmDef.questions.filter(
+                        q => (qcmDraftAnswers[q.id]?.length || 0) > 0
+                      ).length
+                    }{' '}
+                    / {activeQcmDef.questions.length} questions répondues
+                  </span>
+                </div>
+                <h3 style={{ margin: '6px 0 2px', fontSize: '1.08rem', fontWeight: 900 }}>
+                  {activeQcmDef.title}
+                </h3>
+                <div style={{ fontSize: '0.74rem', color: '#cbd5e1' }}>
+                  {activeQcmDef.subtitle}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingQcm}
+                onClick={() => setActiveQcmDef(null)}
+                aria-label="Fermer le QCM"
+                style={{
+                  background: '#334155',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  width: '32px',
+                  height: '32px',
+                  fontSize: '1rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Corps scrollable */}
+            <div style={{ padding: '16px 18px', overflowY: 'auto', flex: 1, background: '#f8fafc' }}>
+              {/* Contexte */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: `1.5px solid ${activeQcmDef.accentColor}40`,
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  marginBottom: '14px',
+                }}
+              >
+                <div style={{ fontWeight: 900, fontSize: '0.84rem', color: '#0f172a', marginBottom: '6px' }}>
+                  {activeQcmDef.contextTitle}
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.75rem', color: '#334155', lineHeight: 1.45 }}>
+                  {activeQcmDef.contextBullets.map((b, i) => (
+                    <li key={i} style={{ marginBottom: '3px' }}>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+
+                {activeQcmDef.exampleSlots && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', marginTop: '10px' }}>
+                    {activeQcmDef.exampleSlots.map((slot, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          borderLeft: `4px solid ${slot.borderColor}`,
+                          borderRadius: '6px',
+                          padding: '7px 10px',
+                          fontSize: '0.72rem',
+                        }}
+                      >
+                        <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                          {slot.timeLabel} · {slot.instructor}
+                        </div>
+                        <div style={{ color: '#475569', marginTop: '2px' }}>{slot.details}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {activeQcmDef.exampleImageUrl && (
+                  <div style={{ marginTop: '10px', textAlign: 'center' }}>
+                    <img
+                      src={activeQcmDef.exampleImageUrl}
+                      alt={activeQcmDef.exampleImageCaption || 'Plan secteur Lestrevet'}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '220px',
+                        borderRadius: '8px',
+                        border: '1px solid #cbd5e1',
+                        objectFit: 'contain',
+                      }}
+                    />
+                    {activeQcmDef.exampleImageCaption && (
+                      <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '4px' }}>
+                        {activeQcmDef.exampleImageCaption}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Répondant */}
+              <div
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
+                <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a' }}>
+                  👤 Qui répond à ce questionnaire ?
+                </span>
+                <select
+                  value={qcmRespondent}
+                  onChange={e => setQcmRespondent(e.target.value)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    background: '#f8fafc',
+                    color: '#0f172a',
+                  }}
+                >
+                  <option value="Jérôme">Jérôme (Moniteur titulaire)</option>
+                  <option value="Benoît">Benoît (Concepteur)</option>
+                  <option value="Jérôme & Benoît">Jérôme &amp; Benoît ensemble</option>
+                </select>
+              </div>
+
+              {/* Liste des questions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {activeQcmDef.questions.map(q => {
+                  const selectedIds = qcmDraftAnswers[q.id] || [];
+                  return (
+                    <div
+                      key={q.id}
+                      style={{
+                        background: '#ffffff',
+                        border: selectedIds.length > 0 ? `1.5px solid ${activeQcmDef.accentColor}` : '1.5px solid #cbd5e1',
+                        borderLeft: `4px solid ${activeQcmDef.accentColor}`,
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '0.86rem', fontWeight: 900, color: '#0f172a' }}>
+                          {q.title}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.66rem',
+                            fontWeight: 800,
+                            padding: '2px 7px',
+                            borderRadius: '4px',
+                            background: `${activeQcmDef.accentColor}15`,
+                            color: activeQcmDef.accentColor,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {q.tag}
+                        </span>
+                      </div>
+                      <p style={{ margin: '0 0 8px', fontSize: '0.75rem', color: '#475569' }}>
+                        {q.description}
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                        {q.options.map(opt => {
+                          const isChecked = selectedIds.includes(opt.id);
+                          return (
+                            <label
+                              key={opt.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '10px',
+                                padding: '9px 10px',
+                                borderRadius: '8px',
+                                border: isChecked ? `1.5px solid ${activeQcmDef.accentColor}` : '1px solid #e2e8f0',
+                                background: isChecked ? `${activeQcmDef.accentColor}10` : '#f8fafc',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <input
+                                type={q.type}
+                                name={`inapp_${activeQcmDef.noteId}_${q.id}`}
+                                checked={isChecked}
+                                onChange={() => handleToggleQcmOption(q.id, opt.id, q.type)}
+                                style={{
+                                  marginTop: '3px',
+                                  accentColor: activeQcmDef.accentColor,
+                                  transform: 'scale(1.15)',
+                                  cursor: 'pointer',
+                                  flexShrink: 0,
+                                }}
+                              />
+                              <div style={{ fontSize: '0.76rem', lineHeight: 1.4, color: '#0f172a' }}>
+                                <div style={{ fontWeight: isChecked ? 900 : 700 }}>
+                                  {opt.label}
+                                </div>
+                                <div style={{ fontSize: '0.71rem', color: '#475569', marginTop: '2px' }}>
+                                  {opt.detail}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <textarea
+                        rows={2}
+                        value={qcmDraftNotes[q.id] || ''}
+                        onChange={e =>
+                          setQcmDraftNotes(prev => ({ ...prev, [q.id]: e.target.value }))
+                        }
+                        placeholder={q.placeholder}
+                        style={{
+                          width: '100%',
+                          boxSizing: 'border-box',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          padding: '6px 9px',
+                          fontSize: '0.74rem',
+                          fontFamily: 'inherit',
+                          background: '#fcfcfc',
+                          color: '#0f172a',
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* Remarques générales */}
+                <div
+                  style={{
+                    background: '#fffbeb',
+                    border: '1.5px solid #fcd34d',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: '0.78rem', color: '#92400e', marginBottom: '6px' }}>
+                    ✍️ Remarques libres ou précisions complémentaires :
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={qcmDraftNotes.general || ''}
+                    onChange={e =>
+                      setQcmDraftNotes(prev => ({ ...prev, general: e.target.value }))
+                    }
+                    placeholder="Ex : contraintes particulières, dates de haute saison, nombre exact de chars au parc…"
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      border: '1px solid #fcd34d',
+                      borderRadius: '6px',
+                      padding: '7px 10px',
+                      fontSize: '0.75rem',
+                      fontFamily: 'inherit',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      resize: 'vertical',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {qcmSaveError && (
+                <div
+                  style={{
+                    marginTop: '12px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#b91c1c',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {qcmSaveError}
+                </div>
+              )}
+            </div>
+
+            {/* Pied de modale fixe */}
+            <div
+              style={{
+                padding: '12px 18px',
+                background: '#ffffff',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px',
+              }}
+            >
+              <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                Synchronisé en direct entre Jérôme et Benoît
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  disabled={isSavingQcm}
+                  onClick={() => setActiveQcmDef(null)}
+                  style={{
+                    padding: '9px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    background: '#f8fafc',
+                    color: '#475569',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingQcm}
+                  onClick={handleSaveQcm}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: activeQcmDef.accentColor,
+                    color: '#ffffff',
+                    fontSize: '0.78rem',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: `0 3px 10px ${activeQcmDef.accentColor}40`,
+                  }}
+                >
+                  <span>✓</span>
+                  <span>{isSavingQcm ? 'Enregistrement…' : 'Enregistrer mes réponses'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

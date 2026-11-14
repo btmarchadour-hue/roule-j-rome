@@ -34,7 +34,7 @@ export function createDefaultBeachCadreConfig(): BeachCadreConfig {
         dunePointB: null,
         leftBoundary: null,
         rightBoundary: null,
-        softSandMarginM: 30,
+        softSandMarginM: 50,
         notes: '',
       },
       mairie: {
@@ -44,7 +44,7 @@ export function createDefaultBeachCadreConfig(): BeachCadreConfig {
         dunePointB: null,
         leftBoundary: null,
         rightBoundary: null,
-        softSandMarginM: 30,
+        softSandMarginM: 50,
         notes: '',
       },
     },

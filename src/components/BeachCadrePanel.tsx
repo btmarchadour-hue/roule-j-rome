@@ -692,7 +692,7 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
                 max={150}
                 step={5}
                 disabled={isReadOnly}
-                value={selectedProfile.softSandMarginM ?? 30}
+                value={selectedProfile.softSandMarginM ?? 50}
                 onChange={e =>
                   persistProfileUpdate(editingProfileKey, {
                     softSandMarginM: Math.max(0, Math.min(150, Number(e.target.value) || 0)),
