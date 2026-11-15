@@ -29,6 +29,8 @@ export interface AppSettings {
   calculationMode?: 'theorique' | 'reel';
   empiricalOffsetCm?: number;
   customNonPublishReasons?: string[];
+  parkMaxMono?: number;
+  parkMaxBi?: number;
 }
 
 export interface TidePoint {
@@ -136,6 +138,11 @@ export interface ValidationItem {
   rejectReason?: string;
   assignedPilot?: string; // Nom du moniteur diplômé (Jérôme)
   instructor?: string;    // Moniteur diplômé encadrant responsable (Jérôme)
+  secondaryInstructor?: string; // 2e moniteur si créneau doublé en été (ex: Youenn, Katleen)
+  secondaryQualification?: 'CQP' | 'DE_BPJEPS'; // Qualification du 2e moniteur (CQP = 8 chars max, DE/BPJEPS = 12)
+  secondaryMaxChars?: number;   // Capacité additionnelle apportée par le 2e moniteur (+8 CQP, +12 diplômé)
+  secondaryActualEnd?: string;  // Horaire de fin souple pour le 2e groupe (Q2 opt_a)
+  secondaryFormula?: string;    // Formule/note optionnelle pour le 2e groupe (ex: Perfectionnement)
   pilotsCount?: number;   // Nombre de participants / personnes (1 mono = 1, 1 bi = 2)
   // --- Dissociation Cycle 1 (Offre commerciale) & Cycle 2 (Pilotage terrain) ---
   cycle1Status?: 'published' | 'not_published' | 'closed_no_bookings';
@@ -235,6 +242,7 @@ export interface SlotObservation {
   lostCharsCount?: number;              // Dont chars perdus
   notes?: string;
   author?: string;
+  secondaryInstructor?: string;
   updatedAt?: number;
   createdAt: number;
 }
@@ -362,6 +370,8 @@ export interface GpsWaterlineLog {
 
   // Mesures géométriques calculées par rapport au Cadre Terrain (Dune + Gauche/Droite)
   measuredWidthFromDuneM?: number;   // Largeur plage mesurée depuis la ligne de dune jusqu'à l'eau (m)
+  usableWidthM?: number;             // Largeur exploitable utile (déduction marge haute 50 m)
+  beachZone?: 'lestrevet' | 'lieue_de_greve' | 'pentrez'; // Classement auto 3 zones de la baie
   lateralPosFromLeftM?: number;      // Position le long de la plage depuis la borne Gauche (m)
   lateralPosPct?: number;            // Position relative 0% (Gauche) -> 100% (Droite)
   isInsideZone?: boolean;            // True si compris entre limite Gauche et limite Droite

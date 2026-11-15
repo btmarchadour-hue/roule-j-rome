@@ -7,7 +7,7 @@ import {
   WindPoint,
 } from '../types';
 import { dayFocus, lc, tdy, VC, vstat } from '../utils/tides';
-import { DEFAULT_NON_PUBLISH_REASONS } from '../utils/cycleHelpers';
+import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
 
 interface DayCycle1BannerProps {
   selectedDate: string;
@@ -68,12 +68,13 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
   const availableNonPublishReasons = React.useMemo(() => {
     const base = [...DEFAULT_NON_PUBLISH_REASONS];
     const custom = settings.customNonPublishReasons || [];
-    const seen = new Set(base.map(r => r.toLowerCase()));
+    const seen = new Set(base.map(stripReasonAccents));
     const result: string[] = [...base];
     for (const c of custom) {
       const trimmed = c.trim();
-      if (trimmed && !seen.has(trimmed.toLowerCase())) {
-        seen.add(trimmed.toLowerCase());
+      const key = stripReasonAccents(trimmed);
+      if (trimmed && key !== 'ferme' && key !== 'fermee' && !seen.has(key)) {
+        seen.add(key);
         result.push(trimmed);
       }
     }

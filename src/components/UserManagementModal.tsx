@@ -97,7 +97,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
         displayName: newDisplayName.trim() || `${trimmedUsername} (${newRole === 'admin' ? 'Admin' : 'Moniteur'})`,
         role: newRole,
         passwordHash: pHash,
-        isReadOnly: newRole === 'moniteur' ? true : newIsReadOnly,
+        isReadOnly: newIsReadOnly,
         isActive: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -489,7 +489,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
                       background: '#ffffff',
                     }}
                   >
-                    <option value="moniteur">⛵ Moniteur (Saisie créneaux & émargement)</option>
+                    <option value="moniteur">⛵ Moniteur (Élèves lecture + saisie REX, sans admin)</option>
                     <option value="admin">⭐ Administrateur (Gestion totale + utilisateurs)</option>
                   </select>
                 </div>

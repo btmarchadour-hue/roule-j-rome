@@ -23,21 +23,10 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
       ? Math.max(...pmHeights) - Math.min(...bmHeights)
       : null;
 
-  const coefRating =
-    coef == null
-      ? '—'
-      : coef < 45
-      ? 'Faible (roulage facile)'
-      : coef < 70
-      ? 'Moyen'
-      : coef < 95
-      ? 'Fort'
-      : 'Très fort (vive-eau)';
-
   const dateFormatted = new Date(Date.UTC(y, m, d)).toLocaleDateString('fr-FR', {
-    weekday: 'long',
+    weekday: 'short',
     day: 'numeric',
-    month: 'long',
+    month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
   });
@@ -48,313 +37,176 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
       style={{
         borderLeft: '5px solid var(--ac)',
         background: 'var(--card)',
-        marginBottom: '12px',
-        padding: '14px 16px',
+        marginBottom: '10px',
+        padding: '9px 12px',
       }}
     >
+      {/* Ligne 1 : Date + Prochaine marée */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '8px',
-          marginBottom: '10px',
+          gap: '6px',
+          marginBottom: '6px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '1.2rem' }}>🌊</span>
-          <div>
-            <div
-              style={{
-                fontSize: '0.95rem',
-                fontWeight: 900,
-                textTransform: 'uppercase',
-                letterSpacing: '.04em',
-                lineHeight: 1.1,
-              }}
-            >
-              Marées du jour · {dateFormatted}
-            </div>
-            <div
-              style={{
-                fontSize: '0.7rem',
-                color: 'var(--mu)',
-                textTransform: 'uppercase',
-                letterSpacing: '.05em',
-                marginTop: '2px',
-              }}
-            >
-              Plage de Lestrevet · Plomodiern
-            </div>
-          </div>
-        </div>
-
-        {isToday && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.95rem' }}>🌊</span>
           <span
             style={{
-              fontSize: '0.65rem',
-              fontWeight: 800,
-              background: 'var(--ac)',
-              color: '#111',
-              padding: '3px 8px',
-              borderRadius: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
+              fontSize: '0.82rem',
+              fontWeight: 900,
+              textTransform: 'capitalize',
             }}
           >
-            Aujourd'hui
+            {dateFormatted}
           </span>
+          <span style={{ fontSize: '0.70rem', color: 'var(--mu)', fontWeight: 600 }}>
+            · Lestrevet
+          </span>
+          {isToday && (
+            <span
+              style={{
+                fontSize: '0.62rem',
+                fontWeight: 800,
+                background: 'var(--ac)',
+                color: '#111',
+                padding: '2px 7px',
+                borderRadius: '10px',
+                textTransform: 'uppercase',
+              }}
+            >
+              Aujourd&apos;hui
+            </span>
+          )}
+        </div>
+
+        {isToday && nextTide && (
+          <div style={{ fontSize: '0.74rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ color: nextTide.type === 'BM' ? 'var(--cb)' : 'var(--cn)' }}>
+              Prochaine {nextTide.type} :
+            </span>
+            <b>{nextTide.timeStr}</b>
+            <span style={{ color: 'var(--mu)' }}>({fr2(nextTide.height)} m)</span>
+            <span style={{ color: 'var(--mu)', fontSize: '0.70rem' }}>
+              {nextTide.diffMin > 0
+                ? `dans ${Math.floor(nextTide.diffMin / 60)}h${String(nextTide.diffMin % 60).padStart(2, '0')}`
+                : 'en cours'}
+            </span>
+          </div>
         )}
       </div>
 
-      {/* Prochaine marée alert (if today) */}
-      {isToday && nextTide && (
-        <div
-          style={{
-            background: 'var(--cell)',
-            border: '1px solid var(--bd)',
-            borderRadius: '8px',
-            padding: '8px 12px',
-            marginBottom: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '6px',
-          }}
-        >
-          <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>
-            <span style={{ color: nextTide.type === 'BM' ? 'var(--cb)' : 'var(--cn)' }}>
-              Prochaine {nextTide.type === 'BM' ? 'Basse Mer (BM)' : 'Pleine Mer (PM)'} :
-            </span>{' '}
-            <b>{nextTide.timeStr}</b> ({fr2(nextTide.height)} m)
-            {nextTide.coef != null && (
-              <span
-                style={{
-                  marginLeft: '6px',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  background: 'var(--card)',
-                  border: '1px solid var(--bd)',
-                  padding: '1px 5px',
-                  borderRadius: '6px',
-                }}
-              >
-                Coef {nextTide.coef}
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--mu)', fontWeight: 600 }}>
-            {nextTide.diffMin > 0
-              ? `dans ${Math.floor(nextTide.diffMin / 60)}h${String(nextTide.diffMin % 60).padStart(2, '0')}`
-              : 'en ce moment'}
-          </div>
-        </div>
-      )}
-
-      {/* Grid: Coef / Pleine Mer / Basse Mer / Marnage */}
+      {/* Ligne 2 : Coef · PM · BM · Marnage sur une bande compacte */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: '8px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px',
+          alignItems: 'center',
+          fontSize: '0.74rem',
         }}
       >
-        {/* Coefficient */}
         <div
           style={{
             background: 'var(--cell)',
-            borderRadius: '10px',
-            padding: '10px',
             border: '1px solid var(--bd)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
           }}
         >
-          <span
-            style={{
-              display: 'block',
-              fontSize: '0.65rem',
-              color: 'var(--mu)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontWeight: 800,
-            }}
-          >
-            Coefficient
+          <span style={{ color: 'var(--mu)', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+            Coef
           </span>
-          <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1, marginTop: '2px' }}>
+          <strong style={{ fontSize: '0.82rem' }}>
             {pmCoefs && pmCoefs.length > 1
-              ? pmCoefs.join(' · ')
+              ? pmCoefs.join(' / ')
               : coef != null
               ? coef
               : '—'}
-          </div>
-          <small style={{ display: 'block', color: 'var(--mu)', fontSize: '0.72rem', marginTop: '2px' }}>
-            {pmCoefs && pmCoefs.length > 1
-              ? `Matin ${pmCoefs[0]} · Soir ${pmCoefs[1]}`
-              : coefRating}
-          </small>
+          </strong>
         </div>
 
-        {/* Pleine Mer (PM) avec coefficients */}
         <div
           style={{
             background: 'var(--cell)',
-            borderRadius: '10px',
-            padding: '10px',
             border: '1px solid var(--bd)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            flexWrap: 'wrap',
           }}
         >
-          <span
-            style={{
-              display: 'block',
-              fontSize: '0.65rem',
-              color: 'var(--cn)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontWeight: 800,
-            }}
-          >
-            Pleine Mer (PM)
+          <span style={{ color: 'var(--cn)', fontWeight: 800, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+            PM
           </span>
-          <div style={{ marginTop: '4px' }}>
-            {pmList.length > 0 ? (
-              pmList.map((p, idx) => (
-                <div
-                  key={`pm-${idx}`}
-                  style={{
-                    fontSize: '0.92rem',
-                    fontWeight: 800,
-                    marginBottom: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '4px',
-                  }}
-                >
-                  <div>
-                    {lc(p.t, y, m, d)}{' '}
-                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--mu)' }}>
-                      ({fr2(p.hd != null ? p.hd : p.h)} m)
-                    </span>
-                  </div>
-                  {p.coef != null && (
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 800,
-                        background: 'var(--card)',
-                        border: '1px solid var(--bd)',
-                        color: 'var(--tx)',
-                        padding: '1px 5px',
-                        borderRadius: '6px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      Coef {p.coef}
-                    </span>
-                  )}
-                </div>
-              ))
-            ) : (
-              <span style={{ fontSize: '0.85rem', color: 'var(--mu)' }}>—</span>
-            )}
-          </div>
+          {pmList.length > 0 ? (
+            pmList.map((p, idx) => (
+              <span key={`pm-${idx}`} style={{ fontWeight: 700 }}>
+                {idx > 0 ? '· ' : ''}
+                {lc(p.t, y, m, d)}{' '}
+                <span style={{ color: 'var(--mu)', fontWeight: 600 }}>
+                  ({fr2(p.hd != null ? p.hd : p.h)} m)
+                </span>
+              </span>
+            ))
+          ) : (
+            <span style={{ color: 'var(--mu)' }}>—</span>
+          )}
         </div>
 
-        {/* Basse Mer (BM) */}
         <div
           style={{
             background: 'var(--cell)',
-            borderRadius: '10px',
-            padding: '10px',
             border: '1px solid var(--bd)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            flexWrap: 'wrap',
           }}
         >
-          <span
-            style={{
-              display: 'block',
-              fontSize: '0.65rem',
-              color: 'var(--cb)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontWeight: 800,
-            }}
-          >
-            Basse Mer (BM)
+          <span style={{ color: 'var(--cb)', fontWeight: 800, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+            BM
           </span>
-          <div style={{ marginTop: '4px' }}>
-            {bmList.length > 0 ? (
-              bmList.map((p, idx) => (
-                <div
-                  key={`bm-${idx}`}
-                  style={{
-                    fontSize: '0.92rem',
-                    fontWeight: 800,
-                    marginBottom: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '4px',
-                  }}
-                >
-                  <div>
-                    {lc(p.t, y, m, d)}{' '}
-                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--mu)' }}>
-                      ({fr2(p.hd != null ? p.hd : p.h)} m)
-                    </span>
-                  </div>
-                  {p.coef != null && (
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 800,
-                        background: 'var(--card)',
-                        border: '1px solid var(--bd)',
-                        color: 'var(--tx)',
-                        padding: '1px 5px',
-                        borderRadius: '6px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      Coef {p.coef}
-                    </span>
-                  )}
-                </div>
-              ))
-            ) : (
-              <span style={{ fontSize: '0.85rem', color: 'var(--mu)' }}>—</span>
-            )}
-          </div>
+          {bmList.length > 0 ? (
+            bmList.map((p, idx) => (
+              <span key={`bm-${idx}`} style={{ fontWeight: 700 }}>
+                {idx > 0 ? '· ' : ''}
+                {lc(p.t, y, m, d)}{' '}
+                <span style={{ color: 'var(--mu)', fontWeight: 600 }}>
+                  ({fr2(p.hd != null ? p.hd : p.h)} m)
+                </span>
+              </span>
+            ))
+          ) : (
+            <span style={{ color: 'var(--mu)' }}>—</span>
+          )}
         </div>
 
-        {/* Marnage */}
         <div
           style={{
             background: 'var(--cell)',
-            borderRadius: '10px',
-            padding: '10px',
             border: '1px solid var(--bd)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
           }}
         >
-          <span
-            style={{
-              display: 'block',
-              fontSize: '0.65rem',
-              color: 'var(--mu)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              fontWeight: 800,
-            }}
-          >
-            Marnage du jour
+          <span style={{ color: 'var(--mu)', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+            Marnage
           </span>
-          <div style={{ fontSize: '1.25rem', fontWeight: 900, lineHeight: 1.1, marginTop: '2px' }}>
-            {marnage != null ? `${fr2(marnage)} m` : '—'}
-          </div>
-          <small style={{ display: 'block', color: 'var(--mu)', fontSize: '0.72rem', marginTop: '2px' }}>
-            Écart PM − BM
-          </small>
+          <strong>{marnage != null ? `${fr2(marnage)} m` : '—'}</strong>
         </div>
       </div>
     </div>

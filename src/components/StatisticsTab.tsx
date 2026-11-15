@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AppSettings, CustomSlotsMap, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
 import {
+  AbsentSlotRef,
   CANCELLATION_REASONS_INFO,
   computePeriodStats,
   computeCalibrationStats,
@@ -8,12 +9,18 @@ import {
   exportObservationsAsCsv,
   getFiscalYearStart,
   getFiscalYearBounds,
+  upsertSlotObservation,
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { StatisticsComparator } from './StatisticsComparator';
 import { ImportLogbookModal } from './ImportLogbookModal';
 import { downloadExcelLogbookTemplate } from '../utils/excelImportExport';
-import { subscribeToObservations, deleteObservationFromFirestore } from '../utils/firebaseSync';
+import {
+  subscribeToObservations,
+  deleteObservationFromFirestore,
+  saveObservationToFirestore,
+} from '../utils/firebaseSync';
+import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
 import { minDs, maxDs, MOIS, p2, shf } from '../utils/tides';
 
 interface StatisticsTabProps {
@@ -23,6 +30,9 @@ interface StatisticsTabProps {
   validations: ValidationsMap;
   customSlotsMap: CustomSlotsMap;
   selectedDate: string;
+  isReadOnly?: boolean;
+  onAddCustomNonPublishReason?: (reason: string) => void;
+  onReclassifyValidationReason?: (targets: { ds: string; slotKey: string }[], newReason: string) => void;
 }
 
 export const StatisticsTab: React.FC<StatisticsTabProps> = ({
@@ -32,6 +42,9 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   validations,
   customSlotsMap,
   selectedDate,
+  isReadOnly = false,
+  onAddCustomNonPublishReason,
+  onReclassifyValidationReason,
 }) => {
   // Liste des observations terrain enregistrées (données réelles uniquement)
   const [observations, setObservations] = useState<SlotObservation[]>(() =>
@@ -74,6 +87,96 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
 
   // Modal d'import groupé carnet / REX Excel & CSV
   const [importModalOpen, setImportModalOpen] = useState(false);
+
+  // Requalification rétroactive des motifs de fermeture / absentéisme
+  const [expandedReasonKey, setExpandedReasonKey] = useState<string | null>(null);
+  const [selectedAbsentIds, setSelectedAbsentIds] = useState<Set<string>>(new Set());
+  const [reclassifyReason, setReclassifyReason] = useState<string>(DEFAULT_NON_PUBLISH_REASONS[0]);
+  const [reclassifyCustomInput, setReclassifyCustomInput] = useState('');
+  const [isReclassifying, setIsReclassifying] = useState(false);
+
+  const availableClosureReasons = useMemo(() => {
+    const base: string[] = [...DEFAULT_NON_PUBLISH_REASONS];
+    const seen = new Set(base.map(stripReasonAccents));
+    for (const c of settings.customNonPublishReasons || []) {
+      const t = c.trim();
+      const k = stripReasonAccents(t);
+      if (t && k !== 'ferme' && k !== 'fermee' && !seen.has(k)) {
+        seen.add(k);
+        base.push(t);
+      }
+    }
+    return base;
+  }, [settings.customNonPublishReasons]);
+
+  const makeSlotUid = (s: AbsentSlotRef) => `${s.ds}__${s.slotKey}`;
+
+  const openReclassifyDrawer = (reasonKey: string, slots: AbsentSlotRef[]) => {
+    if (expandedReasonKey === reasonKey) {
+      setExpandedReasonKey(null);
+      return;
+    }
+    setExpandedReasonKey(reasonKey);
+    setSelectedAbsentIds(new Set(slots.map(makeSlotUid)));
+    setReclassifyReason(DEFAULT_NON_PUBLISH_REASONS[0]);
+    setReclassifyCustomInput('');
+  };
+
+  const applyReclassifyReason = async (slots: AbsentSlotRef[], targetReason: string) => {
+    const cleanReason = targetReason.trim();
+    if (!cleanReason || selectedAbsentIds.size === 0 || isReadOnly) return;
+
+    const chosenSlots = slots.filter(s => selectedAbsentIds.has(makeSlotUid(s)));
+    if (chosenSlots.length === 0) return;
+
+    setIsReclassifying(true);
+    try {
+      const normCustom = stripReasonAccents(cleanReason);
+      const isDefaultOrKnown = availableClosureReasons.some(
+        r => stripReasonAccents(r) === normCustom
+      );
+      if (!isDefaultOrKnown) {
+        onAddCustomNonPublishReason?.(cleanReason);
+      }
+
+      // 1. Mise à jour des validations Cycle 1 concernées
+      const valTargets = chosenSlots
+        .filter(s => validations[s.ds]?.items?.some(it => it.k === s.slotKey))
+        .map(s => ({ ds: s.ds, slotKey: s.slotKey }));
+      if (valTargets.length > 0 && onReclassifyValidationReason) {
+        onReclassifyValidationReason(valTargets, cleanReason);
+      }
+
+      // 2. Mise à jour des observations REX concernées (sans doublons)
+      const obsIdsToUpdate = new Set<string>();
+      for (const s of chosenSlots) {
+        if (s.observationId) obsIdsToUpdate.add(s.observationId);
+      }
+      if (obsIdsToUpdate.size > 0) {
+        let nextObsList = observations;
+        const obsToSave: SlotObservation[] = [];
+        observations.forEach(obs => {
+          if (obsIdsToUpdate.has(obs.id)) {
+            const updated: SlotObservation = {
+              ...obs,
+              cancellationNote: cleanReason,
+              updatedAt: Date.now(),
+            };
+            obsToSave.push(updated);
+            nextObsList = upsertSlotObservation(updated);
+          }
+        });
+        setObservations(nextObsList);
+        await Promise.all(obsToSave.map(o => saveObservationToFirestore(o)));
+      }
+
+      setExpandedReasonKey(null);
+    } catch (err) {
+      console.error('Erreur requalification motif fermeture:', err);
+    } finally {
+      setIsReclassifying(false);
+    }
+  };
 
   // Mode d'affichage : Bilan simple d'une période ou Comparateur multi-périodes
   const [viewMode, setViewMode] = useState<'single' | 'comparator'>('single');
@@ -1163,7 +1266,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 🚫 Détail de l&apos;absentéisme sur la plage (hors météo, manque de clients, état de la plage)
               </div>
               <div style={{ fontSize: '0.70rem', color: '#64748b' }}>
-                Basé sur les créneaux marqués « À ne pas publier » en Cycle 1 et leurs raisons personnalisées.
+                Regroupe les créneaux non publiés (Cycle 1) et fermetures / indisponibilités (REX). « Ferme » et « Fermé » sont unifiés et requalifiables ci-dessous.
               </div>
             </div>
             <span style={{ fontSize: '0.76rem', fontWeight: 900, color: '#334155', background: '#e2e8f0', padding: '3px 9px', borderRadius: '6px' }}>
@@ -1177,37 +1280,271 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {periodStats.instructorAbsentReasonsBreakdown.map(item => (
-                <div
-                  key={item.reason}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(150px, 1.4fr) 1fr auto',
-                    alignItems: 'center',
-                    gap: '10px',
-                    background: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                  }}
-                >
-                  <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a' }}>
-                    {item.reason}
-                  </span>
-                  <div style={{ height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+              {periodStats.instructorAbsentReasonsBreakdown.map(item => {
+                const isExpanded = expandedReasonKey === item.reasonKey;
+                const selectedInGroup = item.slots.filter(s => selectedAbsentIds.has(makeSlotUid(s))).length;
+                return (
+                  <div
+                    key={item.reasonKey}
+                    style={{
+                      background: '#fff',
+                      border: item.isGenericClosed ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
+                      borderRadius: '6px',
+                      padding: '6px 10px',
+                    }}
+                  >
                     <div
                       style={{
-                        width: `${Math.min(100, Math.round(item.percentage))}%`,
-                        height: '100%',
-                        background: '#475569',
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(150px, 1.4fr) 1fr auto auto',
+                        alignItems: 'center',
+                        gap: '10px',
                       }}
-                    />
+                    >
+                      <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span>{item.reason}</span>
+                        {item.isGenericClosed && (
+                          <span
+                            style={{
+                              fontSize: '0.64rem',
+                              fontWeight: 800,
+                              color: '#b45309',
+                              background: '#fef3c7',
+                              border: '1px solid #fcd34d',
+                              borderRadius: '4px',
+                              padding: '1px 5px',
+                            }}
+                          >
+                            à détailler
+                          </span>
+                        )}
+                      </span>
+                      <div style={{ height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.round(item.percentage))}%`,
+                            height: '100%',
+                            background: item.isGenericClosed ? '#d97706' : '#475569',
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 800, fontFamily: 'monospace', color: '#334155' }}>
+                        {item.count} ({Math.round(item.percentage)}%)
+                      </span>
+                      {!isReadOnly && item.slots.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openReclassifyDrawer(item.reasonKey, item.slots)}
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '5px',
+                            border: isExpanded
+                              ? '1px solid #0f172a'
+                              : item.isGenericClosed
+                              ? '1px solid #d97706'
+                              : '1px solid #cbd5e1',
+                            background: isExpanded
+                              ? '#334155'
+                              : item.isGenericClosed
+                              ? '#fffbeb'
+                              : '#f8fafc',
+                            color: isExpanded
+                              ? '#fff'
+                              : item.isGenericClosed
+                              ? '#b45309'
+                              : '#334155',
+                            fontSize: '0.68rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="Attribuer une raison précise (Réunion, Impératif personnel, Vacances...) à tout ou partie de ces créneaux"
+                        >
+                          {isExpanded ? '✕ Fermer' : '✏️ Préciser'}
+                        </button>
+                      )}
+                    </div>
+
+                    {isExpanded && !isReadOnly && (
+                      <div
+                        style={{
+                          marginTop: '8px',
+                          paddingTop: '8px',
+                          borderTop: '1px dashed #cbd5e1',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                          <span style={{ fontSize: '0.70rem', fontWeight: 800, color: '#334155' }}>
+                            1. Sélectionner les créneaux concernés ({selectedInGroup}/{item.slots.length}) :
+                          </span>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedAbsentIds(new Set(item.slots.map(makeSlotUid)))
+                              }
+                              style={{
+                                fontSize: '0.67rem',
+                                fontWeight: 700,
+                                color: '#0369a1',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: 0,
+                              }}
+                            >
+                              Tout cocher
+                            </button>
+                            <span style={{ color: '#cbd5e1' }}>·</span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAbsentIds(new Set())}
+                              style={{
+                                fontSize: '0.67rem',
+                                fontWeight: 700,
+                                color: '#64748b',
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: 0,
+                              }}
+                            >
+                              Tout décocher
+                            </button>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '5px',
+                            maxHeight: '110px',
+                            overflowY: 'auto',
+                          }}
+                        >
+                          {item.slots.map(s => {
+                            const uid = makeSlotUid(s);
+                            const checked = selectedAbsentIds.has(uid);
+                            return (
+                              <label
+                                key={uid}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  padding: '3px 7px',
+                                  borderRadius: '5px',
+                                  border: checked ? '1px solid #0284c7' : '1px solid #e2e8f0',
+                                  background: checked ? '#f0f9ff' : '#f8fafc',
+                                  fontSize: '0.69rem',
+                                  fontWeight: 700,
+                                  color: '#1e293b',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setSelectedAbsentIds(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(uid)) next.delete(uid);
+                                      else next.add(uid);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span>
+                                  {s.ds.slice(8, 10)}/{s.ds.slice(5, 7)} · {s.startTime}–{s.endTime}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#334155', marginBottom: '5px' }}>
+                            2. Choisir ou saisir la raison réelle de fermeture :
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '6px' }}>
+                            {availableClosureReasons.map(reasonLabel => {
+                              const active =
+                                !reclassifyCustomInput.trim() &&
+                                stripReasonAccents(reclassifyReason) === stripReasonAccents(reasonLabel);
+                              return (
+                                <button
+                                  key={reasonLabel}
+                                  type="button"
+                                  onClick={() => {
+                                    setReclassifyReason(reasonLabel);
+                                    setReclassifyCustomInput('');
+                                  }}
+                                  style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '5px',
+                                    border: active ? '1.5px solid #0f172a' : '1px solid #cbd5e1',
+                                    background: active ? '#334155' : '#f8fafc',
+                                    color: active ? '#fff' : '#1e293b',
+                                    fontSize: '0.70rem',
+                                    fontWeight: active ? 800 : 600,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {reasonLabel}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              value={reclassifyCustomInput}
+                              onChange={e => setReclassifyCustomInput(e.target.value)}
+                              placeholder="Ou autre raison libre (ex: RDV pro, Salon nautique...)"
+                              style={{
+                                flex: '1 1 200px',
+                                padding: '5px 8px',
+                                fontSize: '0.72rem',
+                                borderRadius: '5px',
+                                border: '1px solid #cbd5e1',
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={isReclassifying || selectedInGroup === 0}
+                              onClick={() =>
+                                applyReclassifyReason(
+                                  item.slots,
+                                  reclassifyCustomInput.trim() || reclassifyReason
+                                )
+                              }
+                              style={{
+                                padding: '5px 11px',
+                                borderRadius: '5px',
+                                border: 'none',
+                                background: selectedInGroup > 0 ? '#0284c7' : '#cbd5e1',
+                                color: '#fff',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                cursor: selectedInGroup > 0 ? 'pointer' : 'not-allowed',
+                              }}
+                            >
+                              {isReclassifying
+                                ? 'Enregistrement...'
+                                : `Appliquer à ${selectedInGroup} créneau${selectedInGroup > 1 ? 'x' : ''}`}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 800, fontFamily: 'monospace', color: '#334155' }}>
-                    {item.count} ({Math.round(item.percentage)}%)
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1530,6 +1867,8 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           slotTitle={editingObservation?.customTitle}
           isCustom={editingObservation?.isCustom}
           initialObservation={editingObservation}
+          customNonPublishReasons={settings.customNonPublishReasons}
+          isReadOnly={isReadOnly}
           onSaveSuccess={updated => setObservations(updated)}
         />
       )}

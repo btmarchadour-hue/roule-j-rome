@@ -385,4 +385,125 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
       },
     ],
   },
+  'note-ergonomie-terrain-doublons': {
+    noteId: 'note-ergonomie-terrain-doublons',
+    title: 'Revue · Ergonomie Terrain & Simplification (Vue Jérôme)',
+    subtitle: '5 points de simplification à arbitrer ensemble après premier usage sur le terrain',
+    accentColor: '#0284c7',
+    contextTitle: '📱 Pourquoi passer ces 5 points en revue ?',
+    contextBullets: [
+      'Plusieurs informations (PM/BM, vent texte, exports CSV, réglages) se répètent encore entre le haut et le bas des écrans.',
+      'Sur smartphone à la plage, Jérôme a besoin d’accéder très vite à la balise en direct et aux créneaux/inscrits du jour.',
+      'Ce questionnaire permet de cocher ensemble ce qu’on simplifie, ce qu’on déplace et ce qu’on garde tel quel.',
+    ],
+    questions: [
+      {
+        id: 'q1',
+        title: 'Point 1 · Ordre d’affichage sur l’écran principal (Cycle 2)',
+        tag: 'Priorité Mobile',
+        description: 'Aujourd’hui, il faut descendre sous la carte Marées, le calendrier du mois, Windguru et 2 graphiques avant de voir les créneaux du jour.',
+        type: 'radio',
+        placeholder: 'Ordre idéal souhaité par Jérôme sur son téléphone…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Option A · Remonter la Balise live + Créneaux du jour en haut (Calendrier compact ou repliable)',
+            detail: 'Accès immédiat aux séances et inscrits du jour dès l’ouverture de l’application.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Option B · Garder le calendrier tout en haut mais le rendre repliable en 1 clic',
+            detail: 'Permet de masquer le mois complet quand on travaille uniquement sur aujourd’hui/demain.',
+          },
+          {
+            id: 'opt_c',
+            label: 'Option C · Garder l’ordre actuel',
+            detail: 'Aucun changement sur l’ordre d’affichage en Cycle 2.',
+          },
+        ],
+      },
+      {
+        id: 'q2',
+        title: 'Point 2 · Doublons PM/BM, textes vent et bas de page Cycle 2',
+        tag: 'Allègement Écran',
+        description: 'PM/BM apparaît 3 fois, les exports mensuels (TableView, Marnage, 2 CSV) sont en double en Cycle 1 et Cycle 2, et fmin est isolé en bas de Cycle 2.',
+        type: 'checkbox',
+        placeholder: 'Autres éléments visuels jugés inutiles ou redondants…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Supprimer les répétitions PM/BM + lignes texte vent redondantes sous les graphiques',
+            detail: 'Les courbes et Windguru + la carte du haut suffisent.',
+          },
+          {
+            id: 'opt_b',
+            recommended: true,
+            label: 'Alléger le bas de Cycle 2 (retirer le 2e Export CSV, les Alertes fixes et les Règles répétées)',
+            detail: 'Division par 2 de la hauteur de page sur mobile.',
+          },
+          {
+            id: 'opt_c',
+            recommended: true,
+            label: 'Rapatrier le réglage « Séances minimum (fmin) » avec tous les autres Réglages',
+            detail: 'Tous les paramètres du moteur réunis au même endroit.',
+          },
+          {
+            id: 'opt_d',
+            label: 'Compacter la grande carte « Marées du jour » tout en haut',
+            detail: 'Affiche l’essentiel sur 1–2 lignes pour libérer l’écran mobile.',
+          },
+        ],
+      },
+      {
+        id: 'q3',
+        title: 'Point 3 · Lisibilité des boutons sur chaque créneau Cycle 2',
+        tag: 'Tactile Smartphone',
+        description: '7 boutons sont alignés par créneau (Inscriptions, Maintenir, Décaler, Regrouper, Annuler Vie 2, ↩, REX), et les noms des inscrits sont cachés.',
+        type: 'checkbox',
+        placeholder: 'Précisions sur les boutons ou informations à voir tout de suite sur le sable…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Afficher les noms des inscrits en résumé direct sur la carte du créneau',
+            detail: 'Ex. « Dupont x3, Martin x1 » visible sans ouvrir la fiche.',
+          },
+          {
+            id: 'opt_b',
+            recommended: true,
+            label: 'Regrouper les actions rares (Décaler / Regrouper / Annuler / ↩) dans un menu « ⚙️ Ajuster »',
+            detail: 'Évite les clics accidentels sur Annuler entre deux séances.',
+          },
+          {
+            id: 'opt_c',
+            label: 'Afficher le bandeau « SMS clients » une seule fois en haut au lieu de sous chaque créneau',
+            detail: 'Allège visuellement les journées où plusieurs créneaux sont ajustés.',
+          },
+        ],
+      },
+      {
+        id: 'q4',
+        title: 'Point 4 · Créneau sur mesure de dernière minute',
+        tag: 'Rapidité Terrain',
+        description: 'Quand un client appelle le jour même pour un horaire particulier, faut-il pouvoir créer et publier le créneau en 1 seul clic depuis Cycle 2 ?',
+        type: 'radio',
+        placeholder: 'Cas fréquents rencontrés au téléphone…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Option A · Oui, bouton « Créer & publier directement » depuis Cycle 2',
+            detail: 'Le créneau apparaît immédiatement en Cycle 2 prêt pour l’inscription.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Option B · Garder la validation séparée Cycle 1 → Cycle 2',
+            detail: 'Sécurité pour éviter toute publication involontaire.',
+          },
+        ],
+      },
+    ],
+  },
 };

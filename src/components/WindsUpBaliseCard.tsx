@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppSettings, WindsUpSpotData } from '../types';
+import { classifyWindSector } from '../utils/beachOrientation';
 import { fetchPublicWindsUpSpot66Fallback } from '../utils/windsUpFallback';
 
 interface WindsUpBaliseCardProps {
@@ -184,6 +185,10 @@ export const WindsUpBaliseCard: React.FC<WindsUpBaliseCardProps> = ({
       bd: '#86efac',
     };
   })();
+
+  const liveWindSector = data
+    ? classifyWindSector(data.latest.deg != null ? data.latest.deg : data.latest.dir)
+    : null;
 
   // Build unified SVG chart (Relevés barres + Min/Max + Courbe Prévisions Orange + Actuellement)
   const renderChart = () => {
@@ -800,23 +805,64 @@ export const WindsUpBaliseCard: React.FC<WindsUpBaliseCardProps> = ({
               </div>
             </div>
 
-            {windJudgment && (
-              <div
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  background: windJudgment.bg,
-                  color: windJudgment.fg,
-                  border: `1.5px solid ${windJudgment.bd}`,
-                  fontSize: '0.74rem',
-                  fontWeight: 900,
-                }}
-              >
-                {latestOk ? '✅ ' : '⚠️ '}
-                {windJudgment.label}
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              {liveWindSector && (
+                <span
+                  title={liveWindSector.detail}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    background: liveWindSector.bg,
+                    color: liveWindSector.fg,
+                    border: `1.5px solid ${liveWindSector.bd}`,
+                    fontSize: '0.74rem',
+                    fontWeight: 900,
+                  }}
+                >
+                  🧭 {liveWindSector.label}
+                </span>
+              )}
+
+              {windJudgment && (
+                <div
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    background: windJudgment.bg,
+                    color: windJudgment.fg,
+                    border: `1.5px solid ${windJudgment.bd}`,
+                    fontSize: '0.74rem',
+                    fontWeight: 900,
+                  }}
+                >
+                  {latestOk ? '✅ ' : '⚠️ '}
+                  {windJudgment.label}
+                </div>
+              )}
+            </div>
           </div>
+
+          {liveWindSector?.sector === 'terre' && (
+            <div
+              style={{
+                padding: '7px 11px',
+                borderRadius: '8px',
+                background: '#fff7ed',
+                border: '1.5px solid #fdba74',
+                color: '#9a3412',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+              }}
+            >
+              <span>⚠️</span>
+              <span>
+                Vent de terre en cours (secteur NE–ESE via Kervennec) : déventes et irrégularités possibles devant l&apos;école.
+              </span>
+            </div>
+          )}
 
           {/* Graphique combiné Relevés (barres) + Prévisions (courbe orange) + Légende */}
           {renderChart()}

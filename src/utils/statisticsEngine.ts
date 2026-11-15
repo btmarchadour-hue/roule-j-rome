@@ -1,6 +1,13 @@
 import { AppSettings, CancellationReason, CustomSlotsMap, MAX_CHARS_PER_INSTRUCTOR, SessionItem, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
 import { dayFocus, win } from './tides';
-import { getObservationChars, getValidationItemChars, isNoBookingsReason, isNotPublishedCycle1 } from './cycleHelpers';
+import {
+  getObservationChars,
+  getSlotMaxCapacity,
+  getValidationItemChars,
+  isNoBookingsReason,
+  isNotPublishedCycle1,
+  normalizeClosureReason,
+} from './cycleHelpers';
 
 export const CANCELLATION_REASONS_INFO: Record<
   CancellationReason,
@@ -237,8 +244,11 @@ export interface PeriodStatsResult {
   instructorAbsenteeismRate: number;    // Taux d'absentéisme sur la plage (%)
   instructorAbsentReasonsBreakdown: {
     reason: string;
+    reasonKey: string;
+    isGenericClosed: boolean;
     count: number;
     percentage: number;
+    slots: AbsentSlotRef[];
   }[];
   totalMono: number;
   totalBi: number;
@@ -248,6 +258,16 @@ export interface PeriodStatsResult {
   cycle2MergedCount: number;            // Séances regroupées / fusionnées en Cycle 2
   avgFillRate: number; // en % (sur base de 12 chars max / moniteur par séance réalisée)
   observationsCount: number;
+}
+
+export interface AbsentSlotRef {
+  ds: string;
+  slotKey: string;
+  startTime: string;
+  endTime: string;
+  source: 'validation' | 'observation';
+  currentReason: string;
+  observationId?: string;
 }
 
 export interface CalibrationStatsResult {
@@ -298,10 +318,29 @@ export function computePeriodStats(
   let totalMono = 0;
   let totalBi = 0;
   let totalRealizedChars = 0;
+  let totalRealizedCapacity = 0;
   let cycle1PublishedCount = 0;
   let cycle2ShiftedCount = 0;
   let cycle2MergedCount = 0;
-  const absentReasonsMap = new Map<string, number>();
+  const absentReasonsMap = new Map<
+    string,
+    { label: string; isGenericClosed: boolean; count: number; slots: AbsentSlotRef[] }
+  >();
+  const addAbsentSlot = (rawReason: string, ref: AbsentSlotRef) => {
+    const norm = normalizeClosureReason(rawReason);
+    const existing = absentReasonsMap.get(norm.key);
+    if (existing) {
+      existing.count += 1;
+      existing.slots.push(ref);
+    } else {
+      absentReasonsMap.set(norm.key, {
+        label: norm.label,
+        isGenericClosed: norm.isGenericClosed,
+        count: 1,
+        slots: [ref],
+      });
+    }
+  };
 
   const reasonsCount: Record<CancellationReason, number> = {
     wind_low: 0,
@@ -404,6 +443,7 @@ export function computePeriodStats(
           const obsChars = matchedObs ? getObservationChars(matchedObs) : 0;
           const slotChars = obsChars > 0 ? obsChars : itemCharsInfo.totalChars;
           totalRealizedChars += slotChars;
+          totalRealizedCapacity += getSlotMaxCapacity(item);
         } else if (item.status === 'rejected') {
           totalCancelledSlots++;
           // Recherche motif
@@ -434,7 +474,15 @@ export function computePeriodStats(
               matchedObs?.cancellationNote?.trim() ||
               (item.rejectReason?.replace(/^Non publié\s*\(C1\)\s*:\s*/i, '').trim()) ||
               'Indisponibilité moniteur / matériel';
-            absentReasonsMap.set(rawReason, (absentReasonsMap.get(rawReason) || 0) + 1);
+            addAbsentSlot(rawReason, {
+              ds,
+              slotKey: item.k,
+              startTime: item.publishedStart || item.s,
+              endTime: item.publishedEnd || item.e,
+              source: item.nonPublishReason || isC1NotPub ? 'validation' : 'observation',
+              currentReason: rawReason,
+              observationId: matchedObs?.id,
+            });
           } else {
             weatherCancelledSlotsCount++;
             const booked = matchedObs?.bookedParticipantsCount ?? item.pilotsCount ?? 0;
@@ -465,7 +513,15 @@ export function computePeriodStats(
         } else if (reason === 'instructor') {
           instructorAbsentSlotsCount++;
           const rawReason = obs.cancellationNote?.trim() || 'Indisponibilité moniteur / matériel';
-          absentReasonsMap.set(rawReason, (absentReasonsMap.get(rawReason) || 0) + 1);
+          addAbsentSlot(rawReason, {
+            ds,
+            slotKey: obs.slotKey,
+            startTime: obs.slotStart,
+            endTime: obs.slotEnd,
+            source: 'observation',
+            currentReason: rawReason,
+            observationId: obs.id,
+          });
         } else {
           weatherCancelledSlotsCount++;
           const booked = obs.bookedParticipantsCount || 0;
@@ -484,6 +540,7 @@ export function computePeriodStats(
         if (obs.monoCount) totalMono += obs.monoCount;
         if (obs.biCount) totalBi += obs.biCount;
         totalRealizedChars += getObservationChars(obs);
+        totalRealizedCapacity += obs.secondaryInstructor ? MAX_CHARS_PER_INSTRUCTOR * 2 : MAX_CHARS_PER_INSTRUCTOR;
       }
     });
 
@@ -510,10 +567,10 @@ export function computePeriodStats(
     .filter(item => item.count > 0)
     .sort((a, b) => b.count - a.count);
 
-  // Règle école : capacité max = 12 CHARS par moniteur (Mono + Bi), PAS en personnes
+  // Règle école : capacité max = 12 CHARS par moniteur (ou 20/24 si doublé), PAS en personnes
   const avgFillRate =
-    totalRealizedSlots > 0
-      ? Math.min(100, (totalRealizedChars / (totalRealizedSlots * MAX_CHARS_PER_INSTRUCTOR)) * 100)
+    totalRealizedCapacity > 0
+      ? Math.min(100, (totalRealizedChars / totalRealizedCapacity) * 100)
       : 0;
 
   const rescheduledRate =
@@ -527,10 +584,16 @@ export function computePeriodStats(
       : 0;
 
   const instructorAbsentReasonsBreakdown = Array.from(absentReasonsMap.entries())
-    .map(([reason, count]) => ({
-      reason,
-      count,
-      percentage: instructorAbsentSlotsCount > 0 ? (count / instructorAbsentSlotsCount) * 100 : 0,
+    .map(([reasonKey, bucket]) => ({
+      reason: bucket.label,
+      reasonKey,
+      isGenericClosed: bucket.isGenericClosed,
+      count: bucket.count,
+      percentage:
+        instructorAbsentSlotsCount > 0 ? (bucket.count / instructorAbsentSlotsCount) * 100 : 0,
+      slots: bucket.slots.sort((a, b) =>
+        `${a.ds}_${a.startTime}`.localeCompare(`${b.ds}_${b.startTime}`)
+      ),
     }))
     .sort((a, b) => b.count - a.count);
 

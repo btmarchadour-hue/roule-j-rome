@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note · Audit Ergonomie Terrain &amp; Doublons Restants · Char à Voile Lestrevet</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 11mm 12mm 11mm 12mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.44;
+      font-size: 10.8px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn-word { background: #1d4ed8; }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      max-width: calc(100% - 20px);
+      margin: 14px auto;
+      padding: 12mm 14mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 6px;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .block, .item-card { break-inside: avoid; page-break-inside: avoid; }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2.5px solid #0284c7;
+      padding-bottom: 7px;
+      margin-bottom: 10px;
+      border-collapse: collapse;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 3px 0 2px;
+      font-size: 16.5px;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1.2;
+    }
+    .sub {
+      color: #475569;
+      font-size: 9.8px;
+    }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 11px;
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.4px;
+    }
+    .block {
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 9px 11px;
+      margin-bottom: 10px;
+      background: #ffffff;
+    }
+    .block-amber {
+      background: #fffbeb;
+      border-color: #fcd34d;
+    }
+    .block-blue {
+      background: #f0f9ff;
+      border-color: #7dd3fc;
+    }
+    .block-indigo {
+      background: #eef2ff;
+      border-color: #a5b4fc;
+    }
+    .block h2 {
+      margin: 0 0 6px;
+      font-size: 11.8px;
+      font-weight: 900;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #0284c7;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .item-card {
+      border: 1px solid #e2e8f0;
+      border-left: 3.5px solid #0284c7;
+      border-radius: 6px;
+      padding: 7px 10px;
+      margin-bottom: 7px;
+      background: #ffffff;
+    }
+    .item-card.amber {
+      border-left-color: #d97706;
+    }
+    .item-card.purple {
+      border-left-color: #7c3aed;
+    }
+    .item-title {
+      font-weight: 800;
+      font-size: 10.4px;
+      color: #0f172a;
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      font-size: 8.2px;
+      font-weight: 800;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      text-transform: uppercase;
+    }
+    .tag.amber {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .tag.purple {
+      background: #ede9fe;
+      color: #5b21b6;
+    }
+    ul {
+      margin: 3px 0 0 15px;
+      padding: 0;
+    }
+    li {
+      margin-bottom: 2px;
+    }
+    table.review-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 9.5px;
+    }
+    table.review-table th,
+    table.review-table td {
+      border: 1px solid #cbd5e1;
+      padding: 5px 7px;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.review-table th {
+      background: #f1f5f9;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .footer-note {
+      margin-top: 10px;
+      padding-top: 6px;
+      border-top: 1px solid #cbd5e1;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.8px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <strong>📱 Audit Ergonomie Terrain &amp; Doublons Restants</strong>
+      <span style="font-size: 10px; color: #94a3b8; margin-left: 8px;">À passer en revue ensemble · Benoît &amp; Jérôme</span>
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn" type="button" onclick="window.print()">🖨️ Imprimer / PDF A4</button>
+      <button class="btn btn-word" type="button" onclick="exportToWord()">📄 Télécharger Word (.doc)</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="export-content">
+    <table class="header-table">
+      <tr>
+        <td>
+          <span class="title-badge">Revue Ergonomie Terrain · À arbitrer ensemble</span>
+          <h1>Audit Ergonomie Terrain &amp; Doublons Restants (Vue Jérôme)</h1>
+          <div class="sub">
+            Constats relevés sur « Ça roule ? » en se mettant à la place du moniteur sur le terrain (smartphone au camion ou sur la plage entre deux séances).
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="meta-box">
+      <div><strong>Site :</strong> Plage de Lestrevet · Plomodiern</div>
+      <div><strong>Point d’étape :</strong> 14 novembre 2026</div>
+      <div><strong>Statut :</strong> À passer en revue avant modification</div>
+    </div>
+
+    <div class="block block-amber">
+      <h2><span class="step-num" style="background:#d97706;">1</span> Les 5 doublons encore présents dans l’application</h2>
+
+      <div class="item-card amber">
+        <div class="item-title">
+          <span>A. Horaires PM / BM et coefficients répétés 3 fois sur le même écran</span>
+          <span class="tag amber">Doublon visuel</span>
+        </div>
+        <ul>
+          <li><strong>Où :</strong> 1) Grande carte <em>🌊 Marées du jour</em> tout en haut (avant les onglets), 2) Badges <em>● PRATICABLE | COEF</em> sous les courbes, 3) Ligne texte <em>PM … · BM …</em> tout en bas de la fiche du jour.</li>
+          <li><strong>Impact :</strong> Sur téléphone, la carte <em>Marées du jour</em> consomme ~220 px avant même les onglets et les décisions du jour.</li>
+        </ul>
+      </div>
+
+      <div class="item-card amber">
+        <div class="item-title">
+          <span>B. Bas de page dupliqués entre Cycle 1 et Cycle 2 (Tableau mensuel, Marnage, Exports CSV)</span>
+          <span class="tag amber">Page trop longue</span>
+        </div>
+        <ul>
+          <li><strong>Où :</strong> Le bloc <em>Export / Tableau mensuel</em>, la <em>Courbe de marnage</em>, les <em>Alertes</em> et les <em>Règles</em> sont présents en double en bas de Cycle 1 et de Cycle 2.</li>
+          <li><strong>En plus en Cycle 2 :</strong> deux boutons d’export CSV distincts (<em>Export</em> de TableView + <em>Export numérique du planning</em>) et une carte <em>Alertes &amp; Conditions</em> qui répète des infos fixes.</li>
+        </ul>
+      </div>
+
+      <div class="item-card amber">
+        <div class="item-title">
+          <span>C. Textes vent « 💨 09h00–15h00 : … » redondants sous Windguru + Courbe Vent</span>
+          <span class="tag amber">Redondance météo</span>
+        </div>
+        <ul>
+          <li><strong>Où :</strong> Sous les créneaux (Cycle 1 et Cycle 2), une liste texte répète les moyennes déjà lues juste au-dessus dans le tableau Windguru et la courbe Vent &amp; Rafales.</li>
+        </ul>
+      </div>
+
+      <div class="item-card amber">
+        <div class="item-title">
+          <span>D. Bandeau « 📲 SMS clients : En attente de connexion… » répété à l’identique</span>
+          <span class="tag amber">Bruit visuel</span>
+        </div>
+        <ul>
+          <li><strong>Où :</strong> Affiché sous chaque créneau décalé, regroupé ou annulé en Cycle 2 <strong>et</strong> rappelé une fois de plus dans <em>Alertes &amp; Conditions</em>.</li>
+        </ul>
+      </div>
+
+      <div class="item-card amber">
+        <div class="item-title">
+          <span>E. Réglage « Séances minimum pour ouvrir la journée (fmin) » isolé des autres réglages</span>
+          <span class="tag amber">Réglages éclatés</span>
+        </div>
+        <ul>
+          <li><strong>Où :</strong> <code>fmin</code> est tout en bas de Cycle 2, tandis que tous les autres réglages (hauteur d’eau, vent min/max, coef max, gestion des comptes) sont tout en bas de Cycle 1.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block block-blue">
+      <h2><span class="step-num">2</span> Les 5 points peu pratiques sur le terrain (dans la peau de Jérôme)</h2>
+
+      <div class="item-card">
+        <div class="item-title">
+          <span>1. Trop de scroll sur mobile avant d’atteindre les créneaux et les inscrits</span>
+          <span class="tag">Priorité terrain</span>
+        </div>
+        <ul>
+          <li><strong>Constat :</strong> En ouvrant Cycle 2 le matin, on passe successivement par : Header → Sync → Marées du jour → Onglets → Encart C1 → Calendrier complet du mois → Balise Winds-Up → Windguru → Verdict → Courbe marée → Courbe vent → <strong>enfin les créneaux du jour</strong>.</li>
+          <li><strong>Attente terrain :</strong> Sur la plage le jour J, l’info vitale immédiate est : <em>vent réel de la balise + prochaine marée + mes séances du jour et qui est inscrit</em>. Le calendrier mensuel sert surtout à la préparation hebdo/mensuelle.</li>
+        </ul>
+      </div>
+
+      <div class="item-card">
+        <div class="item-title">
+          <span>2. Double étape pour un créneau de dernière minute (client au téléphone)</span>
+          <span class="tag">Rapidité</span>
+        </div>
+        <ul>
+          <li><strong>Constat :</strong> Ajouter un créneau sur mesure oblige aujourd’hui à créer le créneau puis à le publier en Cycle 1 avant de pouvoir y inscrire les clients en Cycle 2.</li>
+          <li><strong>Piste :</strong> Un bouton unique <em>« + Créer &amp; publier directement »</em> éviterait l’aller-retour quand le téléphone sonne.</li>
+        </ul>
+      </div>
+
+      <div class="item-card">
+        <div class="item-title">
+          <span>3. Trop de petits boutons côte à côte sur chaque carte de créneau en Cycle 2</span>
+          <span class="tag">Ergonomie tactile</span>
+        </div>
+        <ul>
+          <li><strong>Constat :</strong> Sur une même ligne : <code>Inscriptions</code>, <code>Maintenir</code>, <code>Décaler</code>, <code>Regrouper</code>, <code>Annuler (Vie 2)</code>, <code>↩</code>, <code>REX</code>.</li>
+          <li><strong>Risque :</strong> Sur smartphone avec du soleil ou les mains mouillées, risque d’appui accidentel sur <em>Annuler</em> ou <em>↩</em> juste à côté de <em>Maintenir</em>.</li>
+          <li><strong>Piste :</strong> Garder 2 actions principales bien espacées (<em>Inscriptions</em> + <em>Maintenir / REX</em>) et regrouper <em>Décaler / Regrouper / Annuler / Réinitialiser</em> dans un menu <em>« ⚙️ Ajuster »</em>.</li>
+        </ul>
+      </div>
+
+      <div class="item-card">
+        <div class="item-title">
+          <span>4. Noms des inscrits invisibles sans ouvrir chaque fiche de créneau</span>
+          <span class="tag">Gain de temps</span>
+        </div>
+        <ul>
+          <li><strong>Constat :</strong> On voit <code>Inscriptions (4/12)</code>, mais il faut ouvrir la fenêtre de chaque séance pour vérifier les noms, prénoms ou groupes (mono/bi).</li>
+          <li><strong>Piste :</strong> Afficher une ligne discrète sous le créneau (ex. <em>Inscrits : Dupont (3 mono), Martin (1 bi)</em>) consultable en 1 coup d’œil au parking.</li>
+        </ul>
+      </div>
+
+      <div class="item-card">
+        <div class="item-title">
+          <span>5. Page Cycle 2 alourdie par les outils mensuels et la documentation en bas de page</span>
+          <span class="tag">Lisibilité</span>
+        </div>
+        <ul>
+          <li><strong>Constat :</strong> Tableau mensuel, courbe de marnage, 2 exports CSV, alertes fixes, réglage <code>fmin</code> et règles du verdict s’empilent sur près de 10 écrans.</li>
+          <li><strong>Piste :</strong> Regrouper tous les réglages ensemble, déplacer ou replier les exports mensuels et ne laisser en Cycle 2 que ce qui sert à la décision et à la séance du jour.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block block-indigo">
+      <h2><span class="step-num" style="background:#4f46e5;">3</span> Grille de revue commune (Décisions à prendre ensemble)</h2>
+      <table class="review-table">
+        <thead>
+          <tr>
+            <th style="width: 28%;">Sujet à passer en revue</th>
+            <th style="width: 44%;">Simplification envisagée</th>
+            <th style="width: 28%;">Décision (Go / Adapter / Garder)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Ordre d’affichage Cycle 2 (mobile)</strong></td>
+            <td>Mettre Balise Winds-Up + Séances du jour plus haut (ou rendre le Calendrier repliable / compact en Cycle 2).</td>
+            <td>☐ Go &nbsp; ☐ Adapter &nbsp; ☐ Garder tel quel</td>
+          </tr>
+          <tr>
+            <td><strong>2. Carte « Marées du jour » en haut</strong></td>
+            <td>Compacter sur 1–2 lignes ou supprimer les répétitions PM/BM &amp; texte vent en bas de carte.</td>
+            <td>☐ Go &nbsp; ☐ Adapter &nbsp; ☐ Garder tel quel</td>
+          </tr>
+          <tr>
+            <td><strong>3. Bas de page Cycle 2</strong></td>
+            <td>Retirer les doublons (2e Export CSV, Alertes fixes, Règles du verdict, réglage <code>fmin</code> remis dans Réglages).</td>
+            <td>☐ Go &nbsp; ☐ Adapter &nbsp; ☐ Garder tel quel</td>
+          </tr>
+          <tr>
+            <td><strong>4. Boutons sur chaque créneau Cycle 2</strong></td>
+            <td>Regrouper Décaler / Regrouper / Annuler / ↩ sous « ⚙️ Ajuster » + afficher le résumé des noms inscrits.</td>
+            <td>☐ Go &nbsp; ☐ Adapter &nbsp; ☐ Garder tel quel</td>
+          </tr>
+          <tr>
+            <td><strong>5. Créneau sur mesure express</strong></td>
+            <td>Option « Créer &amp; publier en 1 clic » depuis Cycle 2 sans repasser par Cycle 1.</td>
+            <td>☐ Go &nbsp; ☐ Adapter &nbsp; ☐ Garder tel quel</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer-note">
+      <span>Note Audit Ergonomie &amp; Doublons — Char à Voile du Bout du Monde (Plage de Lestrevet)</span>
+      <span>Application « Ça roule ? » · À passer en revue · Benoît &amp; Jérôme</span>
+    </div>
+  </div>
+
+  <script>
+    function exportToWord() {
+      var content = document.getElementById('export-content').cloneNode(true);
+      var html =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+        'xmlns:w="urn:schemas-microsoft-com:office:word" ' +
+        'xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"><title>Audit Ergonomie Terrain &amp; Doublons</title>' +
+        '<style>' +
+        'body { font-family: Calibri, Arial, sans-serif; font-size: 10pt; color: #0f172a; }' +
+        'h1 { font-size: 15pt; color: #0f172a; }' +
+        'h2 { font-size: 11.5pt; color: #0369a1; margin-top: 10pt; }' +
+        'table { border-collapse: collapse; width: 100%; }' +
+        'th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 9pt; }' +
+        'th { background: #f1f5f9; }' +
+        '</style></head><body>' +
+        content.innerHTML +
+        '</body></html>';
+
+      var blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'note_ergonomie_terrain_doublons_lestrevet.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

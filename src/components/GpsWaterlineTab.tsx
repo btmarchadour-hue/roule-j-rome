@@ -21,6 +21,12 @@ import {
   requestSmoothedHighAccuracyGps,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
+import {
+  BAY_ZONES_META,
+  BayZoneId,
+  classifyBayZone,
+  estimateLitto3dUsableWidthM,
+} from '../utils/beachOrientation';
 import { BeachCadrePanel } from './BeachCadrePanel';
 import { Litto3DBeachSection } from './Litto3DBeachSection';
 
@@ -54,6 +60,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
   // Filtre d'affichage
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
+  const [filterZone, setFilterZone] = useState<'all' | BayZoneId>('all');
 
   // Gamification Étape 2 : Objectif 300 mesures & Modèle Empirique
   const TARGET_MEASURES = 300;
@@ -234,15 +241,57 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     document.body.removeChild(a);
   };
 
-  // Filtrage des logs
+  // Filtrage des logs (période + zone de la baie)
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const currentMonthStr = useMemo(() => todayStr.slice(0, 7), [todayStr]);
+  const softMarginM = activeCadreProfile?.softSandMarginM ?? 50;
 
-  const filteredLogs = useMemo(() => {
-    if (filterPeriod === 'today') return logs.filter(l => l.dateStr === todayStr);
-    if (filterPeriod === 'month') return logs.filter(l => l.dateStr.startsWith(currentMonthStr));
-    return logs;
-  }, [logs, filterPeriod, todayStr, currentMonthStr]);
+  const logsWithZone = useMemo(() => {
+    return logs.map(l => {
+      const dyn = evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadreProfile);
+      const zone = classifyBayZone(l.latitude, l.longitude, dyn.lateralPosPct ?? l.lateralPosPct);
+      const rawWidth = dyn.widthFromDuneM ?? l.measuredWidthFromDuneM ?? null;
+      const usableWidthM =
+        rawWidth != null
+          ? Math.max(0, rawWidth - softMarginM)
+          : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
+      return {
+        log: l,
+        dyn,
+        zone,
+        rawWidth,
+        usableWidthM,
+        isEstimatedWidth: rawWidth == null,
+      };
+    });
+  }, [logs, activeCadreProfile, softMarginM]);
+
+  const zoneSummaries = useMemo(() => {
+    const order: BayZoneId[] = ['lestrevet', 'lieue_de_greve', 'pentrez'];
+    return order.map(zId => {
+      const items = logsWithZone.filter(x => x.zone.zoneId === zId);
+      const avgUsableM =
+        items.length > 0
+          ? Math.round(items.reduce((acc, x) => acc + x.usableWidthM, 0) / items.length)
+          : null;
+      return {
+        meta: BAY_ZONES_META[zId],
+        count: items.length,
+        avgUsableM,
+      };
+    });
+  }, [logsWithZone]);
+
+  const filteredEntries = useMemo(() => {
+    return logsWithZone.filter(item => {
+      if (filterPeriod === 'today' && item.log.dateStr !== todayStr) return false;
+      if (filterPeriod === 'month' && !item.log.dateStr.startsWith(currentMonthStr)) return false;
+      if (filterZone !== 'all' && item.zone.zoneId !== filterZone) return false;
+      return true;
+    });
+  }, [logsWithZone, filterPeriod, filterZone, todayStr, currentMonthStr]);
+
+  const filteredLogs = useMemo(() => filteredEntries.map(e => e.log), [filteredEntries]);
 
   // Statistiques synthétiques
   const stats = useMemo(() => {
@@ -669,11 +718,40 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 const dyn = evaluatePointAgainstCadre(lastLoggedItem.latitude, lastLoggedItem.longitude, activeCadreProfile);
                 const wDune = dyn.widthFromDuneM ?? lastLoggedItem.measuredWidthFromDuneM;
                 const latPct = dyn.lateralPosPct ?? lastLoggedItem.lateralPosPct;
-                if (wDune == null) return null;
+                const zone = classifyBayZone(lastLoggedItem.latitude, lastLoggedItem.longitude, latPct);
+                const usableW =
+                  wDune != null
+                    ? Math.max(0, wDune - softMarginM)
+                    : lastLoggedItem.usableWidthM ??
+                      estimateLitto3dUsableWidthM(lastLoggedItem.correctedWaterHeightM, softMarginM);
                 return (
-                  <div style={{ fontSize: '0.74rem', color: '#0f172a', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e2e8f0' }}>
-                    Largeur Dune → Mer : <strong>{wDune} m</strong>
-                    {latPct != null && ` · Couloir : ${latPct}%`}
+                  <div style={{ fontSize: '0.74rem', color: '#0f172a', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div>
+                      Zone :{' '}
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          fontSize: '0.68rem',
+                          fontWeight: 800,
+                          background: zone.bg,
+                          color: zone.fg,
+                          border: `1px solid ${zone.bd}`,
+                        }}
+                      >
+                        📍 {zone.label}
+                      </span>
+                    </div>
+                    <div>
+                      Bande exploitable utile : <strong>{usableW} m</strong>
+                      {wDune != null ? (
+                        <span style={{ color: '#64748b' }}>
+                          {' '}(Dune → Mer {wDune} m − {softMarginM} m sable mou{latPct != null ? ` · ${latPct}%` : ''})
+                        </span>
+                      ) : (
+                        <span style={{ color: '#64748b' }}> (est. Litto3D)</span>
+                      )}
+                    </div>
                   </div>
                 );
               })()}
@@ -749,82 +827,128 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
       {/* TABLEAU DES RELEVÉS GPS AVEC FILTRES ET EXPORT */}
       <div className="card" style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ padding: '12px 16px', background: '#f8fafc', borderBottom: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontWeight: 900, fontSize: '0.88rem', color: '#0f172a' }}>
-              📋 Carnet des Relevés GPS Limite Basse ({filteredLogs.length})
-            </span>
-            <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: '6px', padding: '2px' }}>
-              <button
-                type="button"
-                onClick={() => setFilterPeriod('all')}
-                style={{
-                  border: 'none',
-                  background: filterPeriod === 'all' ? '#ffffff' : 'transparent',
-                  color: filterPeriod === 'all' ? '#0f172a' : '#64748b',
-                  fontWeight: filterPeriod === 'all' ? 800 : 600,
-                  fontSize: '0.68rem',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                }}
-              >
-                Tous
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterPeriod('month')}
-                style={{
-                  border: 'none',
-                  background: filterPeriod === 'month' ? '#ffffff' : 'transparent',
-                  color: filterPeriod === 'month' ? '#0f172a' : '#64748b',
-                  fontWeight: filterPeriod === 'month' ? 800 : 600,
-                  fontSize: '0.68rem',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                }}
-              >
-                Ce mois
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterPeriod('today')}
-                style={{
-                  border: 'none',
-                  background: filterPeriod === 'today' ? '#ffffff' : 'transparent',
-                  color: filterPeriod === 'today' ? '#0f172a' : '#64748b',
-                  fontWeight: filterPeriod === 'today' ? 800 : 600,
-                  fontSize: '0.68rem',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                }}
-              >
-                Aujourd'hui
-              </button>
+        <div style={{ padding: '12px 16px', background: '#f8fafc', borderBottom: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 900, fontSize: '0.88rem', color: '#0f172a' }}>
+                📋 Carnet des Relevés GPS Limite Basse ({filteredEntries.length})
+              </span>
+              <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: '6px', padding: '2px' }}>
+                <button
+                  type="button"
+                  onClick={() => setFilterPeriod('all')}
+                  style={{
+                    border: 'none',
+                    background: filterPeriod === 'all' ? '#ffffff' : 'transparent',
+                    color: filterPeriod === 'all' ? '#0f172a' : '#64748b',
+                    fontWeight: filterPeriod === 'all' ? 800 : 600,
+                    fontSize: '0.68rem',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Tous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterPeriod('month')}
+                  style={{
+                    border: 'none',
+                    background: filterPeriod === 'month' ? '#ffffff' : 'transparent',
+                    color: filterPeriod === 'month' ? '#0f172a' : '#64748b',
+                    fontWeight: filterPeriod === 'month' ? 800 : 600,
+                    fontSize: '0.68rem',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Ce mois
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterPeriod('today')}
+                  style={{
+                    border: 'none',
+                    background: filterPeriod === 'today' ? '#ffffff' : 'transparent',
+                    color: filterPeriod === 'today' ? '#0f172a' : '#64748b',
+                    fontWeight: filterPeriod === 'today' ? 800 : 600,
+                    fontSize: '0.68rem',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Aujourd'hui
+                </button>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              style={{
+                padding: '6px 12px',
+                background: '#0284c7',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>📥 Exporter Excel / CSV</span>
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            style={{
-              padding: '6px 12px',
-              background: '#0284c7',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '0.74rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span>📥 Exporter Excel / CSV</span>
-          </button>
+          {/* Filtrage & synthèse automatique 3 zones : Lestrevet / Lieue de Grève / Pentrez */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setFilterZone('all')}
+              style={{
+                border: filterZone === 'all' ? '1.5px solid #0f172a' : '1px solid #cbd5e1',
+                background: filterZone === 'all' ? '#0f172a' : '#ffffff',
+                color: filterZone === 'all' ? '#ffffff' : '#475569',
+                borderRadius: '6px',
+                padding: '4px 9px',
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Toutes zones ({logs.length})
+            </button>
+            {zoneSummaries.map(zs => {
+              const active = filterZone === zs.meta.zoneId;
+              return (
+                <button
+                  key={zs.meta.zoneId}
+                  type="button"
+                  onClick={() => setFilterZone(active ? 'all' : zs.meta.zoneId)}
+                  style={{
+                    border: active ? `1.5px solid ${zs.meta.fg}` : `1px solid ${zs.meta.bd}`,
+                    background: zs.meta.bg,
+                    color: zs.meta.fg,
+                    borderRadius: '6px',
+                    padding: '4px 9px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    boxShadow: active ? '0 0 0 1px currentColor' : 'none',
+                  }}
+                >
+                  📍 {zs.meta.shortLabel} ({zs.count})
+                  {zs.avgUsableM != null ? ` · moy. ${zs.avgUsableM} m utile` : ''}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div style={{ overflowX: 'auto', maxHeight: '420px' }}>
@@ -845,12 +969,12 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.length === 0 ? (
+              {filteredEntries.length === 0 ? (
                 <tr>
                   <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
                     <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📍</div>
                     <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.90rem', marginBottom: '4px' }}>
-                      Aucun relevé GPS pour cette période
+                      Aucun relevé GPS pour cette période / zone
                     </div>
                     <div style={{ fontSize: '0.75rem', maxWidth: '480px', margin: '0 auto', lineHeight: 1.5 }}>
                       Dès que Jérôme se rend sur la plage de Pentrez / Lestrevet à la limite basse de roulage, il lui suffit de cliquer sur le gros bouton bleu ci-dessus pour enregistrer le point en direct.
@@ -858,9 +982,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log, idx) => {
-                  const dynEval = evaluatePointAgainstCadre(log.latitude, log.longitude, activeCadreProfile);
-                  const widthDune = dynEval.widthFromDuneM ?? log.measuredWidthFromDuneM;
+                filteredEntries.map(({ log, dyn: dynEval, zone, rawWidth: widthDune, usableWidthM, isEstimatedWidth }, idx) => {
                   const latPct = dynEval.lateralPosPct ?? log.lateralPosPct;
                   const inZone = dynEval.isInsideZone ?? log.isInsideZone;
 
@@ -907,18 +1029,37 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       </span>
                     </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                      {widthDune != null ? (
-                        <div>
-                          <strong style={{ color: '#0f172a' }}>{widthDune} m</strong>
-                          {latPct != null && (
-                            <span style={{ fontSize: '0.66rem', color: inZone === false ? '#b45309' : '#15803d', marginLeft: '5px', fontWeight: 700 }}>
-                              · {latPct}%{inZone === false ? ' (hors zone)' : ''}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: 'fit-content',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            fontSize: '0.64rem',
+                            fontWeight: 800,
+                            background: zone.bg,
+                            color: zone.fg,
+                            border: `1px solid ${zone.bd}`,
+                          }}
+                        >
+                          {zone.shortLabel}
+                        </span>
+                        <div style={{ fontSize: '0.70rem' }}>
+                          <strong style={{ color: '#0f172a' }}>{usableWidthM} m utile</strong>
+                          {widthDune != null ? (
+                            <span style={{ fontSize: '0.64rem', color: inZone === false ? '#b45309' : '#64748b', marginLeft: '4px' }}>
+                              (Dune {widthDune} m{latPct != null ? ` · ${latPct}%` : ''}{inZone === false ? ' hors zone' : ''})
                             </span>
+                          ) : (
+                            isEstimatedWidth && (
+                              <span style={{ fontSize: '0.64rem', color: '#94a3b8', marginLeft: '4px' }}>
+                                (est. Litto3D)
+                              </span>
+                            )
                           )}
                         </div>
-                      ) : (
-                        <span style={{ color: '#94a3b8' }}>— (Dune requise)</span>
-                      )}
+                      </div>
                     </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
                       <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> ({log.weatherSnapshot.windDirectionComp}) · {log.weatherSnapshot.pressureHpa} hPa

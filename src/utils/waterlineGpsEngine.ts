@@ -1,5 +1,6 @@
 import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
 import { evaluatePointAgainstCadre } from './beachCadreEngine';
+import { classifyBayZone, estimateLitto3dUsableWidthM } from './beachOrientation';
 import { build, comp, hAt, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
@@ -261,6 +262,12 @@ export function buildWaterlineSnapshot(
   const cadreEval = activeCadre
     ? evaluatePointAgainstCadre(gps.latitude, gps.longitude, activeCadre)
     : null;
+  const softMarginM = activeCadre?.softSandMarginM ?? 50;
+  const usableWidthM =
+    cadreEval?.widthFromDuneM != null
+      ? Math.max(0, cadreEval.widthFromDuneM - softMarginM)
+      : estimateLitto3dUsableWidthM(correctedWaterHeightM, softMarginM);
+  const bayZone = classifyBayZone(gps.latitude, gps.longitude, cadreEval?.lateralPosPct);
 
   return {
     timestamp: gps.timestamp,
@@ -279,6 +286,8 @@ export function buildWaterlineSnapshot(
     rawSurcoteCm,
     correctedSurcoteCm,
     measuredWidthFromDuneM: cadreEval?.widthFromDuneM ?? undefined,
+    usableWidthM,
+    beachZone: bayZone.zoneId,
     lateralPosFromLeftM: cadreEval?.lateralPosFromLeftM ?? undefined,
     lateralPosPct: cadreEval?.lateralPosPct ?? undefined,
     isInsideZone: cadreEval?.isInsideZone ?? undefined,
@@ -306,7 +315,9 @@ export function exportWaterlineLogsAsCsv(
     'Altitude_m',
     'Precision_GPS_m',
     'Qualite_GPS',
+    'Zone_Plage',
     'Largeur_Dune_Mer_m',
+    'Largeur_Utile_Exploitable_m',
     'Position_Depuis_Gauche_m',
     'Position_Couloir_pct',
     'Dans_Cadre_Roulage',
@@ -327,9 +338,16 @@ export function exportWaterlineLogsAsCsv(
     'Notes',
   ];
 
+  const softMarginM = activeCadre?.softSandMarginM ?? 50;
   const rows = logs.map(l => {
     const dynEval = activeCadre ? evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadre) : null;
-    const widthM = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM ?? '';
+    const widthNum = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM ?? null;
+    const widthM = widthNum ?? '';
+    const usableW =
+      widthNum != null
+        ? Math.max(0, widthNum - softMarginM)
+        : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
+    const bayZone = classifyBayZone(l.latitude, l.longitude, dynEval?.lateralPosPct ?? l.lateralPosPct);
     const latPosM = dynEval?.lateralPosFromLeftM ?? l.lateralPosFromLeftM ?? '';
     const latPct = dynEval?.lateralPosPct ?? l.lateralPosPct ?? '';
     const inZone =
@@ -350,7 +368,9 @@ export function exportWaterlineLogsAsCsv(
       l.altitude != null ? l.altitude : '',
       l.accuracyM,
       l.accuracyQuality,
+      bayZone.shortLabel,
       widthM,
+      usableW,
       latPosM,
       latPct,
       inZone,

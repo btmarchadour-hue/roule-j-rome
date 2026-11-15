@@ -16,8 +16,6 @@ import {
   dayFocus,
   dayInfo,
   dayRow,
-  dayWind,
-  exportValidCsv,
   kOf,
   lc,
   maxDs,
@@ -27,7 +25,6 @@ import {
   toU,
   VC,
   vstat,
-  wtxt,
 } from '../utils/tides';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
@@ -36,9 +33,13 @@ import {
   findMatchingValidationItem,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
+  getMonitorBadgeStyle,
   getSlotBookingsSummary,
+  getSlotFleetAlerts,
+  getSlotMaxCapacity,
   getValidationItemChars,
   hasCycle2Trigger,
+  SECONDARY_INSTRUCTOR_PRESETS,
   shiftTimeString,
 } from '../utils/cycleHelpers';
 import { CalendarGrid } from './CalendarGrid';
@@ -52,6 +53,11 @@ import { SlotBookingsModal } from './SlotBookingsModal';
 import { CustomSlotsManager } from './CustomSlotsManager';
 import { DayCycle1Banner } from './DayCycle1Banner';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
+import {
+  classifyWindSector,
+  evaluateFrontalSwell,
+  WindSectorInfo,
+} from '../utils/beachOrientation';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 
 interface FocusTabProps {
@@ -79,6 +85,7 @@ interface FocusTabProps {
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
+  onCreateAndPublishCustomSlot?: (dateStr: string, slot: CustomSlot) => void;
   onValidateDay?: (
     dateStr: string,
     focusData: DayFocusData,
@@ -94,6 +101,9 @@ interface FocusTabProps {
     slotEnd: string;
     isCustom?: boolean;
     customTitle?: string;
+    maxChars?: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
   }) => void;
   isReadOnly?: boolean;
   focusDate?: string;
@@ -127,6 +137,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onSelectDayInCalendar,
   customSlotsMap = {},
   onUpdateCustomSlots,
+  onCreateAndPublishCustomSlot,
   onValidateDay,
   onClearValidation,
   onAddCustomNonPublishReason,
@@ -152,22 +163,35 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     slotStart: string;
     slotEnd: string;
     slotTitle?: string;
+    maxChars?: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
+    secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+    secondaryActualEnd?: string;
+    secondaryFormula?: string;
   } | null>(null);
   const [openTool, setOpenTool] = useState<{
     slotKey: string;
-    mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather';
+    mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather' | 'double_instructor';
   } | null>(null);
   const [confirmMono, setConfirmMono] = useState<number>(1);
   const [confirmBi, setConfirmBi] = useState<number>(0);
   const [cancelReason, setCancelReason] = useState<string>(C2_WEATHER_REASONS[0]);
   const [cancelRescheduled, setCancelRescheduled] = useState<number>(0);
   const [cancelLost, setCancelLost] = useState<number>(0);
+  const [doubleName, setDoubleName] = useState<string>('Youenn');
+  const [doubleQual, setDoubleQual] = useState<'CQP' | 'DE_BPJEPS'>('CQP');
+  const [doubleAddChars, setDoubleAddChars] = useState<number>(8);
+  const [doubleEnd, setDoubleEnd] = useState<string>('');
+  const [doubleFormula, setDoubleFormula] = useState<string>('');
   const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState<boolean>(false);
+  const [adjustMenuSlotKey, setAdjustMenuSlotKey] = useState<string | null>(null);
 
   const handleSelectCustomDate = (ds: string) => {
     setInternalFocusDate(ds);
     onFocusDateChange?.(ds);
     setOpenTool(null);
+    setAdjustMenuSlotKey(null);
   };
 
   const targetDs = propFocusDate || internalFocusDate;
@@ -188,12 +212,32 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const cm = cm0 - 1;
   const P = dayInfo(cy, cm, cd, settings, tideW, first, last);
   const coef = COEF[currentDs];
-  const DW = dayWind(cy, cm, cd, settings, tideW, first, last, windList);
   const dayStartU = toU(cy, cm, cd, 0);
   const dayEndU = toU(cy, cm, cd + 1, 0);
   const R = dayRow(cy, cm, cd, settings, EX, tideW, first, last, windList);
   const ad = EX.filter(p => p.t >= dayStartU && p.t < dayEndU && p.adj).map(p => p.adj as number);
   const holiday = getFrenchHolidayInfo(currentDs);
+
+  const dayWindSectors: WindSectorInfo[] = (() => {
+    const seen = new Map<string, WindSectorInfo>();
+    for (const s of currentFocus.list) {
+      if (s.st) {
+        const info = classifyWindSector(s.st.dir);
+        if (info && !seen.has(info.sector)) seen.set(info.sector, info);
+      }
+    }
+    if (seen.size === 0) {
+      for (const wp of windList) {
+        if (wp.t >= dayStartU + 480 && wp.t <= dayStartU + 1200) {
+          const info = classifyWindSector(wp.a);
+          if (info && !seen.has(info.sector)) seen.set(info.sector, info);
+        }
+      }
+    }
+    return [...seen.values()];
+  })();
+  const hasVentDeTerre = dayWindSectors.some(s => s.sector === 'terre');
+  const frontalSwellAdvisory = evaluateFrontalSwell(windList, dayStartU + 480, dayStartU + 1200);
 
   const formatWd = (ds: string) => {
     const [y, m, d] = ds.split('-').map(Number);
@@ -228,7 +272,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         : slotKey;
     const resKey = buildReservationKey(f.ds, effectiveBookingKey);
     const slotBookings = bookingsMap[resKey] || [];
-    const bookingSummary = getSlotBookingsSummary(slotBookings);
+    const slotMaxChars = getSlotMaxCapacity(valItem);
+    const primaryInstructor = valItem?.instructor || valItem?.assignedPilot || 'Jérôme';
+    const secondaryInstructor = valItem?.secondaryInstructor;
+    const bookingSummary = getSlotBookingsSummary(slotBookings, slotMaxChars);
     const itemChars = getValidationItemChars(valItem);
 
     const effectiveChars =
@@ -239,7 +286,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       bookingSummary.totalChars > 0 ? bookingSummary.biCount : itemChars.bi;
     const effectivePeople =
       bookingSummary.totalChars > 0 ? bookingSummary.totalPeople : itemChars.people;
-    const isOverCapacity = effectiveChars > MAX_CHARS_PER_INSTRUCTOR;
+    const isOverCapacity = effectiveChars > slotMaxChars;
+    const fleetAlerts = getSlotFleetAlerts(
+      effectiveMono,
+      effectiveBi,
+      settings.parkMaxMono,
+      settings.parkMaxBi
+    );
 
     const c1Status = getEffectiveCycle1Status(valItem);
     const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
@@ -252,8 +305,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       Boolean(valItem?.actualStart) &&
       (valItem?.actualStart !== startTimeStr || valItem?.actualEnd !== endTimeStr);
 
-    const isToolOpen = (mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather') =>
-      openTool?.slotKey === slotKey && openTool.mode === mode;
+    const isToolOpen = (
+      mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather' | 'double_instructor'
+    ) => openTool?.slotKey === slotKey && openTool.mode === mode;
 
     // Créneaux candidats pour le regroupement / fusion sur la même journée (uniquement parmi les créneaux validés Cycle 1)
     const mergeTargets = f.list
@@ -274,13 +328,15 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         const oVal = findMatchingValidationItem(valRecord, oKey, oStart, oEnd);
         const oBook = getSlotBookingsSummary(bookingsMap[buildReservationKey(f.ds, oKey)] || []);
         const oChars = Math.max(oBook.totalChars, getValidationItemChars(oVal).totalChars);
+        const maxTargetChars = getSlotMaxCapacity(oVal);
         const combined = effectiveChars + oChars;
         return {
           slotKey: oKey,
           label: `${oVal?.actualStart || oStart} - ${oVal?.actualEnd || oEnd}`,
           oChars,
           combined,
-          overMax: combined > MAX_CHARS_PER_INSTRUCTOR,
+          maxTargetChars,
+          overMax: combined > maxTargetChars,
         };
       });
 
@@ -357,9 +413,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           x.lim === 'marée' ? 'de marée' : "d'heure du jour"
         } au ${x.side} · à ta discrétion`
       : x.txt || '';
+    const slotWindSector = x.st ? classifyWindSector(x.st.dir) : null;
 
-    const needsSmsManualNotice =
-      c2Status === 'shifted' || c2Status === 'merged' || c2Status === 'cancelled_weather';
+    const isAdjustOpen =
+      adjustMenuSlotKey === slotKey ||
+      isToolOpen('shift') ||
+      isToolOpen('merge') ||
+      isToolOpen('cancel_weather');
 
     return (
       <div
@@ -451,7 +511,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 >
                   <span>🚗</span>
                   <span>
-                    {effectiveChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+                    {effectiveChars} / {slotMaxChars} chars
                   </span>
                   {(effectiveMono > 0 || effectiveBi > 0) && (
                     <span style={{ fontWeight: 700, opacity: 0.85 }}>
@@ -460,23 +520,62 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   )}
                 </span>
 
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    color: '#334155',
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.70rem',
-                    fontWeight: 800,
-                  }}
-                >
-                  <span>👨‍🏫 Moniteur :</span>
-                  <strong>Jérôme</strong>
-                </span>
+                {(() => {
+                  const pStyle = getMonitorBadgeStyle(primaryInstructor);
+                  const sStyle = secondaryInstructor ? getMonitorBadgeStyle(secondaryInstructor) : null;
+                  return (
+                    <>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          background: pStyle.bg,
+                          border: `1px solid ${pStyle.bd}`,
+                          color: pStyle.fg,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.70rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        <span>👤</span>
+                        <strong>{primaryInstructor}</strong>
+                      </span>
+                      {secondaryInstructor && sStyle && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: sStyle.bg,
+                            border: `1px solid ${sStyle.bd}`,
+                            color: sStyle.fg,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.70rem',
+                            fontWeight: 800,
+                          }}
+                          title="2e moniteur affecté à ce créneau multi-moniteurs"
+                        >
+                          <span>👤</span>
+                          <strong>
+                            {secondaryInstructor}
+                            {valItem?.secondaryQualification === 'CQP'
+                              ? ` (CQP · +${valItem?.secondaryMaxChars ?? 8})`
+                              : ` (+${valItem?.secondaryMaxChars ?? MAX_CHARS_PER_INSTRUCTOR})`}
+                          </strong>
+                          {valItem?.secondaryActualEnd && valItem.secondaryActualEnd !== displayEnd && (
+                            <span style={{ opacity: 0.9 }}>· fin {valItem.secondaryActualEnd}</span>
+                          )}
+                          {valItem?.secondaryFormula && (
+                            <span style={{ opacity: 0.9 }}>· {valItem.secondaryFormula}</span>
+                          )}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             ) : c1Status === 'published' ? (
               <span
@@ -553,6 +652,26 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
             {chip}
 
+            {slotWindSector && (
+              <span
+                title={slotWindSector.detail}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 7px',
+                  borderRadius: '5px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  background: slotWindSector.bg,
+                  color: slotWindSector.fg,
+                  border: `1px solid ${slotWindSector.bd}`,
+                }}
+              >
+                🧭 {slotWindSector.label}
+              </span>
+            )}
+
             {sub && (
               <small style={{ color: '#64748b', fontSize: '0.72rem' }}>
                 {sub + (x.past ? ' · passée' : '')}
@@ -583,11 +702,17 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     slotStart: startTimeStr,
                     slotEnd: endTimeStr,
                     slotTitle: x.customTitle,
+                    maxChars: slotMaxChars,
+                    primaryInstructor,
+                    secondaryInstructor,
+                    secondaryQualification: valItem?.secondaryQualification,
+                    secondaryActualEnd: valItem?.secondaryActualEnd,
+                    secondaryFormula: valItem?.secondaryFormula,
                   })
                 }
                 title="Ouvrir la fiche numérique des réservations (déclenche Cycle 2 dès 1 char)"
               >
-                👥 Inscriptions ({effectiveChars}/{MAX_CHARS_PER_INSTRUCTOR})
+                👥 Inscriptions ({effectiveChars}/{slotMaxChars})
               </button>
 
               {!isReadOnly && onCycle2Action && (
@@ -629,108 +754,71 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     ✓ Maintenir
                   </button>
 
+                  {(c1Status === 'published' || inCycle2) && (
+                    <button
+                      type="button"
+                      className="fbtn"
+                      style={{
+                        margin: 0,
+                        padding: '5px 9px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: secondaryInstructor ? '#047857' : '#6d28d9',
+                        background: secondaryInstructor ? '#ecfdf5' : '#f5f3ff',
+                        border: secondaryInstructor ? '1.5px solid #34d399' : '1.5px solid #c4b5fd',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => {
+                        setDoubleName(valItem?.secondaryInstructor || 'Youenn');
+                        setDoubleQual(valItem?.secondaryQualification || 'CQP');
+                        setDoubleAddChars(
+                          valItem?.secondaryMaxChars ??
+                            (valItem?.secondaryQualification === 'DE_BPJEPS' ? 12 : 8)
+                        );
+                        setDoubleEnd(valItem?.secondaryActualEnd || '');
+                        setDoubleFormula(valItem?.secondaryFormula || '');
+                        setOpenTool(
+                          isToolOpen('double_instructor')
+                            ? null
+                            : { slotKey, mode: 'double_instructor' }
+                        );
+                      }}
+                      title="Doubler ce créneau en haute saison (ex. Jérôme + Youenn CQP = 20 chars max)"
+                    >
+                      {secondaryInstructor ? `👥 +${secondaryInstructor}` : '+ Doubler (2e moniteur)'}
+                    </button>
+                  )}
+
                   {inCycle2 && (
-                    <>
-                      <button
-                        type="button"
-                        className="fbtn"
-                        style={{
-                          margin: 0,
-                          padding: '5px 9px',
-                          fontSize: '0.72rem',
-                          fontWeight: 800,
-                          color: isToolOpen('shift') ? '#fff' : '#b45309',
-                          background: isToolOpen('shift') ? '#d97706' : '#fef3c7',
-                          border: '1px solid #fcd34d',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() =>
-                          setOpenTool(isToolOpen('shift') ? null : { slotKey, mode: 'shift' })
-                        }
-                        title="Décaler l'horaire en conservant l'heure Cycle 1 d'origine"
-                      >
-                        🕒 Décaler
-                      </button>
-
-                      {mergeTargets.length > 0 && (
-                        <button
-                          type="button"
-                          className="fbtn"
-                          style={{
-                            margin: 0,
-                            padding: '5px 9px',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                            color: isToolOpen('merge') ? '#fff' : '#6d28d9',
-                            background: isToolOpen('merge') ? '#7c3aed' : '#f3e8ff',
-                            border: '1px solid #d8b4fe',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                          }}
-                          onClick={() =>
-                            setOpenTool(isToolOpen('merge') ? null : { slotKey, mode: 'merge' })
+                    <button
+                      type="button"
+                      className="fbtn"
+                      style={{
+                        margin: 0,
+                        padding: '5px 9px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: isAdjustOpen ? '#fff' : '#334155',
+                        background: isAdjustOpen ? '#334155' : '#f1f5f9',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => {
+                        if (isAdjustOpen) {
+                          setAdjustMenuSlotKey(null);
+                          if (openTool?.slotKey === slotKey && openTool.mode !== 'confirm_chars') {
+                            setOpenTool(null);
                           }
-                          title="Regrouper les inscrits sur un autre créneau (max 12 chars)"
-                        >
-                          🔗 Regrouper
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        className="fbtn"
-                        style={{
-                          margin: 0,
-                          padding: '5px 9px',
-                          fontSize: '0.72rem',
-                          fontWeight: 800,
-                          color: isToolOpen('cancel_weather') ? '#fff' : '#dc2626',
-                          background: isToolOpen('cancel_weather') ? '#dc2626' : '#fff',
-                          border: '1px solid #fca5a5',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => {
-                          setCancelReason(
-                            x.ok === false ? 'Vent trop fort / rafales' : C2_WEATHER_REASONS[0]
-                          );
-                          setCancelRescheduled(effectiveChars);
-                          setCancelLost(0);
-                          setOpenTool(
-                            isToolOpen('cancel_weather')
-                              ? null
-                              : { slotKey, mode: 'cancel_weather' }
-                          );
-                        }}
-                        title="Annuler la séance pour météo ou terrain (Vie 2)"
-                      >
-                        ⛔ Annuler (Vie 2)
-                      </button>
-
-                      <button
-                        type="button"
-                        className="fbtn"
-                        style={{
-                          margin: 0,
-                          padding: '5px 8px',
-                          fontSize: '0.70rem',
-                          fontWeight: 700,
-                          color: '#64748b',
-                          background: '#fff',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => {
-                          onCycle2Action(f, x, { type: 'reset_to_cycle1' });
-                          setOpenTool(null);
-                        }}
-                        title="Revenir à l'état Cycle 1 (sans décision tactique)"
-                      >
-                        ↩
-                      </button>
-                    </>
+                        } else {
+                          setAdjustMenuSlotKey(slotKey);
+                        }
+                      }}
+                      title="Décaler l'horaire, regrouper, annuler (Vie 2) ou revenir en Cycle 1"
+                    >
+                      ⚙️ Ajuster {isAdjustOpen ? '▲' : '▼'}
+                    </button>
                   )}
                 </>
               )}
@@ -758,6 +846,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       slotEnd: displayEnd,
                       isCustom: x.isCustom,
                       customTitle: x.customTitle,
+                      maxChars: slotMaxChars,
+                      primaryInstructor,
+                      secondaryInstructor,
                     })
                   }
                   title="Saisir le REX complet de la séance (hauteurs d'eau, chars, météo)"
@@ -801,7 +892,127 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         </div>
 
-        {/* ALERTE DÉPASSEMENT 12 CHARS / MONITEUR */}
+        {/* MENU DÉPLIANT ⚙️ AJUSTER : Décaler / Regrouper / Annuler (Vie 2) / Revenir C1 */}
+        {inCycle2 && isAdjustOpen && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              flexWrap: 'wrap',
+              padding: '8px 10px',
+              borderRadius: '8px',
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+            }}
+          >
+            <span style={{ fontSize: '0.70rem', fontWeight: 800, color: '#475569', marginRight: '4px' }}>
+              Actions Cycle 2 :
+            </span>
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '5px 9px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                color: isToolOpen('shift') ? '#fff' : '#b45309',
+                background: isToolOpen('shift') ? '#d97706' : '#fef3c7',
+                border: '1px solid #fcd34d',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+              onClick={() =>
+                setOpenTool(isToolOpen('shift') ? null : { slotKey, mode: 'shift' })
+              }
+              title="Décaler l'horaire en conservant l'heure Cycle 1 d'origine"
+            >
+              🕒 Décaler
+            </button>
+
+            {mergeTargets.length > 0 && (
+              <button
+                type="button"
+                className="fbtn"
+                style={{
+                  margin: 0,
+                  padding: '5px 9px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  color: isToolOpen('merge') ? '#fff' : '#6d28d9',
+                  background: isToolOpen('merge') ? '#7c3aed' : '#f3e8ff',
+                  border: '1px solid #d8b4fe',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+                onClick={() =>
+                  setOpenTool(isToolOpen('merge') ? null : { slotKey, mode: 'merge' })
+                }
+                title="Regrouper les inscrits sur un autre créneau (max 12 chars)"
+              >
+                🔗 Regrouper
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '5px 9px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                color: isToolOpen('cancel_weather') ? '#fff' : '#dc2626',
+                background: isToolOpen('cancel_weather') ? '#dc2626' : '#fff',
+                border: '1px solid #fca5a5',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                setCancelReason(
+                  x.ok === false ? 'Vent trop fort / rafales' : C2_WEATHER_REASONS[0]
+                );
+                setCancelRescheduled(effectiveChars);
+                setCancelLost(0);
+                setOpenTool(
+                  isToolOpen('cancel_weather')
+                    ? null
+                    : { slotKey, mode: 'cancel_weather' }
+                );
+              }}
+              title="Annuler la séance pour météo ou terrain (Vie 2)"
+            >
+              ⛔ Annuler (Vie 2)
+            </button>
+
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '5px 9px',
+                fontSize: '0.70rem',
+                fontWeight: 700,
+                color: '#64748b',
+                background: '#fff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                onCycle2Action(f, x, { type: 'reset_to_cycle1' });
+                setOpenTool(null);
+                setAdjustMenuSlotKey(null);
+              }}
+              title="Revenir à l'état Cycle 1 (sans décision tactique)"
+            >
+              ↩ Revenir C1
+            </button>
+          </div>
+        )}
+
+        {/* ALERTE DÉPASSEMENT CAPACITÉ MONITEUR(S) */}
         {isOverCapacity && (
           <div
             style={{
@@ -814,7 +1025,221 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               fontWeight: 800,
             }}
           >
-            ⚠️ Attention : {effectiveChars} chars engagés sur ce créneau, au-dessus de la limite de {MAX_CHARS_PER_INSTRUCTOR} chars max par moniteur.
+            ⚠️ Attention : {effectiveChars} chars engagés sur ce créneau, au-dessus du plafond de{' '}
+            {slotMaxChars} chars max
+            {secondaryInstructor
+              ? ` (${primaryInstructor} + ${secondaryInstructor})`
+              : ' (1 moniteur — utilisez « + Doubler » si un 2e moniteur encadre)'}
+            .
+          </div>
+        )}
+
+        {/* ALERTE PARC MATÉRIEL DISTINCTE MONOPLACES / BIPLACES (Q3 opt_b) */}
+        {(fleetAlerts.monoOver || fleetAlerts.biOver) && (
+          <div
+            style={{
+              padding: '6px 10px',
+              borderRadius: '6px',
+              background: '#fff7ed',
+              border: '1px solid #fdba74',
+              color: '#9a3412',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+            }}
+          >
+            ⚠️ Parc matériel dépassé :{' '}
+            {fleetAlerts.monoOver
+              ? `${effectiveMono} monoplaces réservés > ${fleetAlerts.parkMaxMono} max utilisables`
+              : ''}
+            {fleetAlerts.monoOver && fleetAlerts.biOver ? ' · ' : ''}
+            {fleetAlerts.biOver
+              ? `${effectiveBi} biplaces réservés > ${fleetAlerts.parkMaxBi} max utilisables`
+              : ''}
+            .
+          </div>
+        )}
+
+        {/* PANNEAU INLINE 0 : DOUBLEMENT 2E MONITEUR (NOTE 2 : Q1/Q2/Q3/Q5/Q6) */}
+        {isToolOpen('double_instructor') && !isReadOnly && onCycle2Action && (
+          <div
+            style={{
+              padding: '11px 12px',
+              borderRadius: '8px',
+              background: '#f5f3ff',
+              border: '1.5px solid #c4b5fd',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '9px',
+              fontSize: '0.76rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <strong style={{ color: '#5b21b6' }}>
+                👥 Créneau multi-moniteurs · Ajouter ou ajuster le 2e moniteur (1 clic) :
+              </strong>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {SECONDARY_INSTRUCTOR_PRESETS.map(preset => {
+                  const pSt = getMonitorBadgeStyle(preset.name);
+                  return (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => {
+                        onCycle2Action(f, x, {
+                          type: 'double_instructor',
+                          secondaryInstructor: preset.name,
+                          secondaryQualification: preset.qualification,
+                          secondaryMaxChars: preset.addChars,
+                          secondaryActualEnd: doubleEnd.trim() || undefined,
+                          secondaryFormula: doubleFormula.trim() || undefined,
+                        });
+                        setOpenTool(null);
+                      }}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: `1.5px solid ${pSt.bd}`,
+                        background: pSt.bg,
+                        color: pSt.fg,
+                        fontWeight: 900,
+                        fontSize: '0.73rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⚡ {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontWeight: 700, color: '#334155', fontSize: '0.70rem' }}>
+                Prénom 2e moniteur :
+                <input
+                  type="text"
+                  value={doubleName}
+                  onChange={e => setDoubleName(e.target.value)}
+                  placeholder="ex: Youenn, Katleen..."
+                  style={{ padding: '4px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '0.76rem', width: '130px' }}
+                />
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontWeight: 700, color: '#334155', fontSize: '0.70rem' }}>
+                Diplôme / Plafond :
+                <select
+                  value={doubleQual}
+                  onChange={e => {
+                    const q = e.target.value as 'CQP' | 'DE_BPJEPS';
+                    setDoubleQual(q);
+                    setDoubleAddChars(q === 'CQP' ? 8 : 12);
+                  }}
+                  style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '0.76rem', background: '#fff' }}
+                >
+                  <option value="CQP">CQP (+8 chars → 20 max)</option>
+                  <option value="DE_BPJEPS">DE / BPJEPS (+12 chars → 24 max)</option>
+                </select>
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontWeight: 700, color: '#334155', fontSize: '0.70rem' }}>
+                +Chars ajoutés :
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={doubleAddChars}
+                  onChange={e => setDoubleAddChars(Math.max(1, Math.min(12, Number(e.target.value) || 8)))}
+                  style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '0.76rem', width: '64px', fontWeight: 800 }}
+                />
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontWeight: 700, color: '#334155', fontSize: '0.70rem' }}>
+                Fin 2e groupe (optionnel, Q2) :
+                <input
+                  type="time"
+                  value={doubleEnd}
+                  onChange={e => setDoubleEnd(e.target.value)}
+                  style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '0.76rem' }}
+                />
+              </label>
+
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontWeight: 700, color: '#334155', fontSize: '0.70rem' }}>
+                Formule / note 2e groupe (Q2) :
+                <input
+                  type="text"
+                  value={doubleFormula}
+                  onChange={e => setDoubleFormula(e.target.value)}
+                  placeholder="ex: Perfectionnement, Stage..."
+                  style={{ padding: '4px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', fontSize: '0.76rem', width: '170px' }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#5b21b6' }}>
+                Plafond créneau combiné : {MAX_CHARS_PER_INSTRUCTOR} ({primaryInstructor}) + {doubleAddChars} ({doubleName || '2e'}) ={' '}
+                <strong>{MAX_CHARS_PER_INSTRUCTOR + doubleAddChars} chars max</strong>
+              </span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {secondaryInstructor && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCycle2Action(f, x, {
+                        type: 'double_instructor',
+                        secondaryInstructor: undefined,
+                      });
+                      setOpenTool(null);
+                    }}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #fca5a5',
+                      background: '#fee2e2',
+                      color: '#991b1b',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🗑️ Retirer {secondaryInstructor}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!doubleName.trim()}
+                  onClick={() => {
+                    if (!doubleName.trim()) return;
+                    onCycle2Action(f, x, {
+                      type: 'double_instructor',
+                      secondaryInstructor: doubleName.trim(),
+                      secondaryQualification: doubleQual,
+                      secondaryMaxChars: doubleAddChars,
+                      secondaryActualEnd: doubleEnd.trim() || undefined,
+                      secondaryFormula: doubleFormula.trim() || undefined,
+                    });
+                    setOpenTool(null);
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: doubleName.trim() ? '#7c3aed' : '#94a3b8',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: doubleName.trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  ✓ Valider doublement ({MAX_CHARS_PER_INSTRUCTOR + doubleAddChars} chars)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenTool(null)}
+                  style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -978,7 +1403,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <strong style={{ color: '#6d28d9' }}>
-                🔗 Regrouper ces {effectiveChars} char(s) sur un autre créneau de la journée (max {MAX_CHARS_PER_INSTRUCTOR} chars) :
+                🔗 Regrouper ces {effectiveChars} char(s) sur un autre créneau de la journée :
               </strong>
               <button
                 type="button"
@@ -1011,7 +1436,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  ➔ {tgt.label} ({effectiveChars} + {tgt.oChars} = {tgt.combined}/{MAX_CHARS_PER_INSTRUCTOR} chars{tgt.overMax ? ' ⚠️' : ''})
+                  ➔ {tgt.label} ({effectiveChars} + {tgt.oChars} = {tgt.combined}/{tgt.maxTargetChars} chars{tgt.overMax ? ' ⚠️' : ''})
                 </button>
               ))}
             </div>
@@ -1098,29 +1523,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             </div>
           </div>
         )}
-
-        {/* MENTION REPORT SMS VERS FUTUR OUTIL DE RÉSERVATION */}
-        {needsSmsManualNotice && (
-          <div
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              background: '#f8fafc',
-              border: '1px dashed #94a3b8',
-              color: '#475569',
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span>📲</span>
-            <span>
-              SMS clients : En attente de connexion avec le futur outil de réservation (prévenir les inscrits manuellement si besoin).
-            </span>
-          </div>
-        )}
       </div>
     );
   };
@@ -1197,18 +1599,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       </div>
     );
   };
-
-  const alerts: string[] = [];
-  if (!windList.length) {
-    alerts.push(
-      "Météo indisponible (hors ligne ou chargement en cours) : le vent n'est pas vérifié."
-    );
-  }
-  if (currentFocus.glob) {
-    alerts.push("Le vent provient d'un modèle global (indicatif).");
-  }
-  alerts.push('📡 Balise Winds Up Pentrez (Spot 66) : relais AROME HD Météo-France (1,3 km) actif sur la plage.');
-  alerts.push('📲 Automatisations SMS clients : en attente du futur outil de réservation en ligne.');
 
   return (
     <div id="tab2">
@@ -1505,16 +1895,88 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </span>
         </div>
 
-        <div className="note" style={{ marginTop: '10px', marginBottom: '12px', lineHeight: 1.4 }}>
-          {currentFocus.rng ? (
-            <>
-              💨 <b>Vent prévu sur les créneaux :</b> {currentFocus.rng}{' '}
-              {currentFocus.glob ? '(modèle global)' : '(AROME Météo-France)'}
-            </>
-          ) : (
-            'Pas de données de vent prévues sur cette plage horaire.'
+        <div className="note" style={{ marginTop: '10px', marginBottom: '10px', lineHeight: 1.4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            {currentFocus.rng ? (
+              <>
+                💨 <b>Vent prévu sur les créneaux :</b> {currentFocus.rng}{' '}
+                {currentFocus.glob ? '(modèle global)' : '(AROME Météo-France)'}
+              </>
+            ) : (
+              'Pas de données de vent prévues sur cette plage horaire.'
+            )}
+          </div>
+          {dayWindSectors.length > 0 && (
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+              {dayWindSectors.map(sec => (
+                <span
+                  key={sec.sector}
+                  title={sec.detail}
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    fontSize: '0.70rem',
+                    fontWeight: 800,
+                    background: sec.bg,
+                    color: sec.fg,
+                    border: `1px solid ${sec.bd}`,
+                  }}
+                >
+                  🧭 {sec.label}
+                </span>
+              ))}
+            </div>
           )}
         </div>
+
+        {hasVentDeTerre && (
+          <div
+            style={{
+              padding: '7px 11px',
+              borderRadius: '8px',
+              background: '#fff7ed',
+              border: '1.5px solid #fdba74',
+              color: '#9a3412',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+              marginBottom: '10px',
+            }}
+          >
+            <span>⚠️</span>
+            <span>
+              Vent de terre (secteur NE–ESE via Kervennec) : déventes et irrégularités possibles devant l&apos;école (verdict auto inchangé).
+            </span>
+          </div>
+        )}
+
+        {frontalSwellAdvisory && (
+          <div
+            style={{
+              padding: '7px 11px',
+              borderRadius: '8px',
+              background: '#eff6ff',
+              border: '1.5px solid #93c5fd',
+              color: '#1e40af',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+              marginBottom: '10px',
+            }}
+          >
+            <span>🌊</span>
+            <span>
+              Houle frontale ({frontalSwellAdvisory.dirComp} {frontalSwellAdvisory.maxHeightM.toFixed(1).replace('.', ',')} m
+              {frontalSwellAdvisory.periodS != null ? ` · ${frontalSwellAdvisory.periodS}s` : ''}) ≥ 1,5 m : prévoir une marge indicative de{' '}
+              <b>+10 à +15 cm</b> sur le seuil L ({settings.L.toFixed(2).replace('.', ',')} m ➔{' '}
+              {(settings.L - frontalSwellAdvisory.recommendedMarginCm / 100).toFixed(2).replace('.', ',')} m effectifs).
+            </span>
+          </div>
+        )}
 
         {/* Courbe de hauteur d'eau & plage praticable (identique Cycle 1) */}
         <CurveChart
@@ -1600,6 +2062,17 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
           const validatedKeySet = new Set(cycle1ValidatedSlots.map(item => item.slotKey));
           const hiddenSlotsCount = currentFocus.list.length - cycle1ValidatedSlots.length;
+          const anySlotNeedsSmsNotice = cycle1ValidatedSlots.some(({ valItem, slotKey }) => {
+            const effectiveBKey =
+              valItem && (bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)]?.length ?? 0) > 0
+                ? valItem.k
+                : slotKey;
+            const bChars = getSlotBookingsSummary(
+              bookingsMap[buildReservationKey(currentFocus.ds, effectiveBKey)] || []
+            ).totalChars;
+            const st = getEffectiveCycle2Status(valItem, bChars);
+            return st === 'shifted' || st === 'merged' || st === 'cancelled_weather';
+          });
 
           return (
             <>
@@ -1608,6 +2081,29 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 {hiddenSlotsCount > 0 ? ` / ${currentFocus.list.length}` : ''}) · Jauge max{' '}
                 {MAX_CHARS_PER_INSTRUCTOR} chars / moniteur
               </div>
+
+              {anySlotNeedsSmsNotice && (
+                <div
+                  style={{
+                    padding: '7px 11px',
+                    borderRadius: '8px',
+                    background: '#f8fafc',
+                    border: '1px dashed #94a3b8',
+                    color: '#475569',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <span>📲</span>
+                  <span>
+                    SMS clients : En attente de connexion avec le futur outil de réservation (prévenir les inscrits des créneaux modifiés manuellement si besoin).
+                  </span>
+                </div>
+              )}
 
               {cycle1ValidatedSlots.length > 0 ? (
                 <>
@@ -1718,6 +2214,14 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             windList={windList}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={onUpdateCustomSlots}
+            onCreateAndPublishSlot={
+              onCreateAndPublishCustomSlot
+                ? (ds, slot) => {
+                    onCreateAndPublishCustomSlot(ds, slot);
+                    setIsCustomSlotsOpen(false);
+                  }
+                : undefined
+            }
             defaultSlots={(() => {
               const pl = plan(cy, cm, cd, settings, tideW, first, last);
               return pl.full
@@ -1740,30 +2244,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           />
         )}
 
-        {/* Conditions détaillées vent, soleil, lune, surcote barométrique et PM/BM (identique Cycle 1) */}
-        {DW.P.length > 0 && (
-          <div style={{ marginTop: '12px' }}>
-            {DW.lvl === -1 ? (
-              <div className="m">💨 Vent indisponible (hors ligne ou au-delà de 16 jours)</div>
-            ) : (
-              <>
-                {DW.ws.map((x, i) => (
-                  <div key={`c2-dw-${i}`} className="m">
-                    💨 {lc(DW.P[i][0], cy, cm, cd)}–{lc(DW.P[i][1], cy, cm, cd)} :{' '}
-                    {wtxt(x) || 'pas de donnée'}
-                  </div>
-                ))}
-
-                {DW.ws.some(x => x && x.src === 'G') && (
-                  <div className="m">
-                    Au-delà d&apos;environ 2 jours, le vent vient d&apos;un modèle global (moins précis) : indicatif
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
         <div className="m" style={{ marginTop: '12px' }}>
           ☀ Lever {R.lev} · Coucher {R.cou} · lumière retenue {R.lum}
         </div>
@@ -1776,22 +2256,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             🌡 Basse pression : +{Math.round(Math.max(...ad) * 100)} cm ajoutés aux hauteurs d&apos;eau (correction automatique)
           </div>
         )}
-
-        <div className="m">
-          {EX.filter(p => p.t >= dayStartU && p.t < dayEndU)
-            .map(
-              p =>
-                (p.pm ? 'PM ' : 'BM ') +
-                lc(p.t, cy, cm, cd) +
-                ' ' +
-                (p.hd != null ? p.hd : p.h).toFixed(2).replace('.', ',') +
-                ' m'
-            )
-            .join('   ·   ')}
-        </div>
       </div>
 
-      {/* Tableau mensuel et courbe de marnage cliquable (identiques Cycle 1) */}
+      {/* Tableau mensuel et courbe de marnage cliquable */}
       <TableView
         year={year}
         month={month}
@@ -1814,32 +2281,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         />
       </div>
 
-      <div className="card">
-        <div className="fh">Alertes &amp; Conditions</div>
-        {alerts.map((al, idx) => (
-          <div key={`al-${idx}`} className="fal">
-            {al}
-          </div>
-        ))}
-      </div>
-
-      {/* Export valid days (100% digital, plus d'impression papier) */}
-      <div className="card">
-        <div className="fh">Export numérique du planning</div>
-        <div className="note">
-          L&apos;export CSV reprend les créneaux Cycle 1, horaires Cycle 2 ajustés et le nombre de chars engagés.
-        </div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button
-            className="fbtn"
-            type="button"
-            onClick={() => exportValidCsv(validations, MAX_CHARS_PER_INSTRUCTOR)}
-          >
-            📥 Exporter le planning Cycle 1 / Cycle 2 (CSV)
-          </button>
-        </div>
-      </div>
-
       {/* Minimum sessions setting */}
       <div className="card ctl">
         <label>
@@ -1854,25 +2295,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             }}
           />
         </label>
-      </div>
-
-      {/* Verdict rules explanation */}
-      <div className="card hyp">
-        <b>Règles du verdict &amp; Cycle 2</b>
-        <ul>
-          <li>
-            <b>Ouvrir</b> : au moins {settings.fmin} séances praticables avec un vent favorable (8 à 25 nds, rafales ≤ 35 nds) et aucune séance hors plage.
-          </li>
-          <li>
-            <b>Ouvrir avec réserves</b> : séances possibles mais moins de {settings.fmin} séances vent OK, ou rafales limites, ou météo incertaine.
-          </li>
-          <li>
-            <b>Ne pas rouler</b> : aucune séance complète, ou vent trop faible/fort sur tous les créneaux.
-          </li>
-          <li>
-            <b>Capacité moniteur</b> : maximum <b>{MAX_CHARS_PER_INSTRUCTOR} chars par moniteur</b> (1 monoplace = 1 char, 1 biplace = 1 char), et minimum <b>1 char inscrit</b> pour activer le Cycle 2.
-          </li>
-        </ul>
       </div>
 
       {activeBookingSlot && (
@@ -1895,6 +2317,14 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             );
           }}
           isReadOnly={isReadOnly}
+          maxChars={activeBookingSlot.maxChars}
+          parkMaxMono={settings.parkMaxMono}
+          parkMaxBi={settings.parkMaxBi}
+          primaryInstructor={activeBookingSlot.primaryInstructor}
+          secondaryInstructor={activeBookingSlot.secondaryInstructor}
+          secondaryQualification={activeBookingSlot.secondaryQualification}
+          secondaryActualEnd={activeBookingSlot.secondaryActualEnd}
+          secondaryFormula={activeBookingSlot.secondaryFormula}
         />
       )}
     </div>

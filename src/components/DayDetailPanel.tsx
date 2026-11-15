@@ -16,14 +16,12 @@ import {
   dayFocus,
   dayInfo,
   dayRow,
-  dayWind,
   lc,
   p2,
   plan,
   sw,
   toU,
   tdy,
-  wtxt,
 } from '../utils/tides';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
@@ -33,9 +31,13 @@ import {
   findMatchingValidationItem,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
+  getMonitorBadgeStyle,
   getSlotBookingsSummary,
+  getSlotFleetAlerts,
+  getSlotMaxCapacity,
   getValidationItemChars,
   hasCycle2Trigger,
+  stripReasonAccents,
 } from '../utils/cycleHelpers';
 import { CurveChart } from './CurveChart';
 import { CustomSlotsManager } from './CustomSlotsManager';
@@ -88,6 +90,9 @@ interface DayDetailPanelProps {
     slotEnd: string;
     isCustom?: boolean;
     customTitle?: string;
+    maxChars?: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
   }) => void;
   isReadOnly?: boolean;
 }
@@ -132,7 +137,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const pl = plan(y, m, d, settings, tideW, first, last);
   const SS = pl.full;
   const XS = pl.extra;
-  const DW = dayWind(y, m, d, settings, tideW, first, last, windList);
 
   const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState(false);
   const [inlineEdit, setInlineEdit] = useState<{
@@ -146,6 +150,12 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     slotStart: string;
     slotEnd: string;
     slotTitle?: string;
+    maxChars?: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
+    secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+    secondaryActualEnd?: string;
+    secondaryFormula?: string;
   } | null>(null);
   const [activeSlotReasonIdx, setActiveSlotReasonIdx] = useState<number | null>(null);
   const [customSlotReasonInput, setCustomSlotReasonInput] = useState('');
@@ -153,12 +163,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const availableNonPublishReasons = React.useMemo(() => {
     const base = [...DEFAULT_NON_PUBLISH_REASONS];
     const custom = settings.customNonPublishReasons || [];
-    const seen = new Set(base.map(r => r.toLowerCase()));
+    const seen = new Set(base.map(stripReasonAccents));
     const result: string[] = [...base];
     for (const c of custom) {
       const trimmed = c.trim();
-      if (trimmed && !seen.has(trimmed.toLowerCase())) {
-        seen.add(trimmed.toLowerCase());
+      const key = stripReasonAccents(trimmed);
+      if (trimmed && key !== 'ferme' && key !== 'fermee' && !seen.has(key)) {
+        seen.add(key);
         result.push(trimmed);
       }
     }
@@ -645,7 +656,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               : slotKey;
           const resKey = buildReservationKey(selectedDate, effectiveBookingKey);
           const slotBookings = bookingsMap[resKey] || [];
-          const bookingSummary = getSlotBookingsSummary(slotBookings);
+          const slotMaxChars = getSlotMaxCapacity(valItem);
+          const primaryInstructor = valItem?.instructor || valItem?.assignedPilot || 'Jérôme';
+          const secondaryInstructor = valItem?.secondaryInstructor;
+          const bookingSummary = getSlotBookingsSummary(slotBookings, slotMaxChars);
           const itemChars = getValidationItemChars(valItem);
           const effectiveChars =
             bookingSummary.totalChars > 0 ? bookingSummary.totalChars : itemChars.totalChars;
@@ -655,7 +669,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             bookingSummary.totalChars > 0 ? bookingSummary.biCount : itemChars.bi;
           const effectivePeople =
             bookingSummary.totalChars > 0 ? bookingSummary.totalPeople : itemChars.people;
-          const isOverCapacity = effectiveChars > MAX_CHARS_PER_INSTRUCTOR;
+          const isOverCapacity = effectiveChars > slotMaxChars;
+          const fleetAlerts = getSlotFleetAlerts(
+            effectiveMono,
+            effectiveBi,
+            settings.parkMaxMono,
+            settings.parkMaxBi
+          );
 
           const c1Status = getEffectiveCycle1Status(valItem);
           const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
@@ -824,7 +844,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                     >
                       <span>🚗</span>
                       <span>
-                        {effectiveChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+                        {effectiveChars} / {slotMaxChars} chars
                       </span>
                       {(effectiveMono > 0 || effectiveBi > 0) && (
                         <span style={{ fontWeight: 700, opacity: 0.85 }}>
@@ -833,23 +853,78 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       )}
                     </span>
 
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        background: '#f8fafc',
-                        border: '1px solid #cbd5e1',
-                        color: '#334155',
-                        padding: '2px 7px',
-                        borderRadius: '5px',
-                        fontSize: '0.68rem',
-                        fontWeight: 800,
-                      }}
-                    >
-                      <span>👨‍🏫</span>
-                      <span>Jérôme</span>
-                    </span>
+                    {(fleetAlerts.monoOver || fleetAlerts.biOver) && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          background: '#fef2f2',
+                          border: '1px solid #ef4444',
+                          color: '#991b1b',
+                          padding: '2px 7px',
+                          borderRadius: '5px',
+                          fontSize: '0.68rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        ⚠️ {fleetAlerts.monoOver ? `Mono ${effectiveMono}/${fleetAlerts.parkMaxMono}` : ''}
+                        {fleetAlerts.monoOver && fleetAlerts.biOver ? ' · ' : ''}
+                        {fleetAlerts.biOver ? `Bi ${effectiveBi}/${fleetAlerts.parkMaxBi}` : ''}
+                      </span>
+                    )}
+
+                    {(() => {
+                      const pStyle = getMonitorBadgeStyle(primaryInstructor);
+                      const sStyle = secondaryInstructor ? getMonitorBadgeStyle(secondaryInstructor) : null;
+                      return (
+                        <>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: pStyle.bg,
+                              border: `1px solid ${pStyle.bd}`,
+                              color: pStyle.fg,
+                              padding: '2px 7px',
+                              borderRadius: '5px',
+                              fontSize: '0.68rem',
+                              fontWeight: 800,
+                            }}
+                          >
+                            <span>👤</span>
+                            <span>{primaryInstructor}</span>
+                          </span>
+                          {secondaryInstructor && sStyle && (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: sStyle.bg,
+                                border: `1px solid ${sStyle.bd}`,
+                                color: sStyle.fg,
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                fontSize: '0.68rem',
+                                fontWeight: 800,
+                              }}
+                            >
+                              <span>👤</span>
+                              <span>
+                                {secondaryInstructor}
+                                {valItem?.secondaryQualification === 'CQP' ? ' (CQP)' : ''}
+                                {valItem?.secondaryActualEnd && valItem.secondaryActualEnd !== displayEnd
+                                  ? ` · fin ${valItem.secondaryActualEnd}`
+                                  : ''}
+                                {valItem?.secondaryFormula ? ` · ${valItem.secondaryFormula}` : ''}
+                              </span>
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </>
                 ) : c1Status === 'published' ? (
                   <>
@@ -920,7 +995,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         fontWeight: 800,
                       }}
                     >
-                      <span>Motif : {valItem?.nonPublishReason || 'Indisponibilité personnelle'}</span>
+                      <span>Motif : {valItem?.nonPublishReason || 'Impératif personnel'}</span>
                     </span>
                   </>
                 ) : c1Status === 'closed_no_bookings' ? (
@@ -1001,11 +1076,17 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         slotStart: startTimeStr,
                         slotEnd: endTimeStr,
                         slotTitle: x.title,
+                        maxChars: slotMaxChars,
+                        primaryInstructor,
+                        secondaryInstructor,
+                        secondaryQualification: valItem?.secondaryQualification,
+                        secondaryActualEnd: valItem?.secondaryActualEnd,
+                        secondaryFormula: valItem?.secondaryFormula,
                       })
                     }
                     title="Gérer les réservations et chars sur ce créneau (déclenche Cycle 2 dès 1 char)"
                   >
-                    👥 Inscriptions ({effectiveChars}/{MAX_CHARS_PER_INSTRUCTOR})
+                    👥 Inscriptions ({effectiveChars}/{slotMaxChars})
                   </button>
 
                   {!isReadOnly && !isPast && onSetSlotCycle1Action && !inCycle2 && (
@@ -1153,6 +1234,9 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           slotEnd: displayEnd,
                           isCustom: x.isCustom,
                           customTitle: x.title,
+                          maxChars: slotMaxChars,
+                          primaryInstructor,
+                          secondaryInstructor,
                         })
                       }
                       title="Saisir le REX terrain (chars sortis, météo réelle, annulation)"
@@ -1543,6 +1627,14 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                   );
                 }}
                 isReadOnly={isReadOnly || isPast}
+                maxChars={activeBookingSlot.maxChars}
+                parkMaxMono={settings.parkMaxMono}
+                parkMaxBi={settings.parkMaxBi}
+                primaryInstructor={activeBookingSlot.primaryInstructor}
+                secondaryInstructor={activeBookingSlot.secondaryInstructor}
+                secondaryQualification={activeBookingSlot.secondaryQualification}
+                secondaryActualEnd={activeBookingSlot.secondaryActualEnd}
+                secondaryFormula={activeBookingSlot.secondaryFormula}
               />
             )}
           </>
@@ -1566,30 +1658,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         isReadOnly={isReadOnly || isPast}
       />
 
-      {/* Wind conditions */}
-      {DW.P.length > 0 && (
-        <>
-          {DW.lvl === -1 ? (
-            <div className="m">💨 Vent indisponible (hors ligne ou au-delà de 16 jours)</div>
-          ) : (
-            <>
-              {DW.ws.map((x, i) => (
-                <div key={`dw-${i}`} className="m">
-                  💨 {lc(DW.P[i][0], y, m, d)}–{lc(DW.P[i][1], y, m, d)} :{' '}
-                  {wtxt(x) || 'pas de donnée'}
-                </div>
-              ))}
-
-              {DW.ws.some(x => x && x.src === 'G') && (
-                <div className="m">
-                  Au-delà d'environ 2 jours, le vent vient d'un modèle global (moins précis) : indicatif
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-
       <div className="m" style={{ marginTop: '12px' }}>
         ☀ Lever {R.lev} · Coucher {R.cou} · lumière retenue {R.lum}
       </div>
@@ -1602,19 +1670,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           🌡 Basse pression : +{Math.round(Math.max(...ad) * 100)} cm ajoutés aux hauteurs d'eau (correction automatique)
         </div>
       )}
-
-      <div className="m">
-        {EX.filter(p => p.t >= a && p.t < z)
-          .map(
-            p =>
-              (p.pm ? 'PM ' : 'BM ') +
-              lc(p.t, y, m, d) +
-              ' ' +
-              (p.hd != null ? p.hd : p.h).toFixed(2).replace('.', ',') +
-              ' m'
-          )
-          .join('   ·   ')}
-      </div>
     </div>
   );
 };

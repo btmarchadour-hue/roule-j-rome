@@ -1,7 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { MAX_CHARS_PER_INSTRUCTOR } from '../types';
 import { AgendaBookingItem } from '../utils/firebaseSync';
-import { getSlotBookingsSummary, parseBookingItemCounts } from '../utils/cycleHelpers';
+import {
+  DEFAULT_PARK_MAX_BI,
+  DEFAULT_PARK_MAX_MONO,
+  getMonitorBadgeStyle,
+  getSlotBookingsSummary,
+  getSlotFleetAlerts,
+  parseBookingItemCounts,
+} from '../utils/cycleHelpers';
 
 interface SlotBookingsModalProps {
   isOpen: boolean;
@@ -14,6 +21,14 @@ interface SlotBookingsModalProps {
   bookings: AgendaBookingItem[];
   onSaveBookings: (slotKey: string, bookings: AgendaBookingItem[]) => void;
   isReadOnly?: boolean;
+  maxChars?: number;
+  parkMaxMono?: number;
+  parkMaxBi?: number;
+  primaryInstructor?: string;
+  secondaryInstructor?: string;
+  secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+  secondaryActualEnd?: string;
+  secondaryFormula?: string;
 }
 
 export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
@@ -27,6 +42,14 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
   bookings,
   onSaveBookings,
   isReadOnly = false,
+  maxChars = MAX_CHARS_PER_INSTRUCTOR,
+  parkMaxMono = DEFAULT_PARK_MAX_MONO,
+  parkMaxBi = DEFAULT_PARK_MAX_BI,
+  primaryInstructor = 'Jérôme',
+  secondaryInstructor,
+  secondaryQualification,
+  secondaryActualEnd,
+  secondaryFormula,
 }) => {
   const [draftList, setDraftList] = useState<AgendaBookingItem[]>(() =>
     bookings.map(b => {
@@ -40,13 +63,17 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
     })
   );
 
-  const summary = useMemo(() => getSlotBookingsSummary(draftList), [draftList]);
+  const summary = useMemo(() => getSlotBookingsSummary(draftList, maxChars), [draftList, maxChars]);
+  const fleetAlerts = useMemo(
+    () => getSlotFleetAlerts(summary.monoCount, summary.biCount, parkMaxMono, parkMaxBi),
+    [summary.monoCount, summary.biCount, parkMaxMono, parkMaxBi]
+  );
 
   if (!isOpen) return null;
 
   const handleAddRow = () => {
     if (isReadOnly) return;
-    const remaining = Math.max(0, MAX_CHARS_PER_INSTRUCTOR - summary.totalChars);
+    const remaining = Math.max(0, maxChars - summary.totalChars);
     const defaultMono = remaining > 0 ? 1 : 0;
     const newRow: AgendaBookingItem = {
       id: `bk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -99,7 +126,9 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
     onClose();
   };
 
-  const pct = Math.min(100, Math.round((summary.totalChars / MAX_CHARS_PER_INSTRUCTOR) * 100));
+  const pct = Math.min(100, Math.round((summary.totalChars / Math.max(1, maxChars)) * 100));
+  const primaryStyle = getMonitorBadgeStyle(primaryInstructor);
+  const secondaryStyle = secondaryInstructor ? getMonitorBadgeStyle(secondaryInstructor) : null;
 
   return (
     <div
@@ -150,6 +179,39 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
             <h3 style={{ margin: '2px 0 0', fontSize: '1.05rem', fontWeight: 900, color: '#fff' }}>
               {dateStr} · {slotStart} – {slotEnd} {slotTitle ? `(${slotTitle})` : ''}
             </h3>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px', alignItems: 'center' }}>
+              <span
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: '5px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  background: primaryStyle.bg,
+                  color: primaryStyle.fg,
+                  border: `1px solid ${primaryStyle.bd}`,
+                }}
+              >
+                👤 {primaryInstructor}
+              </span>
+              {secondaryInstructor && secondaryStyle && (
+                <span
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    background: secondaryStyle.bg,
+                    color: secondaryStyle.fg,
+                    border: `1px solid ${secondaryStyle.bd}`,
+                  }}
+                >
+                  👤 {secondaryInstructor}
+                  {secondaryQualification === 'CQP' ? ' (CQP)' : ''}
+                  {secondaryActualEnd && secondaryActualEnd !== slotEnd ? ` · fin ${secondaryActualEnd}` : ''}
+                  {secondaryFormula ? ` · ${secondaryFormula}` : ''}
+                </span>
+              )}
+            </div>
           </div>
           <button
             type="button"
@@ -167,11 +229,16 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
           </button>
         </div>
 
-        {/* Jauge Chars / Moniteur */}
+        {/* Jauge Chars / Moniteur(s) & Parc Matériel */}
         <div
           style={{
             padding: '12px 18px',
-            background: summary.isOverCapacity ? '#fef2f2' : summary.totalChars > 0 ? '#f0fdf4' : '#f8fafc',
+            background:
+              summary.isOverCapacity || fleetAlerts.monoOver || fleetAlerts.biOver
+                ? '#fef2f2'
+                : summary.totalChars > 0
+                ? '#f0fdf4'
+                : '#f8fafc',
             borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             flexWrap: 'wrap',
@@ -191,13 +258,13 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
                 color: '#fff',
               }}
             >
-              {summary.totalChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+              {summary.totalChars} / {maxChars} chars
             </span>
             <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
-              ({summary.monoCount} mono + {summary.biCount} bi · {summary.totalPeople} pilote{summary.totalPeople > 1 ? 's' : ''}/pers.)
+              ({summary.monoCount}/{fleetAlerts.parkMaxMono} mono + {summary.biCount}/{fleetAlerts.parkMaxBi} bi · {summary.totalPeople} pilote{summary.totalPeople > 1 ? 's' : ''}/pers.)
             </span>
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
-              {pct}% de jauge moniteur
+              {pct}% d&apos;encadrement{secondaryInstructor ? ' (2 moniteurs)' : ''}
             </span>
           </div>
 
@@ -208,7 +275,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
           </div>
         </div>
 
-        {summary.isOverCapacity && (
+        {(summary.isOverCapacity || fleetAlerts.monoOver || fleetAlerts.biOver) && (
           <div
             style={{
               padding: '8px 18px',
@@ -217,9 +284,29 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
               fontSize: '0.76rem',
               fontWeight: 800,
               borderBottom: '1px solid #fca5a5',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '3px',
             }}
           >
-            ⚠️ Attention : la règle école fixe la limite à {MAX_CHARS_PER_INSTRUCTOR} chars maximum par moniteur (actuellement {summary.totalChars} chars).
+            {summary.isOverCapacity && (
+              <div>
+                ⚠️ Encadrement dépassé : {summary.totalChars} chars engagés pour un plafond de {maxChars} chars
+                {secondaryInstructor
+                  ? ` (${primaryInstructor} + ${secondaryInstructor})`
+                  : ' (1 moniteur — doublez le créneau si besoin)'}.
+              </div>
+            )}
+            {fleetAlerts.monoOver && (
+              <div>
+                ⚠️ Parc Monoplaces dépassé : {summary.monoCount} monoplaces réservés pour {fleetAlerts.parkMaxMono} utilisables au club.
+              </div>
+            )}
+            {fleetAlerts.biOver && (
+              <div>
+                ⚠️ Parc Biplaces dépassé : {summary.biCount} biplaces réservés pour {fleetAlerts.parkMaxBi} utilisables au club.
+              </div>
+            )}
           </div>
         )}
 

@@ -15,12 +15,193 @@ export interface SlotBookingCounts {
 
 export const DEFAULT_NON_PUBLISH_REASONS = [
   'Réunion / Administratif',
+  'Impératif personnel',
   'Vacances / Congés',
   'Formation / Stage',
   'Entretien / Maintenance matériel',
-  'Indisponibilité personnelle',
   'Événement / Compétition',
 ] as const;
+
+export function stripReasonAccents(str: string): string {
+  return (str || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+export function normalizeClosureReason(raw?: string): {
+  key: string;
+  label: string;
+  isGenericClosed: boolean;
+} {
+  const cleaned = (raw || '').trim();
+  const norm = stripReasonAccents(cleaned);
+
+  if (
+    !norm ||
+    norm === 'ferme' ||
+    norm === 'fermee' ||
+    norm === 'fermeture' ||
+    norm === 'cloture' ||
+    norm === 'cloturee' ||
+    norm === 'non publie' ||
+    norm === 'a ne pas publier'
+  ) {
+    return {
+      key: 'ferme',
+      label: 'Fermé (raison à préciser)',
+      isGenericClosed: true,
+    };
+  }
+
+  if (
+    norm === 'indisponibilite moniteur / materiel' ||
+    norm === 'indisponibilite moniteur' ||
+    norm === 'indisponibilite'
+  ) {
+    return {
+      key: 'indisponibilite moniteur / materiel',
+      label: 'Indisponibilité moniteur / matériel',
+      isGenericClosed: true,
+    };
+  }
+
+  if (norm === 'reunion' || norm === 'reunions' || norm === 'reunion / administratif') {
+    return {
+      key: 'reunion / administratif',
+      label: 'Réunion / Administratif',
+      isGenericClosed: false,
+    };
+  }
+
+  if (
+    norm === 'imperatif personnel' ||
+    norm === 'imperatif' ||
+    norm === 'indisponibilite personnelle' ||
+    norm === 'raison personnelle' ||
+    norm === 'perso'
+  ) {
+    return {
+      key: 'imperatif personnel',
+      label: 'Impératif personnel',
+      isGenericClosed: false,
+    };
+  }
+
+  if (norm === 'vacance' || norm === 'vacances' || norm === 'conge' || norm === 'conges' || norm === 'vacances / conges') {
+    return {
+      key: 'vacances / conges',
+      label: 'Vacances / Congés',
+      isGenericClosed: false,
+    };
+  }
+
+  if (norm === 'formation' || norm === 'stage' || norm === 'formation / stage') {
+    return {
+      key: 'formation / stage',
+      label: 'Formation / Stage',
+      isGenericClosed: false,
+    };
+  }
+
+  if (norm === 'entretien' || norm === 'maintenance' || norm === 'entretien / maintenance materiel') {
+    return {
+      key: 'entretien / maintenance materiel',
+      label: 'Entretien / Maintenance matériel',
+      isGenericClosed: false,
+    };
+  }
+
+  if (norm === 'evenement' || norm === 'competition' || norm === 'evenement / competition') {
+    return {
+      key: 'evenement / competition',
+      label: 'Événement / Compétition',
+      isGenericClosed: false,
+    };
+  }
+
+  // Fusionne automatiquement toute variante de casse/accent (ex: "Fermé travaux" vs "Ferme travaux")
+  const canonicalDisplay = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  return {
+    key: norm,
+    label: canonicalDisplay,
+    isGenericClosed: false,
+  };
+}
+
+export const DEFAULT_PARK_MAX_MONO = 16;
+export const DEFAULT_PARK_MAX_BI = 6;
+
+export interface SecondaryInstructorPreset {
+  name: string;
+  qualification: 'CQP' | 'DE_BPJEPS';
+  addChars: number;
+  label: string;
+}
+
+export const SECONDARY_INSTRUCTOR_PRESETS: SecondaryInstructorPreset[] = [
+  {
+    name: 'Youenn',
+    qualification: 'CQP',
+    addChars: 8,
+    label: 'Youenn · CQP (+8 chars → 20 max)',
+  },
+  {
+    name: 'Katleen',
+    qualification: 'DE_BPJEPS',
+    addChars: 12,
+    label: 'Katleen · Diplômée (+12 chars → 24 max)',
+  },
+];
+
+export interface MonitorBadgeStyle {
+  bg: string;
+  fg: string;
+  bd: string;
+}
+
+export function getMonitorBadgeStyle(name: string): MonitorBadgeStyle {
+  const n = (name || '').toLowerCase();
+  if (n.includes('jérôme') || n.includes('jerome')) {
+    return { bg: '#eff6ff', fg: '#1d4ed8', bd: '#93c5fd' };
+  }
+  if (n.includes('youenn')) {
+    return { bg: '#ecfdf5', fg: '#047857', bd: '#6ee7b7' };
+  }
+  if (n.includes('katleen')) {
+    return { bg: '#f5f3ff', fg: '#6d28d9', bd: '#c4b5fd' };
+  }
+  return { bg: '#fff7ed', fg: '#c2410c', bd: '#fdba74' };
+}
+
+export function getSlotMaxCapacity(item?: Pick<ValidationItem, 'secondaryInstructor' | 'secondaryMaxChars' | 'secondaryQualification'>): number {
+  if (!item?.secondaryInstructor?.trim()) return MAX_CHARS_PER_INSTRUCTOR;
+  const extra =
+    item.secondaryMaxChars != null
+      ? Math.max(1, Number(item.secondaryMaxChars) || 0)
+      : item.secondaryQualification === 'CQP'
+      ? 8
+      : MAX_CHARS_PER_INSTRUCTOR;
+  return MAX_CHARS_PER_INSTRUCTOR + extra;
+}
+
+export function getSlotFleetAlerts(
+  mono: number,
+  bi: number,
+  parkMaxMono: number = DEFAULT_PARK_MAX_MONO,
+  parkMaxBi: number = DEFAULT_PARK_MAX_BI
+): { monoOver: boolean; biOver: boolean; parkMaxMono: number; parkMaxBi: number } {
+  const safeMaxMono = Math.max(1, Number(parkMaxMono) || DEFAULT_PARK_MAX_MONO);
+  const safeMaxBi = Math.max(1, Number(parkMaxBi) || DEFAULT_PARK_MAX_BI);
+  return {
+    monoOver: mono > safeMaxMono,
+    biOver: bi > safeMaxBi,
+    parkMaxMono: safeMaxMono,
+    parkMaxBi: safeMaxBi,
+  };
+}
 
 export type Cycle1SlotAction = 'publish' | 'not_published' | 'close_no_bookings' | 'reset';
 
@@ -55,6 +236,14 @@ export type Cycle2ActionPayload =
       biCount?: number;
       pilotsCount?: number;
       instructor?: string;
+    }
+  | {
+      type: 'double_instructor';
+      secondaryInstructor?: string;
+      secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+      secondaryMaxChars?: number;
+      secondaryActualEnd?: string;
+      secondaryFormula?: string;
     }
   | {
       type: 'reset_to_cycle1';
@@ -104,7 +293,10 @@ export function parseBookingItemCounts(item: AgendaBookingItem): {
   return { mono, bi, chars, people };
 }
 
-export function getSlotBookingsSummary(bookings: AgendaBookingItem[] = []): SlotBookingCounts {
+export function getSlotBookingsSummary(
+  bookings: AgendaBookingItem[] = [],
+  maxCapacity: number = MAX_CHARS_PER_INSTRUCTOR
+): SlotBookingCounts {
   let monoCount = 0;
   let biCount = 0;
   let totalPeople = 0;
@@ -123,7 +315,7 @@ export function getSlotBookingsSummary(bookings: AgendaBookingItem[] = []): Slot
     biCount,
     totalChars,
     totalPeople,
-    isOverCapacity: totalChars > MAX_CHARS_PER_INSTRUCTOR,
+    isOverCapacity: totalChars > maxCapacity,
   };
 }
 

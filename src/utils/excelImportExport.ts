@@ -152,7 +152,21 @@ export function normalizeCancellationReason(val: any): CancellationReason | unde
   if (c.includes('orage') || c.includes('submersion') || c.includes('pluie') || c.includes('foudre') || c.includes('extreme')) {
     return 'weather_extreme';
   }
-  if (c.includes('moniteur') || c.includes('materiel') || c.includes('casse') || c.includes('panne') || c.includes('malade') || c.includes('instructor')) {
+  if (
+    c.includes('moniteur') ||
+    c.includes('materiel') ||
+    c.includes('casse') ||
+    c.includes('panne') ||
+    c.includes('malade') ||
+    c.includes('instructor') ||
+    c.includes('reunion') ||
+    c.includes('vacance') ||
+    c.includes('conge') ||
+    c.includes('imperatif') ||
+    c.includes('formation') ||
+    c.includes('administratif') ||
+    c.includes('ferme')
+  ) {
     return 'instructor';
   }
 

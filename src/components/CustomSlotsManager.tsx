@@ -8,6 +8,7 @@ interface CustomSlotsManagerProps {
   windList: WindPoint[];
   customSlotsMap: CustomSlotsMap;
   onUpdateCustomSlots: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
+  onCreateAndPublishSlot?: (dateStr: string, slot: CustomSlot) => void;
   defaultSlots?: { start: string; end: string; title?: string }[];
   isOpenControlled?: boolean;
   onToggleOpen?: () => void;
@@ -20,6 +21,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   windList,
   customSlotsMap,
   onUpdateCustomSlots: rawOnUpdateCustomSlots,
+  onCreateAndPublishSlot,
   defaultSlots = [],
   isOpenControlled,
   onToggleOpen,
@@ -460,19 +462,51 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
               </label>
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {!editingSlotId && onCreateAndPublishSlot && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!startInput || !endInput) return;
+                    const newSlot: CustomSlot = {
+                      id: `cs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                      start: startInput,
+                      end: endInput,
+                      title: titleInput.trim() || 'Séance sur mesure',
+                      places: placesInput > 0 ? placesInput : 1,
+                    };
+                    onCreateAndPublishSlot(dateStr, newSlot);
+                    setTitleInput('Séance sur mesure');
+                  }}
+                  style={{
+                    background: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '7px 14px',
+                    fontWeight: 800,
+                    fontSize: '0.74rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                  }}
+                  title="Créer ce créneau sur mesure et le publier directement dans Cycle 2"
+                >
+                  ⚡ Créer &amp; publier directement (C2)
+                </button>
+              )}
+
               <button
                 type="submit"
                 style={{
-                  background: '#0284c7',
-                  color: '#fff',
-                  border: 'none',
+                  background: !editingSlotId && onCreateAndPublishSlot ? '#ffffff' : '#0284c7',
+                  color: !editingSlotId && onCreateAndPublishSlot ? '#0369a1' : '#fff',
+                  border: !editingSlotId && onCreateAndPublishSlot ? '1.5px solid #0284c7' : 'none',
                   borderRadius: '6px',
                   padding: '7px 14px',
                   fontWeight: 800,
                   fontSize: '0.74rem',
                   cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
+                  boxShadow: !editingSlotId && onCreateAndPublishSlot ? 'none' : '0 2px 4px rgba(2, 132, 199, 0.25)',
                 }}
               >
                 {editingSlotId ? '✓ Valider la modification' : '+ Ajouter ce créneau'}

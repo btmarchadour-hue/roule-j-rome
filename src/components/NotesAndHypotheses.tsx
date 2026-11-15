@@ -217,6 +217,30 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         },
       },
       {
+        id: 'note-ergonomie-terrain-doublons',
+        category: 'amelioration',
+        categoryLabel: 'Ergonomie & Revue',
+        categoryColor: '#0284c7',
+        icon: '📱',
+        title: 'Note de Revue · Audit Ergonomie Terrain & Doublons Restants (Vue Jérôme)',
+        subtitle: '5 doublons repérés et 5 pistes d’amélioration mobile/terrain à passer en revue ensemble',
+        summary:
+          'Synthèse structurée en se mettant à la place de Jérôme sur la plage : doublons visuels restants (PM/BM ×3, doubles exports CSV, textes vent, alertes répétées, réglage fmin isolé) et points pratiques sur smartphone (scroll jusqu’aux créneaux, boutons tactiles, noms inscrits visibles, créneau express).',
+        keyPoints: [
+          'Doublons identifiés : carte Marées du jour vs chips vs bas de page ; blocs Export/Marnage dupliqués en C1/C2 ; textes vent & bandeau SMS répétés.',
+          'Ergonomie mobile : accès direct aux séances & balise live sans scroller 10 écrans, et noms des clients visibles sans ouvrir chaque popup.',
+          'Actions terrain : menu « Ajuster » pour éviter les faux clics sur Annuler, regroupement des réglages (fmin), et création express de créneau sur mesure.',
+          'Grille d’arbitrage intégrée (et exportable Word / PDF) pour cocher ensemble chaque décision (« Go / Adapter / Garder »).',
+        ],
+        docUrl: '/note_ergonomie_terrain_doublons.html',
+        docBtnLabel: '📱 Ouvrir la Note Audit Ergonomie & Doublons (A4 / Word)',
+        statusBadge: {
+          label: 'Appliquée · Prête à archiver',
+          bg: '#dcfce7',
+          color: '#166534',
+        },
+      },
+      {
         id: 'note-axes-amelioration',
         category: 'amelioration',
         categoryLabel: 'Axes d’Amélioration',
@@ -259,9 +283,9 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         docUrl: '/note_creneaux_simultanes_ete.html',
         docBtnLabel: '☀️ Ouvrir le QCM Été Multi-Moniteurs (Word / HTML / PDF)',
         statusBadge: {
-          label: 'À arbitrer avec Jérôme',
-          bg: '#fef3c7',
-          color: '#92400e',
+          label: '100 % Appliquée',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {
@@ -284,9 +308,9 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({ onLock }
         docUrl: '/note_orientation_plage_lestrevet.html',
         docBtnLabel: '🗺️ Ouvrir le Questionnaire Remplissable (Word / HTML / PDF)',
         statusBadge: {
-          label: 'À arbitrer avec Jérôme',
-          bg: '#fef3c7',
-          color: '#92400e',
+          label: '100 % Appliquée',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {

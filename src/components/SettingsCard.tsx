@@ -264,6 +264,28 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           />
         </label>
 
+        <label title="Nombre maximal de chars monoplaces du club pouvant rouler simultanément sur un créneau multi-moniteurs">
+          Parc Matériel : Max Monoplaces simultanés
+          <input
+            type="text"
+            inputMode="decimal"
+            disabled={isLocked}
+            value={settings.parkMaxMono ?? 16}
+            onChange={e => onUpdateSettings({ parkMaxMono: Math.max(1, Math.round(parseNum(e.target.value, 16))) })}
+          />
+        </label>
+
+        <label title="Nombre maximal de chars biplaces du club pouvant rouler simultanément sur un créneau multi-moniteurs">
+          Parc Matériel : Max Biplaces simultanés
+          <input
+            type="text"
+            inputMode="decimal"
+            disabled={isLocked}
+            value={settings.parkMaxBi ?? 6}
+            onChange={e => onUpdateSettings({ parkMaxBi: Math.max(1, Math.round(parseNum(e.target.value, 6))) })}
+          />
+        </label>
+
         <label className="ck">
           <input
             type="checkbox"

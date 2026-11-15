@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { CancellationReason, MAX_CHARS_PER_INSTRUCTOR, SlotObservation } from '../types';
 import { CANCELLATION_REASONS_INFO, upsertSlotObservation, deleteSlotObservation } from '../utils/statisticsEngine';
-import { saveObservationToFirestore, deleteObservationFromFirestore } from '../utils/firebaseSync';
+import { getActiveInstructor, saveObservationToFirestore, deleteObservationFromFirestore } from '../utils/firebaseSync';
+import {
+  DEFAULT_NON_PUBLISH_REASONS,
+  getMonitorBadgeStyle,
+  stripReasonAccents,
+} from '../utils/cycleHelpers';
 
 interface SlotObservationModalProps {
   isOpen: boolean;
@@ -20,6 +25,11 @@ interface SlotObservationModalProps {
   initialObservation?: SlotObservation | null;
   onSaveSuccess: (updatedList: SlotObservation[]) => void;
   isReadOnly?: boolean;
+  maxChars?: number;
+  primaryInstructor?: string;
+  secondaryInstructor?: string;
+  currentUserName?: string;
+  customNonPublishReasons?: string[];
 }
 
 export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
@@ -39,6 +49,11 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   initialObservation,
   onSaveSuccess,
   isReadOnly = false,
+  maxChars = MAX_CHARS_PER_INSTRUCTOR,
+  primaryInstructor = 'Jérôme',
+  secondaryInstructor,
+  currentUserName,
+  customNonPublishReasons,
 }) => {
   if (!isOpen) return null;
 
@@ -195,6 +210,8 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       monoCount: status === 'realized' && monoCount !== '' ? Number(monoCount) : undefined,
       biCount: status === 'realized' && biCount !== '' ? Number(biCount) : undefined,
       notes: notes.trim() || undefined,
+      author: initialObservation?.author || currentUserName || getActiveInstructor() || 'Jérôme',
+      secondaryInstructor: secondaryInstructor || initialObservation?.secondaryInstructor || undefined,
       createdAt: initialObservation?.createdAt || Date.now(),
     };
 
@@ -265,6 +282,29 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
             <h3 style={{ margin: '2px 0 0', fontSize: '1.05rem', fontWeight: 900, color: '#fff' }}>
               {dateStr} · {slotStart} – {slotEnd} {slotTitle ? `(${slotTitle})` : ''}
             </h3>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '5px', alignItems: 'center' }}>
+              {(() => {
+                const pStyle = getMonitorBadgeStyle(primaryInstructor);
+                const sStyle = secondaryInstructor ? getMonitorBadgeStyle(secondaryInstructor) : null;
+                return (
+                  <>
+                    <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 800, background: pStyle.bg, color: pStyle.fg, border: `1px solid ${pStyle.bd}` }}>
+                      👤 {primaryInstructor}
+                    </span>
+                    {secondaryInstructor && sStyle && (
+                      <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 800, background: sStyle.bg, color: sStyle.fg, border: `1px solid ${sStyle.bd}` }}>
+                        👤 {secondaryInstructor} (2e moniteur)
+                      </span>
+                    )}
+                    {currentUserName && (
+                      <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600 }}>
+                        · Saisi par {currentUserName}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <button
             type="button"
@@ -400,15 +440,66 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 })}
               </div>
 
+              {cancellationReason === 'instructor' && (
+                <div style={{ marginTop: '10px', background: '#fff', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px 10px' }}>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#991b1b', marginBottom: '6px' }}>
+                    Préciser le motif de fermeture / indisponibilité (pour les statistiques) :
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                    {(() => {
+                      const base: string[] = [...DEFAULT_NON_PUBLISH_REASONS];
+                      const seen = new Set(base.map(stripReasonAccents));
+                      for (const c of customNonPublishReasons || []) {
+                        const t = c.trim();
+                        const k = stripReasonAccents(t);
+                        if (t && k !== 'ferme' && !seen.has(k)) {
+                          seen.add(k);
+                          base.push(t);
+                        }
+                      }
+                      return base.map(reasonLabel => {
+                        const active =
+                          stripReasonAccents(cancellationNote) === stripReasonAccents(reasonLabel);
+                        return (
+                          <button
+                            key={reasonLabel}
+                            type="button"
+                            onClick={() => setCancellationNote(reasonLabel)}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: active ? '1.5px solid #991b1b' : '1px solid #cbd5e1',
+                              background: active ? '#fee2e2' : '#f8fafc',
+                              color: active ? '#7f1d1d' : '#334155',
+                              fontSize: '0.70rem',
+                              fontWeight: active ? 800 : 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {reasonLabel}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginTop: '10px' }}>
                 <label style={{ fontSize: '0.68rem', fontWeight: 700, color: '#7f1d1d', display: 'block', marginBottom: '2px' }}>
-                  Précisions / Observations du moniteur (facultatif) :
+                  {cancellationReason === 'instructor'
+                    ? 'Détail / Motif libre de fermeture :'
+                    : 'Précisions / Observations du moniteur (facultatif) :'}
                 </label>
                 <input
                   type="text"
                   value={cancellationNote}
                   onChange={e => setCancellationNote(e.target.value)}
-                  placeholder="ex: Rafales à 36 nds, sable trop mou près du ruisseau..."
+                  placeholder={
+                    cancellationReason === 'instructor'
+                      ? 'ex: Réunion mairie, impératif personnel, vacances...'
+                      : 'ex: Rafales à 36 nds, sable trop mou près du ruisseau...'
+                  }
                   style={{
                     width: '100%',
                     padding: '6px 8px',
@@ -690,10 +781,10 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 </div>
               </div>
 
-              {/* 3. Bilan chars & participants (Règle 12 chars max par moniteur) */}
+              {/* 3. Bilan chars & participants (Règle dynamique 12 chars/moniteur ou 20/24 si doublé) */}
               {(() => {
                 const liveChars = (Number(monoCount) || 0) + (Number(biCount) || 0);
-                const overLimit = liveChars > MAX_CHARS_PER_INSTRUCTOR;
+                const overLimit = liveChars > maxChars;
                 const noCharsYet = liveChars <= 0 && (participantsCount === '' || Number(participantsCount) <= 0);
                 return (
                   <div
@@ -706,7 +797,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
                       <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
-                        🏎️ Chars Sortis (Max {MAX_CHARS_PER_INSTRUCTOR} / moniteur) &amp; Personnes
+                        🏎️ Chars Sortis (Plafond {maxChars} chars{secondaryInstructor ? ` · ${primaryInstructor} + ${secondaryInstructor}` : ' / moniteur'}) &amp; Personnes
                       </div>
                       <span
                         style={{
@@ -718,7 +809,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                           borderRadius: '4px',
                         }}
                       >
-                        {liveChars} / {MAX_CHARS_PER_INSTRUCTOR} chars
+                        {liveChars} / {maxChars} chars
                       </span>
                     </div>
 
@@ -800,7 +891,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
                     {overLimit && (
                       <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#991b1b', background: '#fee2e2', padding: '6px 10px', borderRadius: '6px', fontWeight: 700 }}>
-                        ⚠️ Règle école : pas plus de {MAX_CHARS_PER_INSTRUCTOR} chars par moniteur ({liveChars} chars saisis — nécessite 2 moniteurs ou ajustement).
+                        ⚠️ Règle école : pas plus de {maxChars} chars sur ce créneau ({liveChars} chars saisis — vérifiez l&apos;encadrement ou le doublement moniteur).
                       </div>
                     )}
 

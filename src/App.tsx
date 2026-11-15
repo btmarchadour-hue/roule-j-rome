@@ -71,8 +71,10 @@ import {
   Cycle2ActionPayload,
   getEffectiveCycle1Status,
   getSlotBookingsSummary,
+  getSlotMaxCapacity,
   getValidationItemChars,
   hasCycle2Trigger,
+  stripReasonAccents,
 } from './utils/cycleHelpers';
 
 const WK = 'cvWind2';
@@ -106,6 +108,8 @@ const defaultSettings: AppSettings = {
   vmax: 25,
   gmax: 35,
   fmin: 3,
+  parkMaxMono: 16,
+  parkMaxBi: 6,
 };
 
 export const App: React.FC = () => {
@@ -256,6 +260,7 @@ export const App: React.FC = () => {
 
   const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(() => getActiveUser());
   const isReadOnly = Boolean(currentUser?.isReadOnly);
+  const isAdminLocked = isReadOnly || currentUser?.role === 'moniteur';
 
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
@@ -310,14 +315,15 @@ export const App: React.FC = () => {
 
   const handleAddCustomNonPublishReason = useCallback((rawReason: string) => {
     const trimmed = rawReason.trim();
-    if (!trimmed) return;
+    const normKey = stripReasonAccents(trimmed);
+    if (!trimmed || normKey === 'ferme' || normKey === 'fermee' || normKey === 'fermeture') return;
     if (currentUser?.isReadOnly || currentUser?.role === 'moniteur') {
       notifySync('🔒 Mode Contrôle : ajout de raison verrouillé');
       return;
     }
     setSettings(prev => {
       const existing = prev.customNonPublishReasons || [];
-      if (existing.some(r => r.toLowerCase() === trimmed.toLowerCase())) {
+      if (existing.some(r => stripReasonAccents(r) === normKey)) {
         return prev;
       }
       const nextReasons = [...existing, trimmed];
@@ -409,8 +415,8 @@ export const App: React.FC = () => {
 
   const handleUpdateCustomSlots = useCallback(
     (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => {
-      if (currentUser?.isReadOnly) {
-        notifySync('🔒 Mode Contrôle : créneaux sur mesure verrouillés');
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : créneaux sur mesure verrouillés');
         return;
       }
       if (dateStr < tdy()) {
@@ -467,7 +473,7 @@ export const App: React.FC = () => {
           const keepClosedVie1 =
             !keepNotPublished && matchedExisting?.cycle1Status === 'closed_no_bookings';
           const notPubReason =
-            matchedExisting?.nonPublishReason || 'Indisponibilité personnelle';
+            matchedExisting?.nonPublishReason || 'Impératif personnel';
 
           syncedItems.push({
             k: slotKey,
@@ -545,6 +551,9 @@ export const App: React.FC = () => {
     slotEnd: string;
     isCustom?: boolean;
     customTitle?: string;
+    maxChars?: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
   } | null>(null);
 
   const [isUserModalOpen, setIsUserModalOpen] = useState<boolean>(false);
@@ -793,7 +802,7 @@ export const App: React.FC = () => {
         }
 
         if (mode === 'not_published') {
-          const cleanReason = nonPublishReason?.trim() || 'Indisponibilité personnelle';
+          const cleanReason = nonPublishReason?.trim() || 'Impératif personnel';
           return {
             k: slotKey,
             s: startTimeStr,
@@ -859,8 +868,8 @@ export const App: React.FC = () => {
     mode: 'all' | 'wind_only' | 'not_published' = 'all',
     nonPublishReason?: string
   ) => {
-    if (isReadOnly) {
-      notifySync('🔒 Mode Lecture seule actif : publications réservées aux administrateurs');
+    if (isAdminLocked) {
+      notifySync('🔒 Mode Moniteur / Lecture seule : publications réservées aux administrateurs');
       return;
     }
     if (ds < tdy()) {
@@ -881,8 +890,8 @@ export const App: React.FC = () => {
   // CYCLE 1 : Publication groupée sur une semaine ou un mois entier (préserve jours passés, jours "À ne pas publier" et Cycle 2)
   const handleValidateDateRange = useCallback(
     (dates: string[], scopeLabel: string) => {
-      if (isReadOnly) {
-        notifySync('🔒 Mode Lecture seule actif : publications réservées aux administrateurs');
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Lecture seule : publications réservées aux administrateurs');
         return;
       }
       const todayStr = tdy();
@@ -961,12 +970,12 @@ export const App: React.FC = () => {
         `📅 ${scopeLabel} : ${batchEntries.length} journée${batchEntries.length > 1 ? 's' : ''} publiée${batchEntries.length > 1 ? 's' : ''} en Cycle 1`
       );
     },
-    [isReadOnly, settings, tideW, first, last, windList, customSlotsMap, validations, buildCycle1DayRecord]
+    [isAdminLocked, settings, tideW, first, last, windList, customSlotsMap, validations, buildCycle1DayRecord]
   );
 
   const handleClearValidation = useCallback((ds: string) => {
-    if (isReadOnly) {
-      notifySync('🔒 Mode Lecture seule : réinitialisation verrouillée');
+    if (isAdminLocked) {
+      notifySync('🔒 Mode Moniteur / Lecture seule : réinitialisation verrouillée');
       return;
     }
     if (ds < tdy()) {
@@ -974,13 +983,13 @@ export const App: React.FC = () => {
       return;
     }
     persistDayValidation(ds, null);
-  }, [isReadOnly, persistDayValidation]);
+  }, [isAdminLocked, persistDayValidation]);
 
   // CYCLE 1 : Action unitaire sur un créneau (à publier, à ne pas publier + motif, clôturer Vie 1, réinitialiser)
   const handleSetSlotCycle1Action = useCallback(
     (record: DayFocusData, slot: SessionItem, action: Cycle1SlotAction, reason?: string) => {
-      if (isReadOnly) {
-        notifySync('🔒 Mode Contrôle : actions Cycle 1 verrouillées');
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : actions Cycle 1 verrouillées');
         return;
       }
       const ds = record.ds;
@@ -999,7 +1008,7 @@ export const App: React.FC = () => {
       if (action === 'reset') {
         nextItems = currentItems.filter(it => it.k !== slotKey);
       } else {
-        const cleanReason = reason?.trim() || 'Indisponibilité personnelle';
+        const cleanReason = reason?.trim() || 'Impératif personnel';
         const nextItem: ValidationItem =
           action === 'not_published'
             ? {
@@ -1082,7 +1091,51 @@ export const App: React.FC = () => {
             }
       );
     },
-    [isReadOnly, validations, persistDayValidation]
+    [isAdminLocked, validations, persistDayValidation]
+  );
+
+  // Requalification rétroactive de motifs de fermeture / non-publication depuis Statistiques
+  const handleReclassifyAbsentValidations = useCallback(
+    (targets: { ds: string; slotKey: string }[], newReason: string) => {
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Lecture seule : modification des motifs verrouillée');
+        return;
+      }
+      const cleanReason = newReason.trim();
+      if (!cleanReason || targets.length === 0) return;
+
+      const byDate = new Map<string, Set<string>>();
+      targets.forEach(t => {
+        if (!byDate.has(t.ds)) byDate.set(t.ds, new Set());
+        byDate.get(t.ds)!.add(t.slotKey);
+      });
+
+      byDate.forEach((slotKeys, ds) => {
+        const rec = validations[ds];
+        if (!rec || !rec.items) return;
+        let changed = false;
+        const nextItems = rec.items.map(it => {
+          if (!slotKeys.has(it.k)) return it;
+          changed = true;
+          return {
+            ...it,
+            nonPublishReason: cleanReason,
+            rejectReason:
+              it.cycle1Status === 'not_published'
+                ? `Non publié (C1) : ${cleanReason}`
+                : it.rejectReason,
+          };
+        });
+        if (changed) {
+          persistDayValidation(ds, {
+            ...rec,
+            ts: Date.now(),
+            items: nextItems,
+          });
+        }
+      });
+    },
+    [validations, persistDayValidation, isAdminLocked]
   );
 
   // PASSAGE AUTOMATIQUE CYCLE 1 -> CYCLE 2 DÈS LA 1ÈRE INSCRIPTION
@@ -1094,8 +1147,8 @@ export const App: React.FC = () => {
       slotEnd: string,
       bookings: AgendaBookingItem[]
     ) => {
-      if (isReadOnly) {
-        notifySync('🔒 Mode Contrôle : réservations verrouillées');
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : réservations en consultation seule');
         return;
       }
       const resKey = buildReservationKey(ds, slotKey);
@@ -1104,10 +1157,11 @@ export const App: React.FC = () => {
         console.warn('Erreur Firestore réservations:', err)
       );
 
-      const summary = getSlotBookingsSummary(bookings);
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
       const existingItem = currentItems.find(it => it.k === slotKey);
+      const slotMaxChars = getSlotMaxCapacity(existingItem);
+      const summary = getSlotBookingsSummary(bookings, slotMaxChars);
       const instructor = getActiveInstructor() || 'Jérôme';
 
       let nextItem: ValidationItem;
@@ -1138,16 +1192,16 @@ export const App: React.FC = () => {
             existingItem?.status === 'rejected' && nextC2Status === 'cancelled_weather'
               ? existingItem.rejectReason
               : undefined,
-          assignedPilot: instructor,
-          instructor,
+          assignedPilot: existingItem?.assignedPilot || instructor,
+          instructor: existingItem?.instructor || instructor,
           charsCount: summary.totalChars,
           monoCount: summary.monoCount,
           biCount: summary.biCount,
           pilotsCount: summary.totalPeople,
         };
         notifySync(
-          summary.totalChars > MAX_CHARS_PER_INSTRUCTOR
-            ? `⚠️ ${summary.totalChars}/${MAX_CHARS_PER_INSTRUCTOR} chars inscrits (dépassement moniteur) · Cycle 2 actif`
+          summary.totalChars > slotMaxChars
+            ? `⚠️ ${summary.totalChars}/${slotMaxChars} chars inscrits (dépassement encadrement) · Cycle 2 actif`
             : `⚡ ${summary.totalChars} char(s) inscrit(s) · Créneau basculé en Cycle 2`
         );
       } else {
@@ -1196,14 +1250,14 @@ export const App: React.FC = () => {
         items: nextItems,
       });
     },
-    [isReadOnly, validations, persistDayValidation]
+    [isAdminLocked, validations, persistDayValidation]
   );
 
   // CYCLE 2 : Décisions tactiques terrain (Maintenir, Décaler, Regrouper, Annuler Vie 2, REX)
   const handleCycle2Action = useCallback(
     (record: DayFocusData, slot: SessionItem, payload: Cycle2ActionPayload) => {
-      if (isReadOnly) {
-        notifySync('🔒 Mode Contrôle : pilotage Cycle 2 verrouillé');
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : pilotage Cycle 2 réservé aux administrateurs');
         return;
       }
 
@@ -1342,10 +1396,52 @@ export const App: React.FC = () => {
             ? nextItems.map(it => (it.k === payload.targetSlotKey ? updatedTarget : it))
             : [...nextItems, updatedTarget];
 
+          const targetMaxChars = getSlotMaxCapacity(existingTarget);
           notifySync(
-            combChars > MAX_CHARS_PER_INSTRUCTOR
-              ? `⚠️ Regroupé (${combChars}/${MAX_CHARS_PER_INSTRUCTOR} chars : dépassement moniteur)`
-              : `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${MAX_CHARS_PER_INSTRUCTOR} chars)`
+            combChars > targetMaxChars
+              ? `⚠️ Regroupé (${combChars}/${targetMaxChars} chars : dépassement encadrement)`
+              : `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${targetMaxChars} chars)`
+          );
+        }
+      } else if (payload.type === 'double_instructor') {
+        const cleanSec = payload.secondaryInstructor?.trim();
+        if (!cleanSec) {
+          updatedSource = {
+            ...baseItem,
+            publishedStart: baseItem.publishedStart || startTimeStr,
+            publishedEnd: baseItem.publishedEnd || endTimeStr,
+            secondaryInstructor: undefined,
+            secondaryQualification: undefined,
+            secondaryMaxChars: undefined,
+            secondaryActualEnd: undefined,
+            secondaryFormula: undefined,
+          };
+          notifySync(`👤 2e moniteur retiré · Plafond rétabli à ${MAX_CHARS_PER_INSTRUCTOR} chars`);
+        } else {
+          const addChars =
+            payload.secondaryMaxChars != null
+              ? Math.max(1, Number(payload.secondaryMaxChars) || 8)
+              : payload.secondaryQualification === 'CQP'
+              ? 8
+              : MAX_CHARS_PER_INSTRUCTOR;
+          const totalCap = MAX_CHARS_PER_INSTRUCTOR + addChars;
+          updatedSource = {
+            ...baseItem,
+            publishedStart: baseItem.publishedStart || startTimeStr,
+            publishedEnd: baseItem.publishedEnd || endTimeStr,
+            cycle1Status: 'published',
+            cycle2Status: baseItem.cycle2Status || (existingCounts.totalChars > 0 ? 'confirmed' : 'awaiting_booking'),
+            status: 'valid',
+            assignedPilot: baseItem.assignedPilot || instructor,
+            instructor: baseItem.instructor || instructor,
+            secondaryInstructor: cleanSec,
+            secondaryQualification: payload.secondaryQualification || (addChars <= 8 ? 'CQP' : 'DE_BPJEPS'),
+            secondaryMaxChars: addChars,
+            secondaryActualEnd: payload.secondaryActualEnd?.trim() || undefined,
+            secondaryFormula: payload.secondaryFormula?.trim() || undefined,
+          };
+          notifySync(
+            `👥 Créneau doublé : ${updatedSource.instructor} + ${cleanSec} (${totalCap} chars max)`
           );
         }
       } else if (payload.type === 'cancel_weather') {
@@ -1390,7 +1486,93 @@ export const App: React.FC = () => {
         items: nextItems,
       });
     },
-    [isReadOnly, validations, bookingsMap, persistDayValidation]
+    [isAdminLocked, validations, bookingsMap, persistDayValidation]
+  );
+
+  const handleCreateAndPublishCustomSlot = useCallback(
+    (dateStr: string, newSlot: CustomSlot) => {
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : créneaux sur mesure verrouillés');
+        return;
+      }
+      if (dateStr < tdy()) {
+        notifySync('🔒 Journée passée : les créneaux ne sont plus modifiables');
+        return;
+      }
+
+      const existingCfg = customSlotsMap[dateStr] || { replaceDefault: false, slots: [] };
+      const updatedSlots = [...existingCfg.slots, newSlot].sort((a, b) =>
+        a.start.localeCompare(b.start)
+      );
+      const nextCustomMap: CustomSlotsMap = {
+        ...customSlotsMap,
+        [dateStr]: { replaceDefault: existingCfg.replaceDefault, slots: updatedSlots },
+      };
+      setCustomSlotsMap(nextCustomMap);
+      try {
+        localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
+      } catch {
+        // ignore
+      }
+      saveCustomSlotsToFirestore(dateStr, {
+        replaceDefault: existingCfg.replaceDefault,
+        slots: updatedSlots,
+      }).catch(err => console.warn('Erreur Firestore custom slots express:', err));
+
+      const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
+      const [yy, mm0, dd] = dateStr.split('-').map(Number);
+      const [sh, sm] = newSlot.start.split(':').map(Number);
+      const targetSlotKey = `${Math.round(toU(yy, mm0 - 1, dd, sh * 60 + sm))}c`;
+      const targetSession =
+        nextFocus.list.find(x => kOf(x) === targetSlotKey) ||
+        nextFocus.list.find(
+          x =>
+            x.isCustom &&
+            lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d) === newSlot.start.replace(':', 'h')
+        );
+
+      if (targetSession) {
+        const sKey = kOf(targetSession);
+        const startStr = lc(targetSession.a, nextFocus.y, nextFocus.m, nextFocus.d);
+        const endStr = lc(targetSession.b, nextFocus.y, nextFocus.m, nextFocus.d);
+        const existingRecord = validations[dateStr];
+        const prevItems = existingRecord?.items || [];
+
+        const publishedItem: ValidationItem = {
+          k: sKey,
+          s: startStr,
+          e: endStr,
+          publishedStart: startStr,
+          publishedEnd: endStr,
+          opt: targetSession.opt,
+          over: targetSession.over,
+          lim: targetSession.lim,
+          customTitle: targetSession.customTitle || newSlot.title,
+          status: 'valid',
+          cycle1Status: 'published',
+          cycle2Status: 'awaiting_booking',
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        };
+
+        const nextItems = prevItems.some(it => it.k === sKey)
+          ? prevItems.map(it => (it.k === sKey ? { ...it, ...publishedItem } : it))
+          : [...prevItems, publishedItem];
+
+        persistDayValidation(dateStr, {
+          sig: sigOf(nextFocus),
+          ts: Date.now(),
+          k: nextFocus.k,
+          cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+          items: nextItems,
+        });
+      }
+
+      notifySync('⚡ Créneau sur mesure créé et publié en Cycle 2 !');
+    },
+    [currentUser, customSlotsMap, settings, tideW, first, last, windList, validations, persistDayValidation]
   );
 
   const handleOpenCycle2FromCalendar = useCallback((ds: string) => {
@@ -1499,7 +1681,7 @@ export const App: React.FC = () => {
               validations={validations}
               bookingsMap={bookingsMap}
               customSlotsMap={customSlotsMap}
-              isReadOnly={isReadOnly}
+              isReadOnly={isAdminLocked}
               onValidateRange={handleValidateDateRange}
             />
 
@@ -1533,7 +1715,7 @@ export const App: React.FC = () => {
               canNextDay={selectedDate < maxDs}
               onOpenCycle2={handleOpenCycle2FromCalendar}
               onOpenObservationModal={slot => setActiveObservationSlot(slot)}
-              isReadOnly={isReadOnly}
+              isReadOnly={isAdminLocked}
             />
 
             <TableView
@@ -1652,11 +1834,12 @@ export const App: React.FC = () => {
             onSelectDayInCalendar={handleSelectDayInCalendar}
             customSlotsMap={customSlotsMap}
             onUpdateCustomSlots={handleUpdateCustomSlots}
+            onCreateAndPublishCustomSlot={handleCreateAndPublishCustomSlot}
             onValidateDay={handleValidateDay}
             onClearValidation={handleClearValidation}
             onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
-            isReadOnly={isReadOnly}
+            isReadOnly={isAdminLocked}
             focusDate={focusDate}
             onFocusDateChange={handleFocusDateChange}
           />
@@ -1672,6 +1855,9 @@ export const App: React.FC = () => {
               validations={validations}
               customSlotsMap={customSlotsMap}
               selectedDate={selectedDate}
+              isReadOnly={isAdminLocked}
+              onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
+              onReclassifyValidationReason={handleReclassifyAbsentValidations}
             />
           </div>
         )}
@@ -1692,7 +1878,7 @@ export const App: React.FC = () => {
         {/* Tab 5: Base de données Clients & CRM */}
         {activeTab === 5 && (
           <div id="tab5">
-            <ClientsTab isReadOnly={isReadOnly} />
+            <ClientsTab isReadOnly={isAdminLocked} />
           </div>
         )}
 
@@ -1818,6 +2004,11 @@ export const App: React.FC = () => {
             slotEnd={activeObservationSlot.slotEnd}
             slotTitle={activeObservationSlot.customTitle}
             isCustom={activeObservationSlot.isCustom}
+            maxChars={activeObservationSlot.maxChars}
+            primaryInstructor={activeObservationSlot.primaryInstructor}
+            secondaryInstructor={activeObservationSlot.secondaryInstructor}
+            currentUserName={currentUser?.username}
+            customNonPublishReasons={settings.customNonPublishReasons}
             onSaveSuccess={() => {
               setActiveObservationSlot(null);
             }}
