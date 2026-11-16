@@ -30,6 +30,14 @@ interface SlotObservationModalProps {
   secondaryInstructor?: string;
   currentUserName?: string;
   customNonPublishReasons?: string[];
+  defaultStatus?: 'realized' | 'cancelled';
+  defaultCancellationReason?: CancellationReason;
+  defaultCancellationNote?: string;
+  defaultMonoCount?: number;
+  defaultBiCount?: number;
+  defaultParticipantsCount?: number;
+  defaultBookedParticipantsCount?: number;
+  forceIntent?: boolean;
 }
 
 export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
@@ -54,15 +62,27 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   secondaryInstructor,
   currentUserName,
   customNonPublishReasons,
+  defaultStatus,
+  defaultCancellationReason,
+  defaultCancellationNote,
+  defaultMonoCount,
+  defaultBiCount,
+  defaultParticipantsCount,
+  defaultBookedParticipantsCount,
+  forceIntent = false,
 }) => {
   const [status, setStatus] = useState<'realized' | 'cancelled'>(
-    initialObservation?.status || 'realized'
+    forceIntent && defaultStatus
+      ? defaultStatus
+      : initialObservation?.status || defaultStatus || 'realized'
   );
   const [cancellationReason, setCancellationReason] = useState<CancellationReason>(
-    initialObservation?.cancellationReason || 'wind_low'
+    forceIntent && defaultCancellationReason
+      ? defaultCancellationReason
+      : initialObservation?.cancellationReason || defaultCancellationReason || 'wind_low'
   );
   const [cancellationNote, setCancellationNote] = useState<string>(
-    initialObservation?.cancellationNote || ''
+    initialObservation?.cancellationNote || defaultCancellationNote || ''
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -102,17 +122,23 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
   // Bilan participants
   const [participantsCount, setParticipantsCount] = useState<number | ''>(
-    initialObservation?.participantsCount ?? ''
+    initialObservation?.participantsCount ??
+      (defaultParticipantsCount && defaultParticipantsCount > 0 ? defaultParticipantsCount : '')
   );
   const [monoCount, setMonoCount] = useState<number | ''>(
-    initialObservation?.monoCount ?? ''
+    initialObservation?.monoCount ??
+      (defaultMonoCount && defaultMonoCount > 0 ? defaultMonoCount : '')
   );
   const [biCount, setBiCount] = useState<number | ''>(
-    initialObservation?.biCount ?? ''
+    initialObservation?.biCount ??
+      (defaultBiCount && defaultBiCount > 0 ? defaultBiCount : '')
   );
   // Demande Jérôme : Inscrits sur séances annulées & replacés / perdus
   const [bookedParticipantsCount, setBookedParticipantsCount] = useState<number | ''>(
-    initialObservation?.bookedParticipantsCount ?? ''
+    initialObservation?.bookedParticipantsCount ??
+      (defaultBookedParticipantsCount && defaultBookedParticipantsCount > 0
+        ? defaultBookedParticipantsCount
+        : '')
   );
   const [rescheduledCount, setRescheduledCount] = useState<number | ''>(
     initialObservation?.rescheduledCount ?? ''
@@ -324,6 +350,21 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSave} style={{ overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {!isReadOnly && (
+            <div
+              style={{
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                color: '#0369a1',
+                padding: '7px 10px',
+                borderRadius: '7px',
+                fontSize: '0.73rem',
+                fontWeight: 700,
+              }}
+            >
+              ⚡ Écran unique : la décision (Séance effectuée / Annulée Vie 2 / Pas d&apos;inscrit) et le REX sont enregistrés en une seule fois.
+            </div>
+          )}
           {errorMessage && (
             <div
               style={{
@@ -999,7 +1040,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
                   }}
                 >
-                  💾 Enregistrer l'observation
+                  ✓ Valider &amp; Enregistrer le REX
                 </button>
               )}
             </div>

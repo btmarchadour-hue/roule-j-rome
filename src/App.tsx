@@ -42,6 +42,7 @@ import {
 import {
   ActiveUserSession,
   AppSettings,
+  CancellationReason,
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
@@ -577,6 +578,14 @@ export const App: React.FC = () => {
     maxChars?: number;
     primaryInstructor?: string;
     secondaryInstructor?: string;
+    defaultStatus?: 'realized' | 'cancelled';
+    defaultCancellationReason?: CancellationReason;
+    defaultCancellationNote?: string;
+    defaultMonoCount?: number;
+    defaultBiCount?: number;
+    defaultParticipantsCount?: number;
+    defaultBookedParticipantsCount?: number;
+    forceIntent?: boolean;
   } | null>(null);
 
   const [isUserModalOpen, setIsUserModalOpen] = useState<boolean>(false);
@@ -838,11 +847,14 @@ export const App: React.FC = () => {
               status: 'rejected',
               rejectReason: "Pas d'inscrits (Vie 2)",
               cycle1Status: 'closed_no_bookings',
+              nonPublishReason: undefined,
               cycle2Status: undefined,
               monoCount: 0,
               biCount: 0,
               charsCount: 0,
               pilotsCount: 0,
+              rescheduledChars: 0,
+              lostChars: 0,
             };
           }
           if (reason === 'instructor') {
@@ -1271,7 +1283,7 @@ export const App: React.FC = () => {
                 lim: slot.lim,
                 customTitle: slot.customTitle,
                 status: 'rejected',
-                rejectReason: "Faute d'inscrits (Vie 1)",
+                rejectReason: "Pas d'inscrits (Vie 2)",
                 cycle1Status: 'closed_no_bookings',
                 nonPublishReason: undefined,
                 cycle2Status: undefined,
@@ -1500,7 +1512,10 @@ export const App: React.FC = () => {
         bookingsMap[buildReservationKey(ds, existingItem ? existingItem.k : slotKey)] || []
       ).totalChars;
       const isValidatedC1 =
-        (existingItem && getEffectiveCycle1Status(existingItem) === 'published') ||
+        (existingItem &&
+          (getEffectiveCycle1Status(existingItem) === 'published' ||
+            (payload.type === 'reset_to_cycle1' &&
+              getEffectiveCycle1Status(existingItem) === 'closed_no_bookings'))) ||
         hasCycle2Trigger(existingItem, bookingChars);
       if (!isValidatedC1) {
         notifySync('⛔ Créneau non validé en Cycle 1 : publiez-le d’abord dans Validation (C1)');
@@ -1545,9 +1560,13 @@ export const App: React.FC = () => {
           pilotsCount: payload.pilotsCount ?? (mono + bi > 0 ? mono + bi * 2 : existingCounts.people),
         };
         notifySync(
-          chars > 0
-            ? `⚡ Cycle 2 · Maintenu (${chars} char${chars > 1 ? 's' : ''})`
-            : '⚡ Cycle 2 · Créneau maintenu'
+          payload.type === 'realized'
+            ? chars > 0
+              ? `🏁 Séance effectuée (${chars} char${chars > 1 ? 's' : ''})`
+              : '🏁 Séance marquée effectuée'
+            : chars > 0
+            ? `⚡ Cycle 2 · Confirmé (${chars} char${chars > 1 ? 's' : ''})`
+            : '⚡ Cycle 2 · Créneau confirmé'
         );
       } else if (payload.type === 'shift') {
         const isZeroShift = payload.shiftMinutes === 0;
@@ -1674,18 +1693,40 @@ export const App: React.FC = () => {
           );
         }
       } else if (payload.type === 'cancel_weather') {
-        updatedSource = {
-          ...baseItem,
-          publishedStart: baseItem.publishedStart || startTimeStr,
-          publishedEnd: baseItem.publishedEnd || endTimeStr,
-          cycle1Status: 'published',
-          cycle2Status: 'cancelled_weather',
-          status: 'rejected',
-          rejectReason: payload.reason,
-          rescheduledChars: payload.rescheduledChars ?? 0,
-          lostChars: payload.lostChars ?? 0,
-        };
-        notifySync(`⛔ Annulé météo (Vie 2) : ${payload.reason}`);
+        const isNoBookings =
+          payload.reason.toLowerCase().includes('pas d\'inscrit') ||
+          payload.reason.toLowerCase().includes('0 réservation');
+        if (isNoBookings) {
+          updatedSource = {
+            ...baseItem,
+            publishedStart: baseItem.publishedStart || startTimeStr,
+            publishedEnd: baseItem.publishedEnd || endTimeStr,
+            cycle1Status: 'closed_no_bookings',
+            cycle2Status: undefined,
+            status: 'rejected',
+            rejectReason: "Pas d'inscrits (Vie 2)",
+            monoCount: 0,
+            biCount: 0,
+            charsCount: 0,
+            pilotsCount: 0,
+            rescheduledChars: 0,
+            lostChars: 0,
+          };
+          notifySync("⛔ Annulé (Vie 2) : Pas d'inscrits");
+        } else {
+          updatedSource = {
+            ...baseItem,
+            publishedStart: baseItem.publishedStart || startTimeStr,
+            publishedEnd: baseItem.publishedEnd || endTimeStr,
+            cycle1Status: 'published',
+            cycle2Status: 'cancelled_weather',
+            status: 'rejected',
+            rejectReason: payload.reason,
+            rescheduledChars: payload.rescheduledChars ?? 0,
+            lostChars: payload.lostChars ?? 0,
+          };
+          notifySync(`⛔ Annulé météo (Vie 2) : ${payload.reason}`);
+        }
       } else if (payload.type === 'reset_to_cycle1') {
         updatedSource = {
           ...baseItem,
@@ -2258,10 +2299,29 @@ export const App: React.FC = () => {
             )}
             currentUserName={currentUser?.username}
             customNonPublishReasons={settings.customNonPublishReasons}
+            defaultStatus={activeObservationSlot.defaultStatus}
+            defaultCancellationReason={activeObservationSlot.defaultCancellationReason}
+            defaultCancellationNote={activeObservationSlot.defaultCancellationNote}
+            defaultMonoCount={activeObservationSlot.defaultMonoCount}
+            defaultBiCount={activeObservationSlot.defaultBiCount}
+            defaultParticipantsCount={activeObservationSlot.defaultParticipantsCount}
+            defaultBookedParticipantsCount={activeObservationSlot.defaultBookedParticipantsCount}
+            forceIntent={activeObservationSlot.forceIntent}
             onSaveSuccess={(updated, savedObs) => {
               setObservations(updated);
               if (savedObs) {
                 syncValidationFromRex(savedObs);
+                if (savedObs.status === 'realized') {
+                  notifySync(
+                    savedObs.charsCount
+                      ? `🏁 Séance effectuée (${savedObs.charsCount} char${savedObs.charsCount > 1 ? 's' : ''}) & REX enregistrés`
+                      : '🏁 Séance effectuée & REX enregistrés'
+                  );
+                } else if (savedObs.cancellationReason === 'no_clients') {
+                  notifySync("⛔ Annulé (Vie 2) : Pas d'inscrits & REX enregistrés");
+                } else {
+                  notifySync('⛔ Annulé (Vie 2) & REX enregistrés');
+                }
               }
               setActiveObservationSlot(null);
             }}

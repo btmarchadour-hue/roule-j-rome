@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AppSettings,
+  CancellationReason,
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
@@ -95,6 +96,14 @@ interface DayDetailPanelProps {
     maxChars?: number;
     primaryInstructor?: string;
     secondaryInstructor?: string;
+    defaultStatus?: 'realized' | 'cancelled';
+    defaultCancellationReason?: CancellationReason;
+    defaultCancellationNote?: string;
+    defaultMonoCount?: number;
+    defaultBiCount?: number;
+    defaultParticipantsCount?: number;
+    defaultBookedParticipantsCount?: number;
+    forceIntent?: boolean;
   }) => void;
   observations?: SlotObservation[];
   isReadOnly?: boolean;
@@ -1206,27 +1215,45 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         🚫 À ne pas publier
                       </button>
 
-                      {c1Status === 'published' && (
-                        <button
-                          type="button"
-                          className="fbtn"
-                          style={{
-                            margin: 0,
-                            padding: '5px 8px',
-                            fontSize: '0.70rem',
-                            fontWeight: 700,
-                            color: '#475569',
-                            background: '#fff',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                          }}
-                          onClick={() => onSetSlotCycle1Action(focusData, sessItem, 'close_no_bookings')}
-                          title="Clôturer faute d'inscrits (Vie 1)"
-                        >
-                          🌑 Vie 1
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: c1Status === 'closed_no_bookings' ? '#fff' : '#b91c1c',
+                          background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fef2f2',
+                          border: '1.5px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                          if (onOpenObservationModal) {
+                            onOpenObservationModal({
+                              dateStr: selectedDate,
+                              slotKey,
+                              slotStart: displayStart,
+                              slotEnd: displayEnd,
+                              isCustom: x.isCustom,
+                              customTitle: x.title,
+                              maxChars: slotMaxChars,
+                              primaryInstructor,
+                              secondaryInstructor,
+                              forceIntent: true,
+                              defaultStatus: 'cancelled',
+                              defaultCancellationReason: 'no_clients',
+                            });
+                          } else {
+                            onSetSlotCycle1Action(focusData, sessItem, 'close_no_bookings');
+                          }
+                        }}
+                        title="Annuler faute d'inscrits (Vie 2) et compléter le REX en un seul écran"
+                      >
+                        👥 Pas d&apos;inscrit
+                      </button>
 
                       {c1Status !== 'unpublished' && (
                         <button
@@ -1277,7 +1304,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                     </button>
                   )}
 
-                  {onOpenObservationModal && (
+                  {onOpenObservationModal && (isPast || isReadOnly || Boolean(slotObs)) && (
                     <button
                       type="button"
                       className="fbtn"
@@ -1318,11 +1345,29 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           maxChars: slotMaxChars,
                           primaryInstructor,
                           secondaryInstructor,
+                          defaultStatus:
+                            c1Status === 'closed_no_bookings' ||
+                            c1Status === 'not_published' ||
+                            c2Status === 'cancelled_weather'
+                              ? 'cancelled'
+                              : 'realized',
+                          defaultCancellationReason:
+                            c1Status === 'closed_no_bookings'
+                              ? 'no_clients'
+                              : c1Status === 'not_published'
+                              ? 'instructor'
+                              : c2Status === 'cancelled_weather'
+                              ? 'wind_low'
+                              : undefined,
+                          defaultCancellationNote: valItem?.nonPublishReason,
+                          defaultMonoCount: effectiveMono,
+                          defaultBiCount: effectiveBi,
+                          defaultParticipantsCount: effectivePeople,
                         })
                       }
                       title={
                         slotObs
-                          ? `Modifier le REX existant (${slotObs.status === 'cancelled' ? slotObsReasonInfo?.shortLabel || 'Annulé' : 'Réalisé'})`
+                          ? `Consulter / modifier le REX (${slotObs.status === 'cancelled' ? slotObsReasonInfo?.shortLabel || 'Annulé' : 'Réalisé'})`
                           : 'Saisir le REX terrain (chars sortis, météo réelle, annulation)'
                       }
                     >
@@ -1556,6 +1601,43 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         </button>
                       );
                     })}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSlotReasonIdx(null);
+                        if (onOpenObservationModal) {
+                          onOpenObservationModal({
+                            dateStr: selectedDate,
+                            slotKey,
+                            slotStart: displayStart,
+                            slotEnd: displayEnd,
+                            isCustom: x.isCustom,
+                            customTitle: x.title,
+                            maxChars: slotMaxChars,
+                            primaryInstructor,
+                            secondaryInstructor,
+                            forceIntent: true,
+                            defaultStatus: 'cancelled',
+                            defaultCancellationReason: 'no_clients',
+                          });
+                        } else {
+                          onSetSlotCycle1Action(focusData, sessItem, 'close_no_bookings');
+                        }
+                      }}
+                      style={{
+                        padding: '5px 9px',
+                        borderRadius: '6px',
+                        border: c1Status === 'closed_no_bookings' ? '1.5px solid #991b1b' : '1px solid #fca5a5',
+                        background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fef2f2',
+                        color: c1Status === 'closed_no_bookings' ? '#fff' : '#b91c1c',
+                        fontSize: '0.73rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⛔ Pas d&apos;inscrit (Vie 2)
+                    </button>
                   </div>
 
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>

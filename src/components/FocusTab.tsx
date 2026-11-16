@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AppSettings,
+  CancellationReason,
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
@@ -106,20 +107,20 @@ interface FocusTabProps {
     maxChars?: number;
     primaryInstructor?: string;
     secondaryInstructor?: string;
+    defaultStatus?: 'realized' | 'cancelled';
+    defaultCancellationReason?: CancellationReason;
+    defaultCancellationNote?: string;
+    defaultMonoCount?: number;
+    defaultBiCount?: number;
+    defaultParticipantsCount?: number;
+    defaultBookedParticipantsCount?: number;
+    forceIntent?: boolean;
   }) => void;
   isReadOnly?: boolean;
   focusDate?: string;
   onFocusDateChange?: (ds: string) => void;
   observations?: SlotObservation[];
 }
-
-const C2_WEATHER_REASONS = [
-  'Vent insuffisant (< 8 nds)',
-  'Vent trop fort / rafales',
-  'Vent mauvais secteur',
-  'État de plage / bâches',
-  'Météo extrême / orage',
-];
 
 export const FocusTab: React.FC<FocusTabProps> = ({
   year,
@@ -176,13 +177,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   } | null>(null);
   const [openTool, setOpenTool] = useState<{
     slotKey: string;
-    mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather' | 'double_instructor';
+    mode: 'shift' | 'merge' | 'double_instructor';
   } | null>(null);
-  const [confirmMono, setConfirmMono] = useState<number>(1);
-  const [confirmBi, setConfirmBi] = useState<number>(0);
-  const [cancelReason, setCancelReason] = useState<string>(C2_WEATHER_REASONS[0]);
-  const [cancelRescheduled, setCancelRescheduled] = useState<number>(0);
-  const [cancelLost, setCancelLost] = useState<number>(0);
   const [doubleName, setDoubleName] = useState<string>('Youenn');
   const [doubleQual, setDoubleQual] = useState<'CQP' | 'DE_BPJEPS'>('CQP');
   const [doubleAddChars, setDoubleAddChars] = useState<number>(8);
@@ -525,8 +521,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       : c2Status === 'shifted'
                       ? `DÉCALÉ ${valItem?.shiftMinutes ? (valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes) + ' MIN' : ''}`
                       : c2Status === 'realized'
-                      ? 'CYCLE 2 · RÉALISÉ'
-                      : 'CYCLE 2 · MAINTENU'}
+                      ? '🏁 CYCLE 2 · SÉANCE EFFECTUÉE'
+                      : 'CYCLE 2 · CONFIRMÉ'}
                   </span>
                 </span>
 
@@ -709,7 +705,21 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             )}
 
             {slotObs && (
-              <span
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenObservationModal?.({
+                    dateStr: currentDs,
+                    slotKey,
+                    slotStart: displayStart,
+                    slotEnd: displayEnd,
+                    isCustom: x.isCustom,
+                    customTitle: x.customTitle,
+                    maxChars: slotMaxChars,
+                    primaryInstructor,
+                    secondaryInstructor,
+                  })
+                }
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -721,8 +731,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   background: slotObs.status === 'cancelled' ? '#fef2f2' : '#ecfdf5',
                   color: slotObs.status === 'cancelled' ? '#b91c1c' : '#047857',
                   border: slotObs.status === 'cancelled' ? '1.5px solid #fca5a5' : '1.5px solid #6ee7b7',
+                  cursor: onOpenObservationModal ? 'pointer' : 'default',
                 }}
-                title={`REX saisi${slotObs.author ? ` par ${slotObs.author}` : ''}${slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : slotObs.notes ? ` · ${slotObs.notes}` : ''}`}
+                title={`Cliquer pour consulter / modifier le REX${slotObs.author ? ` (${slotObs.author})` : ''}${slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : slotObs.notes ? ` · ${slotObs.notes}` : ''}`}
               >
                 <span>📝 REX :</span>
                 {slotObs.status === 'cancelled' ? (
@@ -738,7 +749,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       : ''}
                   </span>
                 )}
-              </span>
+              </button>
             )}
 
             {sub && (
@@ -797,33 +808,46 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                           padding: '5px 9px',
                           fontSize: '0.72rem',
                           fontWeight: 800,
-                          color: '#fff',
-                          background: '#16a34a',
-                          border: 'none',
+                          color: c2Status === 'realized' ? '#166534' : '#fff',
+                          background: c2Status === 'realized' ? '#dcfce7' : '#16a34a',
+                          border: c2Status === 'realized' ? '1.5px solid #22c55e' : 'none',
                           borderRadius: '6px',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
-                          if (effectiveChars >= 1) {
+                          setOpenTool(null);
+                          if (onOpenObservationModal) {
+                            onOpenObservationModal({
+                              dateStr: currentDs,
+                              slotKey,
+                              slotStart: displayStart,
+                              slotEnd: displayEnd,
+                              isCustom: x.isCustom,
+                              customTitle: x.customTitle,
+                              maxChars: slotMaxChars,
+                              primaryInstructor,
+                              secondaryInstructor,
+                              forceIntent: true,
+                              defaultStatus: 'realized',
+                              defaultMonoCount:
+                                effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
+                              defaultBiCount: effectiveBi,
+                              defaultParticipantsCount: effectivePeople || effectiveChars,
+                            });
+                          } else {
                             onCycle2Action(f, x, {
-                              type: 'confirm',
-                              monoCount: effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
+                              type: 'realized',
+                              monoCount:
+                                effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
                               biCount: effectiveBi,
                               pilotsCount: effectivePeople || effectiveChars,
                               instructor: 'Jérôme',
                             });
-                            setOpenTool(null);
-                          } else {
-                            setConfirmMono(0);
-                            setConfirmBi(0);
-                            setOpenTool(
-                              isToolOpen('confirm_chars') ? null : { slotKey, mode: 'confirm_chars' }
-                            );
                           }
                         }}
-                        title="Maintenir la séance en Cycle 2 (nombre de chars optionnel avant lien réservation)"
+                        title="Valider la séance effectuée et compléter le REX en un seul écran (chars, météo, marée)"
                       >
-                        ✓ Maintenir
+                        {c2Status === 'realized' ? '🏁 Séance effectuée ✓' : '✓ Séance effectuée'}
                       </button>
                     )}
 
@@ -863,7 +887,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     </button>
                   )}
 
-                  {(c1Status === 'published' || inCycle2) && (
+                  {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) && (
                     <button
                       type="button"
                       className="fbtn"
@@ -881,22 +905,22 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       onClick={() => {
                         if (isAdjustOpen) {
                           setAdjustMenuSlotKey(null);
-                          if (openTool?.slotKey === slotKey && openTool.mode !== 'confirm_chars') {
+                          if (openTool?.slotKey === slotKey) {
                             setOpenTool(null);
                           }
                         } else {
                           setAdjustMenuSlotKey(slotKey);
                         }
                       }}
-                      title="Décaler l'horaire, regrouper, annuler (Vie 2) ou revenir en Cycle 1"
+                      title="Modifier l'horaire (décaler / regrouper), annuler (Vie 2 / pas d'inscrit) ou revenir en Cycle 1"
                     >
-                      ⚙️ Ajuster {isAdjustOpen ? '▲' : '▼'}
+                      🔀 Modifier / Annuler {isAdjustOpen ? '▲' : '▼'}
                     </button>
                   )}
                 </>
               )}
 
-              {onOpenObservationModal && (
+              {isReadOnly && slotObs && onOpenObservationModal && (
                 <button
                   type="button"
                   className="fbtn"
@@ -904,22 +928,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     margin: 0,
                     padding: '5px 8px',
                     fontSize: '0.72rem',
-                    fontWeight: slotObs ? 800 : 700,
-                    color: slotObs
-                      ? slotObs.status === 'cancelled'
-                        ? '#b91c1c'
-                        : '#047857'
-                      : '#0369a1',
-                    background: slotObs
-                      ? slotObs.status === 'cancelled'
-                        ? '#fee2e2'
-                        : '#dcfce7'
-                      : '#f0f9ff',
-                    border: slotObs
-                      ? slotObs.status === 'cancelled'
+                    fontWeight: 800,
+                    color: slotObs.status === 'cancelled' ? '#b91c1c' : '#047857',
+                    background: slotObs.status === 'cancelled' ? '#fee2e2' : '#dcfce7',
+                    border:
+                      slotObs.status === 'cancelled'
                         ? '1.5px solid #f87171'
-                        : '1.5px solid #34d399'
-                      : '1px solid #bae6fd',
+                        : '1.5px solid #34d399',
                     borderRadius: '6px',
                     cursor: 'pointer',
                   }}
@@ -936,13 +951,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       secondaryInstructor,
                     })
                   }
-                  title={
-                    slotObs
-                      ? `Modifier le REX existant (${slotObs.status === 'cancelled' ? slotObsReasonInfo?.shortLabel || 'Annulé' : 'Réalisé'})`
-                      : "Saisir le REX complet de la séance (hauteurs d'eau, chars, météo)"
-                  }
+                  title="Consulter le REX enregistré (lecture seule)"
                 >
-                  {slotObs ? '📝 REX ✓' : '📝 REX'}
+                  📝 Voir REX
                 </button>
               )}
             </div>
@@ -986,7 +997,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         </div>
 
         {/* MENU DÉPLIANT ⚙️ AJUSTER : Décaler / Regrouper / Annuler (Vie 2) / Revenir C1 */}
-        {(c1Status === 'published' || inCycle2) && isAdjustOpen && !isReadOnly && onCycle2Action && (
+        {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) &&
+          isAdjustOpen &&
+          !isReadOnly &&
+          onCycle2Action && (
           <div
             style={{
               display: 'flex',
@@ -1056,27 +1070,97 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 padding: '5px 9px',
                 fontSize: '0.72rem',
                 fontWeight: 800,
-                color: isToolOpen('cancel_weather') ? '#fff' : '#dc2626',
-                background: isToolOpen('cancel_weather') ? '#dc2626' : '#fff',
+                color: c2Status === 'cancelled_weather' ? '#fff' : '#dc2626',
+                background: c2Status === 'cancelled_weather' ? '#dc2626' : '#fff',
                 border: '1px solid #fca5a5',
                 borderRadius: '6px',
                 cursor: 'pointer',
               }}
               onClick={() => {
-                setCancelReason(
-                  x.ok === false ? 'Vent trop fort / rafales' : C2_WEATHER_REASONS[0]
-                );
-                setCancelRescheduled(effectiveChars);
-                setCancelLost(0);
-                setOpenTool(
-                  isToolOpen('cancel_weather')
-                    ? null
-                    : { slotKey, mode: 'cancel_weather' }
-                );
+                setOpenTool(null);
+                if (onOpenObservationModal) {
+                  const keptWeatherReason =
+                    slotObs?.status === 'cancelled' &&
+                    slotObs.cancellationReason &&
+                    slotObs.cancellationReason !== 'no_clients' &&
+                    slotObs.cancellationReason !== 'instructor'
+                      ? slotObs.cancellationReason
+                      : x.ok === false
+                      ? 'wind_high'
+                      : 'wind_low';
+                  onOpenObservationModal({
+                    dateStr: currentDs,
+                    slotKey,
+                    slotStart: displayStart,
+                    slotEnd: displayEnd,
+                    isCustom: x.isCustom,
+                    customTitle: x.customTitle,
+                    maxChars: slotMaxChars,
+                    primaryInstructor,
+                    secondaryInstructor,
+                    forceIntent: true,
+                    defaultStatus: 'cancelled',
+                    defaultCancellationReason: keptWeatherReason,
+                    defaultBookedParticipantsCount:
+                      effectivePeople > 0 ? effectivePeople : undefined,
+                  });
+                } else {
+                  onCycle2Action(f, x, {
+                    type: 'cancel_weather',
+                    reason: x.ok === false ? 'Vent trop fort / rafales' : 'Vent insuffisant (< 8 nds)',
+                    rescheduledChars: 0,
+                    lostChars: effectiveChars,
+                  });
+                }
               }}
-              title="Annuler la séance pour météo ou terrain (Vie 2)"
+              title="Annuler en Vie 2 (météo, terrain...) et compléter le REX en un seul écran"
             >
               ⛔ Annuler (Vie 2)
+            </button>
+
+            <button
+              type="button"
+              className="fbtn"
+              style={{
+                margin: 0,
+                padding: '5px 9px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                color: c1Status === 'closed_no_bookings' ? '#fff' : '#991b1b',
+                background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fee2e2',
+                border: '1px solid #fca5a5',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                setOpenTool(null);
+                if (onOpenObservationModal) {
+                  onOpenObservationModal({
+                    dateStr: currentDs,
+                    slotKey,
+                    slotStart: displayStart,
+                    slotEnd: displayEnd,
+                    isCustom: x.isCustom,
+                    customTitle: x.customTitle,
+                    maxChars: slotMaxChars,
+                    primaryInstructor,
+                    secondaryInstructor,
+                    forceIntent: true,
+                    defaultStatus: 'cancelled',
+                    defaultCancellationReason: 'no_clients',
+                  });
+                } else {
+                  onCycle2Action(f, x, {
+                    type: 'cancel_weather',
+                    reason: "Pas d'inscrits (Vie 2)",
+                    rescheduledChars: 0,
+                    lostChars: 0,
+                  });
+                }
+              }}
+              title="Annuler faute d'inscrits (Vie 2) et compléter la météo / notes REX en un seul écran"
+            >
+              👥 Pas d&apos;inscrit
             </button>
 
             <button
@@ -1336,87 +1420,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         )}
 
-        {/* PANNEAU INLINE 1 : SAISIE RAPIDE MONO/BI SI MAINTENU SANS FICHE CLIENT */}
-        {isToolOpen('confirm_chars') && !isReadOnly && onCycle2Action && (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '8px',
-              background: '#f0fdf4',
-              border: '1.5px solid #86efac',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '10px',
-              fontSize: '0.76rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <strong style={{ color: '#166534' }}>
-                ⚡ Maintenir en Cycle 2 (chars optionnels tant que le logiciel de réservation n’est pas relié, max {MAX_CHARS_PER_INSTRUCTOR}) :
-              </strong>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
-                Mono :
-                <input
-                  type="number"
-                  min={0}
-                  max={12}
-                  value={confirmMono}
-                  onChange={e => setConfirmMono(Math.max(0, Number(e.target.value) || 0))}
-                  style={{ width: '54px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
-                />
-              </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
-                Bi :
-                <input
-                  type="number"
-                  min={0}
-                  max={12}
-                  value={confirmBi}
-                  onChange={e => setConfirmBi(Math.max(0, Number(e.target.value) || 0))}
-                  style={{ width: '54px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
-                />
-              </label>
-              <span style={{ fontWeight: 800, color: confirmMono + confirmBi > 12 ? '#dc2626' : '#15803d' }}>
-                = {confirmMono + confirmBi} / {MAX_CHARS_PER_INSTRUCTOR} chars ({confirmMono + confirmBi * 2} pers.)
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  onCycle2Action(f, x, {
-                    type: 'confirm',
-                    monoCount: confirmMono,
-                    biCount: confirmBi,
-                    pilotsCount: confirmMono + confirmBi * 2,
-                    instructor: 'Jérôme',
-                  });
-                  setOpenTool(null);
-                }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: '#16a34a',
-                  color: '#fff',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                ✓ Confirmer en Cycle 2
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpenTool(null)}
-                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* PANNEAU INLINE 2 : DÉCALAGE HORAIRE */}
         {isToolOpen('shift') && !isReadOnly && onCycle2Action && (
@@ -1533,86 +1537,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         )}
 
-        {/* PANNEAU INLINE 4 : ANNULATION MÉTÉO / TERRAIN (VIE 2) */}
-        {isToolOpen('cancel_weather') && !isReadOnly && onCycle2Action && (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '8px',
-              background: '#fef2f2',
-              border: '1.5px solid #fca5a5',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              fontSize: '0.76rem',
-            }}
-          >
-            <strong style={{ color: '#991b1b' }}>
-              ⛔ Annulation Météo / Terrain (Vie 2) · Bilan commercial des {effectiveChars} char(s) inscrits :
-            </strong>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <select
-                value={cancelReason}
-                onChange={e => setCancelReason(e.target.value)}
-                style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #fca5a5', fontWeight: 700, background: '#fff' }}
-              >
-                {C2_WEATHER_REASONS.map(r => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
 
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#166534' }}>
-                Chars replacés :
-                <input
-                  type="number"
-                  min={0}
-                  max={12}
-                  value={cancelRescheduled}
-                  onChange={e => setCancelRescheduled(Math.max(0, Number(e.target.value) || 0))}
-                  style={{ width: '52px', padding: '4px', borderRadius: '4px', border: '1px solid #86efac', fontWeight: 800 }}
-                />
-              </label>
-
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#991b1b' }}>
-                Chars perdus :
-                <input
-                  type="number"
-                  min={0}
-                  max={12}
-                  value={cancelLost}
-                  onChange={e => setCancelLost(Math.max(0, Number(e.target.value) || 0))}
-                  style={{ width: '52px', padding: '4px', borderRadius: '4px', border: '1px solid #fca5a5', fontWeight: 800 }}
-                />
-              </label>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onCycle2Action(f, x, {
-                    type: 'cancel_weather',
-                    reason: cancelReason,
-                    rescheduledChars: cancelRescheduled,
-                    lostChars: cancelLost,
-                  });
-                  setOpenTool(null);
-                }}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
-              >
-                Confirmer Vie 2
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOpenTool(null)}
-                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   };

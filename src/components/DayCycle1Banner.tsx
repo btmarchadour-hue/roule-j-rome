@@ -145,7 +145,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               : isZeroPublishedOk
               ? valInfo.notPublishedCount > 0
                 ? '🚫'
-                : '🌑'
+                : '⛔'
               : valInfo.st === 'ok'
               ? '📅'
               : valInfo.st === 'chg'
@@ -232,7 +232,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                         ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}`
                         : ''
                     }${
-                      valInfo.closedNoBookingsCount ? ` · ${valInfo.closedNoBookingsCount} Vie 1` : ''
+                      valInfo.closedNoBookingsCount ? ` · ⛔ ${valInfo.closedNoBookingsCount} annulé Vie 2` : ''
                     } (sur ${valInfo.totalCount})`
                   : 'Journée passée'
                 : valInfo.st === 'chg'
@@ -240,14 +240,14 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                 : isZeroPublishedOk
                 ? valInfo.notPublishedCount > 0
                   ? `Cycle 1 · Journée non publiée (${valInfo.notPublishedCount} créneau${valInfo.notPublishedCount > 1 ? 'x' : ''})`
-                  : `Cycle 1 · Journée clôturée (${valInfo.closedNoBookingsCount} Vie 1)`
+                  : `Cycle 1 · Annulé Vie 2 (${valInfo.closedNoBookingsCount} sans inscrit)`
                 : valInfo.st === 'ok'
                 ? `Cycle 1 · ${valInfo.valCount} à publier${
                     valInfo.notPublishedCount
                       ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}`
                       : ''
                   }${valInfo.cycle2Count ? ` · ⚡ ${valInfo.cycle2Count} en Cycle 2` : ''}${
-                    valInfo.closedNoBookingsCount ? ` · 🌑 ${valInfo.closedNoBookingsCount} Vie 1` : ''
+                    valInfo.closedNoBookingsCount ? ` · ⛔ ${valInfo.closedNoBookingsCount} annulé Vie 2` : ''
                   }`
                 : 'Cycle 1 · En attente de validation (C1)'}
             </div>
