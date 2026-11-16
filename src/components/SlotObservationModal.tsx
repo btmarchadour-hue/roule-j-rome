@@ -148,6 +148,29 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   );
   const [notes, setNotes] = useState<string>(initialObservation?.notes || '');
 
+  const hasInitialWeatherOrBeach = Boolean(
+    initialObservation?.observedPressure != null ||
+      initialObservation?.observedWindKts != null ||
+      initialObservation?.observedGustKts != null ||
+      initialObservation?.observedWindDir ||
+      initialObservation?.observedWaveH != null ||
+      initialObservation?.beachCondition ||
+      defaultPressure != null ||
+      defaultWindKts != null ||
+      defaultGustKts != null ||
+      defaultWindDir ||
+      defaultWaveH != null
+  );
+  const initialIsNoClients =
+    (forceIntent && defaultStatus ? defaultStatus : initialObservation?.status || defaultStatus) ===
+      'cancelled' &&
+    (forceIntent && defaultCancellationReason
+      ? defaultCancellationReason
+      : initialObservation?.cancellationReason || defaultCancellationReason) === 'no_clients';
+  const [weatherExpanded, setWeatherExpanded] = useState<boolean>(
+    !initialIsNoClients || hasInitialWeatherOrBeach
+  );
+
   // Calcul automatique de l'écart horaire quand l'utilisateur change l'heure réelle
   const handlePassableTimeChange = (val: string) => {
     setActualPassableTime(val);
@@ -456,7 +479,12 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     <button
                       key={r}
                       type="button"
-                      onClick={() => setCancellationReason(r)}
+                      onClick={() => {
+                        setCancellationReason(r);
+                        if (r !== 'no_clients') {
+                          setWeatherExpanded(true);
+                        }
+                      }}
                       style={{
                         textAlign: 'left',
                         padding: '6px 8px',
@@ -572,8 +600,47 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 </div>
 
                 {cancellationReason === 'no_clients' ? (
-                  <div style={{ fontSize: '0.72rem', color: '#991b1b', background: '#fef2f2', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fecaca', lineHeight: '1.35' }}>
-                    ℹ️ <strong>Séance annulée · Pas d&apos;inscrits (Vie 2)</strong> : aucun client n&apos;avait réservé sur ce créneau publié. Elle est comptabilisée séparément des annulations météo.
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#991b1b', background: '#fef2f2', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fecaca', lineHeight: '1.35' }}>
+                      ℹ️ <strong>Séance annulée · Pas d&apos;inscrits (Vie 2)</strong> : aucun client n&apos;avait réservé sur ce créneau publié. Elle est comptabilisée séparément des annulations météo.
+                    </div>
+                    {!isReadOnly && (
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button
+                          type="submit"
+                          style={{
+                            padding: '7px 13px',
+                            borderRadius: '6px',
+                            border: 'none',
+                            background: '#dc2626',
+                            color: '#fff',
+                            fontSize: '0.76rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ⚡ Valider « Pas d&apos;inscrits (Vie 2) » en 1 clic
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWeatherExpanded(prev => !prev)}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #cbd5e1',
+                            background: weatherExpanded ? '#e0f2fe' : '#f8fafc',
+                            color: weatherExpanded ? '#0369a1' : '#334155',
+                            fontSize: '0.73rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {weatherExpanded
+                            ? '▲ Masquer météo / plage'
+                            : '🧭 + Saisir vent / pression / plage (facultatif)'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -831,6 +898,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
           )}
 
           {/* PARAMÈTRES MÉTÉO & MER RÉELS (DISPONIBLE POUR SÉANCES RÉALISÉES ET ANNULÉES) */}
+          {weatherExpanded && (
           <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
@@ -957,6 +1025,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Notes générales */}
           <div>

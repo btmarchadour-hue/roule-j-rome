@@ -18,6 +18,7 @@ import {
   dayFocus,
   dayInfo,
   dayRow,
+  isCycle1PastLocked,
   lc,
   p2,
   plan,
@@ -283,6 +284,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
   const focusData = dayFocus(selectedDate, settings, tideW, first, last, windList, customSlotsMap);
   const isPast = selectedDate < tdy();
+  const isPastLocked = isCycle1PastLocked(selectedDate);
 
   const holiday = getFrenchHolidayInfo(selectedDate);
 
@@ -449,7 +451,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             </button>
           )}
 
-          {!isReadOnly && !isPast && (
+          {!isReadOnly && !isPastLocked && (
             <button
               type="button"
               onClick={() => {
@@ -792,7 +794,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               ? '#0284c7'
               : '#94a3b8';
 
-          const isPickingReason = activeSlotReasonIdx === idx && !isReadOnly && !isPast && !inCycle2;
+          const isPickingReason = activeSlotReasonIdx === idx && !isReadOnly && !isPastLocked && !inCycle2;
 
           return (
             <div
@@ -1167,7 +1169,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                     👥 Inscriptions ({effectiveChars}/{slotMaxChars})
                   </button>
 
-                  {!isReadOnly && !isPast && onSetSlotCycle1Action && !inCycle2 && (
+                  {!isReadOnly && !isPastLocked && onSetSlotCycle1Action && !inCycle2 && (
                     <>
                       <button
                         type="button"
@@ -1475,7 +1477,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
                       {!isReadOnly &&
                         !inCycle2 &&
-                        !isPast &&
+                        !isPastLocked &&
                         c1Status !== 'closed_no_bookings' &&
                         c1Status !== 'not_published' && (
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
@@ -1791,7 +1793,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                     list
                   );
                 }}
-                isReadOnly={isReadOnly || isPast}
+                isReadOnly={isReadOnly || isPastLocked}
                 maxChars={activeBookingSlot.maxChars}
                 parkMaxMono={settings.parkMaxMono}
                 parkMaxBi={settings.parkMaxBi}
@@ -1820,7 +1822,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         defaultSlots={calculatedDefaultSlots}
         isOpenControlled={isCustomSlotsOpen}
         onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
-        isReadOnly={isReadOnly || isPast}
+        isReadOnly={isReadOnly || isPastLocked}
       />
 
       <div className="m" style={{ marginTop: '12px' }}>

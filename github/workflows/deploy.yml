@@ -25,7 +25,9 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - run: npm run build
+      - env:
+          VITE_WINDSUP_PROXY_URL: ${{ vars.VITE_WINDSUP_PROXY_URL || secrets.VITE_WINDSUP_PROXY_URL }}
+        run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

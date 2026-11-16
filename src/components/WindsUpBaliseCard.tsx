@@ -120,19 +120,60 @@ export const WindsUpBaliseCard: React.FC<WindsUpBaliseCardProps> = ({
       setLoading(true);
       setError(null);
       const query = `?date=${encodeURIComponent(dateStr)}${forceRefresh ? '&refresh=1' : ''}`;
-      try {
-        let res: Response | null = null;
+      const proxyBase = (import.meta.env.VITE_WINDSUP_PROXY_URL || '').trim().replace(/\/+$/, '');
+      const isStaticGitHubPages =
+        typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io');
+
+      const fetchJsonEndpoint = async (
+        endpoint: string,
+        init: RequestInit
+      ): Promise<WindsUpSpotData | null> => {
         try {
-          res = await fetch(`./api/windsup/spot66${query}`, { credentials: 'same-origin' });
+          const res = await fetch(endpoint, init);
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
+            return (await res.json()) as WindsUpSpotData;
+          }
         } catch {
-          res = null;
+          // Ignore endpoint error and try next source
         }
-        const contentType = res?.headers.get('content-type') || '';
-        if (res && res.ok && contentType.includes('application/json')) {
-          const json: WindsUpSpotData = await res.json();
-          setData(json);
-          return;
+        return null;
+      };
+
+      try {
+        if (isStaticGitHubPages && proxyBase) {
+          const proxyData = await fetchJsonEndpoint(`${proxyBase}${query}`, {
+            mode: 'cors',
+            credentials: 'omit',
+          });
+          if (proxyData) {
+            setData(proxyData);
+            return;
+          }
+        } else {
+          const localData = await fetchJsonEndpoint(`./api/windsup/spot66${query}`, {
+            credentials: 'same-origin',
+          });
+          if (localData && (!localData.isDelayed || !proxyBase)) {
+            setData(localData);
+            return;
+          }
+          if (proxyBase) {
+            const proxyData = await fetchJsonEndpoint(`${proxyBase}${query}`, {
+              mode: 'cors',
+              credentials: 'omit',
+            });
+            if (proxyData && (!proxyData.isDelayed || !localData)) {
+              setData(proxyData);
+              return;
+            }
+          }
+          if (localData) {
+            setData(localData);
+            return;
+          }
         }
+
         const fallbackData = await fetchPublicWindsUpSpot66Fallback(dateStr);
         setData(fallbackData);
       } catch (err) {

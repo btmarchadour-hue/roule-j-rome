@@ -851,6 +851,115 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       </button>
                     )}
 
+                  {(c1Status === 'published' || inCycle2) && (
+                    <button
+                      type="button"
+                      className="fbtn"
+                      style={{
+                        margin: 0,
+                        padding: '5px 9px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: c2Status === 'cancelled_weather' ? '#fff' : '#dc2626',
+                        background: c2Status === 'cancelled_weather' ? '#dc2626' : '#fef2f2',
+                        border: '1.5px solid #fca5a5',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => {
+                        setOpenTool(null);
+                        if (onOpenObservationModal) {
+                          const keptWeatherReason =
+                            slotObs?.status === 'cancelled' &&
+                            slotObs.cancellationReason &&
+                            slotObs.cancellationReason !== 'no_clients' &&
+                            slotObs.cancellationReason !== 'instructor'
+                              ? slotObs.cancellationReason
+                              : x.ok === false
+                              ? 'wind_high'
+                              : 'wind_low';
+                          onOpenObservationModal({
+                            dateStr: currentDs,
+                            slotKey,
+                            slotStart: displayStart,
+                            slotEnd: displayEnd,
+                            isCustom: x.isCustom,
+                            customTitle: x.customTitle,
+                            maxChars: slotMaxChars,
+                            primaryInstructor,
+                            secondaryInstructor,
+                            forceIntent: true,
+                            defaultStatus: 'cancelled',
+                            defaultCancellationReason: keptWeatherReason,
+                            defaultBookedParticipantsCount:
+                              effectivePeople > 0 ? effectivePeople : undefined,
+                          });
+                        } else {
+                          onCycle2Action(f, x, {
+                            type: 'cancel_weather',
+                            reason:
+                              x.ok === false
+                                ? 'Vent trop fort / rafales'
+                                : 'Vent insuffisant (< 8 nds)',
+                            rescheduledChars: 0,
+                            lostChars: effectiveChars,
+                          });
+                        }
+                      }}
+                      title="Annuler en Vie 2 (météo, terrain...) et compléter le REX en un seul écran"
+                    >
+                      ⛔ Annuler (Vie 2)
+                    </button>
+                  )}
+
+                  {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) &&
+                    effectiveChars === 0 && (
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: c1Status === 'closed_no_bookings' ? '#fff' : '#991b1b',
+                          background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fee2e2',
+                          border: '1.5px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setOpenTool(null);
+                          if (onOpenObservationModal) {
+                            onOpenObservationModal({
+                              dateStr: currentDs,
+                              slotKey,
+                              slotStart: displayStart,
+                              slotEnd: displayEnd,
+                              isCustom: x.isCustom,
+                              customTitle: x.customTitle,
+                              maxChars: slotMaxChars,
+                              primaryInstructor,
+                              secondaryInstructor,
+                              forceIntent: true,
+                              defaultStatus: 'cancelled',
+                              defaultCancellationReason: 'no_clients',
+                            });
+                          } else {
+                            onCycle2Action(f, x, {
+                              type: 'cancel_weather',
+                              reason: "Pas d'inscrits (Vie 2)",
+                              rescheduledChars: 0,
+                              lostChars: 0,
+                            });
+                          }
+                        }}
+                        title="Annuler faute d'inscrits (Vie 2) et compléter la météo / notes REX en un seul écran"
+                      >
+                        👥 Pas d&apos;inscrit
+                      </button>
+                    )}
+
                   {(c1Status === 'published' || inCycle2) && c2Status !== 'cancelled_weather' && (
                     <button
                       type="button"
@@ -912,9 +1021,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                           setAdjustMenuSlotKey(slotKey);
                         }
                       }}
-                      title="Modifier l'horaire (décaler / regrouper), annuler (Vie 2 / pas d'inscrit) ou revenir en Cycle 1"
+                      title="Décaler l'horaire, regrouper sur un autre créneau ou revenir en Cycle 1"
                     >
-                      🔀 Modifier / Annuler {isAdjustOpen ? '▲' : '▼'}
+                      🔀 Horaires / Regrouper {isAdjustOpen ? '▲' : '▼'}
                     </button>
                   )}
                 </>
@@ -1061,107 +1170,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 🔗 Regrouper
               </button>
             )}
-
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '5px 9px',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                color: c2Status === 'cancelled_weather' ? '#fff' : '#dc2626',
-                background: c2Status === 'cancelled_weather' ? '#dc2626' : '#fff',
-                border: '1px solid #fca5a5',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
-              onClick={() => {
-                setOpenTool(null);
-                if (onOpenObservationModal) {
-                  const keptWeatherReason =
-                    slotObs?.status === 'cancelled' &&
-                    slotObs.cancellationReason &&
-                    slotObs.cancellationReason !== 'no_clients' &&
-                    slotObs.cancellationReason !== 'instructor'
-                      ? slotObs.cancellationReason
-                      : x.ok === false
-                      ? 'wind_high'
-                      : 'wind_low';
-                  onOpenObservationModal({
-                    dateStr: currentDs,
-                    slotKey,
-                    slotStart: displayStart,
-                    slotEnd: displayEnd,
-                    isCustom: x.isCustom,
-                    customTitle: x.customTitle,
-                    maxChars: slotMaxChars,
-                    primaryInstructor,
-                    secondaryInstructor,
-                    forceIntent: true,
-                    defaultStatus: 'cancelled',
-                    defaultCancellationReason: keptWeatherReason,
-                    defaultBookedParticipantsCount:
-                      effectivePeople > 0 ? effectivePeople : undefined,
-                  });
-                } else {
-                  onCycle2Action(f, x, {
-                    type: 'cancel_weather',
-                    reason: x.ok === false ? 'Vent trop fort / rafales' : 'Vent insuffisant (< 8 nds)',
-                    rescheduledChars: 0,
-                    lostChars: effectiveChars,
-                  });
-                }
-              }}
-              title="Annuler en Vie 2 (météo, terrain...) et compléter le REX en un seul écran"
-            >
-              ⛔ Annuler (Vie 2)
-            </button>
-
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '5px 9px',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                color: c1Status === 'closed_no_bookings' ? '#fff' : '#991b1b',
-                background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fee2e2',
-                border: '1px solid #fca5a5',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
-              onClick={() => {
-                setOpenTool(null);
-                if (onOpenObservationModal) {
-                  onOpenObservationModal({
-                    dateStr: currentDs,
-                    slotKey,
-                    slotStart: displayStart,
-                    slotEnd: displayEnd,
-                    isCustom: x.isCustom,
-                    customTitle: x.customTitle,
-                    maxChars: slotMaxChars,
-                    primaryInstructor,
-                    secondaryInstructor,
-                    forceIntent: true,
-                    defaultStatus: 'cancelled',
-                    defaultCancellationReason: 'no_clients',
-                  });
-                } else {
-                  onCycle2Action(f, x, {
-                    type: 'cancel_weather',
-                    reason: "Pas d'inscrits (Vie 2)",
-                    rescheduledChars: 0,
-                    lostChars: 0,
-                  });
-                }
-              }}
-              title="Annuler faute d'inscrits (Vie 2) et compléter la météo / notes REX en un seul écran"
-            >
-              👥 Pas d&apos;inscrit
-            </button>
 
             <button
               type="button"

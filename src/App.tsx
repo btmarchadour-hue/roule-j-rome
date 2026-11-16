@@ -60,6 +60,7 @@ import { getActiveUser, clearActiveUser } from './utils/authUtils';
 import {
   build,
   dayFocus,
+  isCycle1PastLocked,
   kOf,
   LAT,
   lc,
@@ -443,8 +444,8 @@ export const App: React.FC = () => {
         notifySync('🔒 Mode Moniteur / Contrôle : créneaux sur mesure verrouillés');
         return;
       }
-      if (dateStr < tdy()) {
-        notifySync('🔒 Journée passée : les créneaux Cycle 1 ne sont plus modifiables');
+      if (isCycle1PastLocked(dateStr)) {
+        notifySync('🔒 Archive verrouillée (> 7 jours) : les créneaux Cycle 1 ne sont plus modifiables');
         return;
       }
       const nextCustomMap: CustomSlotsMap = {
@@ -1112,8 +1113,8 @@ export const App: React.FC = () => {
       notifySync('🔒 Mode Moniteur / Lecture seule : publications réservées aux administrateurs');
       return;
     }
-    if (ds < tdy()) {
-      notifySync('🔒 Journée passée : validation Cycle 1 verrouillée (archive)');
+    if (isCycle1PastLocked(ds)) {
+      notifySync('🔒 Archive verrouillée (> 7 jours) : validation Cycle 1 non modifiable');
       return;
     }
     const existingRecord = validations[ds];
@@ -1218,14 +1219,14 @@ export const App: React.FC = () => {
       notifySync('🔒 Mode Moniteur / Lecture seule : réinitialisation verrouillée');
       return;
     }
-    if (ds < tdy()) {
-      notifySync('🔒 Journée passée : archive Cycle 1 non modifiable');
+    if (isCycle1PastLocked(ds)) {
+      notifySync('🔒 Archive verrouillée (> 7 jours) : archive Cycle 1 non modifiable');
       return;
     }
     persistDayValidation(ds, null);
   }, [isAdminLocked, persistDayValidation]);
 
-  // CYCLE 1 : Action unitaire sur un créneau (à publier, à ne pas publier + motif, clôturer Vie 1, réinitialiser)
+  // CYCLE 1 : Action unitaire sur un créneau (à publier, à ne pas publier + motif, clôturer Vie 2, réinitialiser)
   const handleSetSlotCycle1Action = useCallback(
     (record: DayFocusData, slot: SessionItem, action: Cycle1SlotAction, reason?: string) => {
       if (isAdminLocked) {
@@ -1233,8 +1234,8 @@ export const App: React.FC = () => {
         return;
       }
       const ds = record.ds;
-      if (ds < tdy()) {
-        notifySync('🔒 Journée passée : archive Cycle 1 non modifiable');
+      if (isCycle1PastLocked(ds)) {
+        notifySync('🔒 Archive verrouillée (> 7 jours) : archive Cycle 1 non modifiable');
         return;
       }
       const slotKey = kOf(slot);
@@ -1765,8 +1766,8 @@ export const App: React.FC = () => {
         notifySync('🔒 Mode Moniteur / Contrôle : créneaux sur mesure verrouillés');
         return;
       }
-      if (dateStr < tdy()) {
-        notifySync('🔒 Journée passée : les créneaux ne sont plus modifiables');
+      if (isCycle1PastLocked(dateStr)) {
+        notifySync('🔒 Archive verrouillée (> 7 jours) : les créneaux ne sont plus modifiables');
         return;
       }
 

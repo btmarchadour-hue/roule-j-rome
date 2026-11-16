@@ -567,6 +567,12 @@ export const shf = (ds: string, n: number): string => {
   return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate());
 };
 
+export const CYCLE1_CATCHUP_DAYS = 7;
+
+export const isCycle1PastLocked = (ds: string): boolean => {
+  return ds < shf(tdy(), -CYCLE1_CATCHUP_DAYS);
+};
+
 /**
  * Calculates the tide coefficient for any tide timestamp (PM or BM)
  * using smooth interpolation between adjacent daily coefficients (SHOM model).

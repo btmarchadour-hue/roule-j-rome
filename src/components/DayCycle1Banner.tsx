@@ -6,7 +6,7 @@ import {
   ValidationsMap,
   WindPoint,
 } from '../types';
-import { dayFocus, lc, tdy, VC, vstat } from '../utils/tides';
+import { dayFocus, isCycle1PastLocked, lc, tdy, VC, vstat } from '../utils/tides';
 import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
 
 interface DayCycle1BannerProps {
@@ -86,6 +86,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
   const focusData = dayFocus(selectedDate, settings, tideW, first, last, windList, customSlotsMap);
   const valInfo = vstat(focusData, validations);
   const isPast = selectedDate < tdy();
+  const isPastLocked = isCycle1PastLocked(selectedDate);
   const hasSlots = focusData.list.length > 0;
 
   const formattedDate = new Date(Date.UTC(y, m, d)).toLocaleDateString('fr-FR', {
@@ -252,36 +253,64 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                 : 'Cycle 1 · En attente de validation (C1)'}
             </div>
 
-            {!isPast && valInfo.st === 'none' && (
-              <div style={{ marginTop: '4px' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    background: '#fffbeb',
-                    color: '#92400e',
-                    border: '1px solid #fcd34d',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    fontWeight: 800,
-                    fontSize: '0.72rem',
-                  }}
-                >
-                  <span>⏳</span>
-                  <span>EN ATTENTE DE VALIDATION (C1)</span>
-                </span>
+            {((!isPast && valInfo.st === 'none') || (isPast && !isPastLocked)) && (
+              <div style={{ marginTop: '4px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {!isPast && valInfo.st === 'none' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#fffbeb',
+                      color: '#92400e',
+                      border: '1px solid #fcd34d',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 800,
+                      fontSize: '0.72rem',
+                    }}
+                  >
+                    <span>⏳</span>
+                    <span>EN ATTENTE DE VALIDATION (C1)</span>
+                  </span>
+                )}
+                {isPast && !isPastLocked && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      border: '1px solid #bfdbfe',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 800,
+                      fontSize: '0.72rem',
+                    }}
+                  >
+                    <span>⏳</span>
+                    <span>RATTRAPAGE J-7 · Régularisation / clôture journée possible</span>
+                  </span>
+                )}
               </div>
             )}
 
             <div style={{ fontSize: '0.74rem', color: 'var(--mu, #666)', marginTop: '2px' }}>
-              {isPast
+              {isPastLocked
                 ? valInfo.st === 'ok'
-                  ? `Journée passée (verrouillée) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
+                  ? `Archive verrouillée (> 7 j) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}`
-                  : 'Journée passée · Archive non modifiable en Cycle 1'
+                  : 'Archive verrouillée (> 7 j) · Non modifiable en Cycle 1'
+                : isPast
+                ? valInfo.st === 'ok'
+                  ? `Journée passée (rattrapage autorisé sous 7 j) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}`
+                  : 'Journée passée · Vous pouvez publier ou fermer toute la journée (ex. Paris, absence) sous 7 j'
                 : valInfo.st === 'ok'
                 ? `Publié le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                     dateStyle: 'short',
@@ -317,7 +346,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
             </span>
           )}
 
-          {isPast && (
+          {isPastLocked && (
             <span
               style={{
                 background: '#f1f5f9',
@@ -333,11 +362,11 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               }}
             >
               <span>🔒</span>
-              <span>Journée passée · Verrouillée en Cycle 1</span>
+              <span>Archive verrouillée (&gt; 7 j)</span>
             </span>
           )}
 
-          {!isPast && !isReadOnly && hasSlots && (
+          {!isPastLocked && !isReadOnly && hasSlots && (
             <>
               <button
                 type="button"
@@ -437,7 +466,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
             </button>
           )}
 
-          {!isPast && !isReadOnly && valInfo.st !== 'none' && (
+          {!isPastLocked && !isReadOnly && valInfo.st !== 'none' && (
             <button
               type="button"
               className="fbtn"
@@ -461,7 +490,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
       </div>
 
       {/* Sélecteur de raison de non-publication sur toute la journée */}
-      {!isPast && !isReadOnly && dayNonPublishOpen && hasSlots && (
+      {!isPastLocked && !isReadOnly && dayNonPublishOpen && hasSlots && (
         <div
           style={{
             marginTop: '12px',
