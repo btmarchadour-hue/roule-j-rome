@@ -32,8 +32,13 @@ import {
   saveSessionSettingsToFirestore,
   resetAllSettingsToFirestore,
   subscribeToTeamNotes,
+  subscribeToObservations,
   getActiveInstructor,
 } from './utils/firebaseSync';
+import {
+  CANCELLATION_REASONS_INFO,
+  getStoredObservations,
+} from './utils/statisticsEngine';
 import {
   ActiveUserSession,
   AppSettings,
@@ -42,6 +47,7 @@ import {
   DayFocusData,
   MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
+  SlotObservation,
   TeamNote,
   TidePoint,
   ValidationDayRecord,
@@ -188,6 +194,11 @@ export const App: React.FC = () => {
   // Réservations numériques par créneau (`${ds}_${slotKey}` -> AgendaBookingItem[])
   const [bookingsMap, setBookingsMap] = useState<Record<string, AgendaBookingItem[]>>({});
 
+  // Relevés terrain REX synchronisés temps réel (partagés entre Planning, Cycle 2 et Statistiques)
+  const [observations, setObservations] = useState<SlotObservation[]>(() =>
+    getStoredObservations().filter(o => o && o.id && !o.id.startsWith('sample-obs-'))
+  );
+
   // Clean obsolete tab storage key on startup
   useEffect(() => {
     try {
@@ -246,12 +257,24 @@ export const App: React.FC = () => {
       setTeamNotes(notes);
     });
 
+    // 6. Écouter en temps réel les relevés terrain REX (cycle 1, cycle 2, stats)
+    const unsubObservations = subscribeToObservations(remoteObs => {
+      const cleanRemote = (remoteObs || []).filter(o => o && o.id && !o.id.startsWith('sample-obs-'));
+      setObservations(cleanRemote);
+      try {
+        localStorage.setItem('cv_observations_v1', JSON.stringify(cleanRemote));
+      } catch {
+        // ignore
+      }
+    });
+
     return () => {
       unsubValidations();
       unsubCustomSlots();
       unsubSessionSettings();
       unsubBookings();
       unsubTeamNotes();
+      unsubObservations();
     };
   }, []);
 
@@ -768,6 +791,211 @@ export const App: React.FC = () => {
       );
     }
   }, []);
+
+  const findObservationForSlot = useCallback(
+    (ds: string, slotKey: string, slotStart?: string, slotEnd?: string): SlotObservation | null => {
+      const dayObs = observations.filter(o => o.ds === ds);
+      if (dayObs.length === 0) return null;
+      const byExactKey = dayObs
+        .filter(o => o.slotKey === slotKey)
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+      if (byExactKey.length > 0) return byExactKey[0];
+      if (slotStart && slotEnd) {
+        const norm = (v: string) => v.replace('h', ':');
+        const byTime = dayObs
+          .filter(o => norm(o.slotStart || '') === norm(slotStart) && norm(o.slotEnd || '') === norm(slotEnd))
+          .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        if (byTime.length > 0) return byTime[0];
+      }
+      return null;
+    },
+    [observations]
+  );
+
+  const syncValidationFromRex = useCallback(
+    (savedObs: SlotObservation) => {
+      if (!savedObs || !savedObs.ds || isAdminLocked) return;
+      const ds = savedObs.ds;
+      const existingRecord = validations[ds];
+
+      const normTime = (v?: string) => (v || '').replace('h', ':');
+      const matchesObsSlot = (it: ValidationItem) =>
+        it.k === savedObs.slotKey ||
+        (Boolean(savedObs.slotStart) &&
+          Boolean(savedObs.slotEnd) &&
+          normTime(it.publishedStart || it.s) === normTime(savedObs.slotStart) &&
+          normTime(it.publishedEnd || it.e) === normTime(savedObs.slotEnd));
+
+      const applyRexToItem = (base: ValidationItem): ValidationItem => {
+        if (savedObs.status === 'cancelled') {
+          const reason = savedObs.cancellationReason || 'wind_low';
+          const info = CANCELLATION_REASONS_INFO[reason];
+          const noteSuffix = savedObs.cancellationNote?.trim();
+
+          if (reason === 'no_clients') {
+            return {
+              ...base,
+              status: 'rejected',
+              rejectReason: "Pas d'inscrits (Vie 2)",
+              cycle1Status: 'closed_no_bookings',
+              cycle2Status: undefined,
+              monoCount: 0,
+              biCount: 0,
+              charsCount: 0,
+              pilotsCount: 0,
+            };
+          }
+          if (reason === 'instructor') {
+            const cleanReason = noteSuffix || 'Impératif personnel';
+            return {
+              ...base,
+              status: 'rejected',
+              rejectReason: `Non publié (C1) : ${cleanReason}`,
+              cycle1Status: 'not_published',
+              nonPublishReason: cleanReason,
+              cycle2Status: undefined,
+              monoCount: 0,
+              biCount: 0,
+              charsCount: 0,
+              pilotsCount: 0,
+            };
+          }
+
+          const weatherLabel = noteSuffix
+            ? `${info?.shortLabel || 'Météo'} · ${noteSuffix}`
+            : info?.label || 'Annulé météo (Vie 2)';
+          return {
+            ...base,
+            status: 'rejected',
+            rejectReason: weatherLabel,
+            cycle1Status: 'published',
+            cycle2Status: 'cancelled_weather',
+            rescheduledChars: savedObs.rescheduledCount ?? base.rescheduledChars,
+            lostChars: savedObs.lostCount ?? base.lostChars,
+            instructor: savedObs.author || base.instructor || 'Jérôme',
+            secondaryInstructor: savedObs.secondaryInstructor || base.secondaryInstructor,
+          };
+        }
+
+        // Séance réalisée dans le REX
+        const mono = savedObs.monoCount ?? base.monoCount ?? 0;
+        const bi = savedObs.biCount ?? base.biCount ?? 0;
+        const chars = savedObs.charsCount ?? (mono + bi > 0 ? mono + bi : base.charsCount ?? 0);
+        const pilots = savedObs.participantsCount ?? base.pilotsCount ?? mono + bi * 2;
+        return {
+          ...base,
+          status: 'valid',
+          rejectReason: undefined,
+          cycle1Status: 'published',
+          nonPublishReason: undefined,
+          cycle2Status: 'realized',
+          monoCount: mono,
+          biCount: bi,
+          charsCount: chars,
+          pilotsCount: pilots,
+          instructor: savedObs.author || base.instructor || 'Jérôme',
+          secondaryInstructor: savedObs.secondaryInstructor || base.secondaryInstructor,
+        };
+      };
+
+      if (existingRecord && existingRecord.items && existingRecord.items.length > 0) {
+        let matched = false;
+        const nextItems = existingRecord.items.map(it => {
+          if (matchesObsSlot(it)) {
+            matched = true;
+            return applyRexToItem(it);
+          }
+          return it;
+        });
+
+        if (!matched) {
+          nextItems.push(
+            applyRexToItem({
+              k: savedObs.slotKey,
+              s: savedObs.slotStart,
+              e: savedObs.slotEnd,
+              publishedStart: savedObs.slotStart,
+              publishedEnd: savedObs.slotEnd,
+              opt: false,
+              over: 0,
+              lim: '',
+              customTitle: savedObs.customTitle,
+              status: 'valid',
+              cycle1Status: 'published',
+              cycle2Status: 'awaiting_booking',
+            })
+          );
+        }
+
+        persistDayValidation(ds, {
+          ...existingRecord,
+          ts: Date.now(),
+          items: nextItems,
+        });
+        return;
+      }
+
+      // Si la journée n'avait pas encore de fiche validations, créer la fiche à partir de dayFocus pour que Cycle 1/2 & Stats restent 100 % alignés
+      const df = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
+      let matchedComputed = false;
+      const computedItems: ValidationItem[] = df.list.map(x => {
+        const sk = kOf(x);
+        const st = lc(x.a, df.y, df.m, df.d);
+        const en = lc(x.b, df.y, df.m, df.d);
+        const base: ValidationItem = {
+          k: sk,
+          s: st,
+          e: en,
+          publishedStart: st,
+          publishedEnd: en,
+          opt: x.opt,
+          over: x.over,
+          lim: x.lim,
+          customTitle: x.customTitle,
+          status: 'valid',
+          cycle1Status: 'published',
+          cycle2Status: 'awaiting_booking',
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        };
+        if (matchesObsSlot(base)) {
+          matchedComputed = true;
+          return applyRexToItem(base);
+        }
+        return base;
+      });
+
+      if (!matchedComputed) {
+        computedItems.push(
+          applyRexToItem({
+            k: savedObs.slotKey,
+            s: savedObs.slotStart,
+            e: savedObs.slotEnd,
+            publishedStart: savedObs.slotStart,
+            publishedEnd: savedObs.slotEnd,
+            opt: false,
+            over: 0,
+            lim: '',
+            customTitle: savedObs.customTitle,
+            status: 'valid',
+            cycle1Status: 'published',
+            cycle2Status: 'awaiting_booking',
+          })
+        );
+      }
+
+      persistDayValidation(ds, {
+        sig: sigOf(df),
+        ts: Date.now(),
+        k: df.k,
+        cycle1PublishedAt: Date.now(),
+        items: computedItems,
+      });
+    },
+    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap]
+  );
 
   const buildCycle1DayRecord = useCallback(
     (
@@ -1301,10 +1529,6 @@ export const App: React.FC = () => {
         const mono = payload.monoCount ?? existingCounts.mono;
         const bi = payload.biCount ?? existingCounts.bi;
         const chars = mono + bi > 0 ? mono + bi : existingCounts.totalChars;
-        if (chars < 1) {
-          notifySync('⛔ Au moins 1 char inscrit est requis pour activer le Cycle 2');
-          return;
-        }
         updatedSource = {
           ...baseItem,
           publishedStart: baseItem.publishedStart || startTimeStr,
@@ -1320,6 +1544,11 @@ export const App: React.FC = () => {
           charsCount: chars,
           pilotsCount: payload.pilotsCount ?? (mono + bi > 0 ? mono + bi * 2 : existingCounts.people),
         };
+        notifySync(
+          chars > 0
+            ? `⚡ Cycle 2 · Maintenu (${chars} char${chars > 1 ? 's' : ''})`
+            : '⚡ Cycle 2 · Créneau maintenu'
+        );
       } else if (payload.type === 'shift') {
         const isZeroShift = payload.shiftMinutes === 0;
         updatedSource = {
@@ -1714,6 +1943,7 @@ export const App: React.FC = () => {
               canPrevDay={selectedDate > minDs}
               canNextDay={selectedDate < maxDs}
               onOpenCycle2={handleOpenCycle2FromCalendar}
+              observations={observations}
               onOpenObservationModal={slot => setActiveObservationSlot(slot)}
               isReadOnly={isAdminLocked}
             />
@@ -1838,6 +2068,7 @@ export const App: React.FC = () => {
             onValidateDay={handleValidateDay}
             onClearValidation={handleClearValidation}
             onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
+            observations={observations}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
             isReadOnly={isAdminLocked}
             focusDate={focusDate}
@@ -1858,6 +2089,7 @@ export const App: React.FC = () => {
               isReadOnly={isAdminLocked}
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
               onReclassifyValidationReason={handleReclassifyAbsentValidations}
+              onObservationSaved={syncValidationFromRex}
             />
           </div>
         )}
@@ -1989,13 +2221,24 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            <NotesAndHypotheses onLock={handleLock} />
+            <NotesAndHypotheses
+              onLock={handleLock}
+              validations={validations}
+              bookingsMap={bookingsMap}
+              customSlotsMap={customSlotsMap}
+              settings={settings}
+              EX={EX}
+              windList={windList}
+              onSaveDayValidation={persistDayValidation}
+              onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
+            />
           </div>
         )}
 
         {/* Modal de saisie rapide d'un relevé terrain depuis le calendrier */}
         {activeObservationSlot && (
           <SlotObservationModal
+            key={`${activeObservationSlot.dateStr}_${activeObservationSlot.slotKey}`}
             isOpen={Boolean(activeObservationSlot)}
             onClose={() => setActiveObservationSlot(null)}
             dateStr={activeObservationSlot.dateStr}
@@ -2007,9 +2250,19 @@ export const App: React.FC = () => {
             maxChars={activeObservationSlot.maxChars}
             primaryInstructor={activeObservationSlot.primaryInstructor}
             secondaryInstructor={activeObservationSlot.secondaryInstructor}
+            initialObservation={findObservationForSlot(
+              activeObservationSlot.dateStr,
+              activeObservationSlot.slotKey,
+              activeObservationSlot.slotStart,
+              activeObservationSlot.slotEnd
+            )}
             currentUserName={currentUser?.username}
             customNonPublishReasons={settings.customNonPublishReasons}
-            onSaveSuccess={() => {
+            onSaveSuccess={(updated, savedObs) => {
+              setObservations(updated);
+              if (savedObs) {
+                syncValidationFromRex(savedObs);
+              }
               setActiveObservationSlot(null);
             }}
             isReadOnly={isReadOnly}

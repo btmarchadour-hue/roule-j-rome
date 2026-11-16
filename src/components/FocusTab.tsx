@@ -6,6 +6,7 @@ import {
   DayFocusData,
   MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
+  SlotObservation,
   TidePoint,
   ValidationsMap,
   WindPoint,
@@ -59,6 +60,7 @@ import {
   WindSectorInfo,
 } from '../utils/beachOrientation';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
+import { CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
 
 interface FocusTabProps {
   year: number;
@@ -108,6 +110,7 @@ interface FocusTabProps {
   isReadOnly?: boolean;
   focusDate?: string;
   onFocusDateChange?: (ds: string) => void;
+  observations?: SlotObservation[];
 }
 
 const C2_WEATHER_REASONS = [
@@ -145,6 +148,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   isReadOnly = false,
   focusDate: propFocusDate,
   onFocusDateChange,
+  observations = [],
 }) => {
   const onCycle2Action = isReadOnly ? undefined : rawOnCycle2Action;
   const onSaveSlotBookings = isReadOnly ? undefined : rawOnSaveSlotBookings;
@@ -294,12 +298,49 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       settings.parkMaxBi
     );
 
-    const c1Status = getEffectiveCycle1Status(valItem);
-    const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
-    const c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
-
     const displayStart = valItem?.actualStart || startTimeStr;
     const displayEnd = valItem?.actualEnd || endTimeStr;
+    const normT = (v?: string) => (v || '').replace('h', ':');
+    const slotObs = observations
+      .filter(
+        o =>
+          o.ds === f.ds &&
+          (o.slotKey === slotKey ||
+            (Boolean(o.slotStart) &&
+              Boolean(o.slotEnd) &&
+              (normT(o.slotStart) === normT(startTimeStr) || normT(o.slotStart) === normT(displayStart)) &&
+              (normT(o.slotEnd) === normT(endTimeStr) || normT(o.slotEnd) === normT(displayEnd))))
+      )
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
+    const slotObsReasonInfo =
+      slotObs?.status === 'cancelled' && slotObs.cancellationReason
+        ? CANCELLATION_REASONS_INFO[slotObs.cancellationReason]
+        : null;
+
+    let c1Status = getEffectiveCycle1Status(valItem);
+    let inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+    let c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
+
+    if (slotObs?.status === 'cancelled') {
+      if (slotObs.cancellationReason === 'no_clients') {
+        c1Status = 'closed_no_bookings';
+        inCycle2 = false;
+        c2Status = 'none';
+      } else if (slotObs.cancellationReason === 'instructor') {
+        c1Status = 'not_published';
+        inCycle2 = false;
+        c2Status = 'none';
+      } else {
+        c1Status = 'published';
+        inCycle2 = true;
+        c2Status = 'cancelled_weather';
+      }
+    } else if (slotObs?.status === 'realized' && (c2Status === 'none' || c2Status === 'awaiting_booking')) {
+      c1Status = 'published';
+      inCycle2 = true;
+      c2Status = 'realized';
+    }
+
     const isShifted =
       c2Status === 'shifted' &&
       Boolean(valItem?.actualStart) &&
@@ -341,7 +382,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       });
 
     const cardBg =
-      c2Status === 'cancelled_weather'
+      c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
         ? '#fef2f2'
         : c2Status === 'merged'
         ? '#faf5ff'
@@ -349,8 +390,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '#fffbeb'
         : c1Status === 'not_published'
         ? '#f1f5f9'
-        : c1Status === 'closed_no_bookings'
-        ? '#f8fafc'
         : inCycle2
         ? '#f0fdf4'
         : c1Status === 'published'
@@ -358,7 +397,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         : '#ffffff';
 
     const cardBorder =
-      c2Status === 'cancelled_weather'
+      c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
         ? '2px solid #ef4444'
         : c2Status === 'merged'
         ? '2px solid #a855f7'
@@ -366,8 +405,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '2px solid #f59e0b'
         : c1Status === 'not_published'
         ? '2px solid #64748b'
-        : c1Status === 'closed_no_bookings'
-        ? '1.5px solid #cbd5e1'
         : inCycle2
         ? '2px solid #22c55e'
         : c1Status === 'published'
@@ -375,7 +412,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         : '2px dashed #cbd5e1';
 
     const cardBarColor =
-      c2Status === 'cancelled_weather'
+      c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
         ? '#dc2626'
         : c2Status === 'merged'
         ? '#7c3aed'
@@ -383,8 +420,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '#d97706'
         : c1Status === 'not_published'
         ? '#475569'
-        : c1Status === 'closed_no_bookings'
-        ? '#64748b'
         : inCycle2
         ? '#16a34a'
         : c1Status === 'published'
@@ -592,7 +627,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 }}
               >
                 <span>📅</span>
-                <span>CYCLE 1 PUBLIÉ · 0 inscrit (En attente 1er char)</span>
+                <span>CYCLE 1 PUBLIÉ · Prêt pour Cycle 2</span>
               </span>
             ) : c1Status === 'not_published' ? (
               <span
@@ -619,16 +654,17 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '5px',
-                  background: '#475569',
+                  background: '#dc2626',
                   color: '#ffffff',
                   padding: '4px 10px',
                   borderRadius: '6px',
                   fontWeight: 900,
-                  fontSize: '0.74rem',
+                  fontSize: '0.76rem',
+                  letterSpacing: '0.02em',
                 }}
               >
-                <span>🌑</span>
-                <span>CLÔTURÉ · FAUTE D&apos;INSCRITS (VIE 1)</span>
+                <span>⛔</span>
+                <span>ANNULÉ (VIE 2) · PAS D&apos;INSCRIT</span>
               </span>
             ) : (
               <span
@@ -672,6 +708,39 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               </span>
             )}
 
+            {slotObs && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  fontSize: '0.70rem',
+                  fontWeight: 900,
+                  background: slotObs.status === 'cancelled' ? '#fef2f2' : '#ecfdf5',
+                  color: slotObs.status === 'cancelled' ? '#b91c1c' : '#047857',
+                  border: slotObs.status === 'cancelled' ? '1.5px solid #fca5a5' : '1.5px solid #6ee7b7',
+                }}
+                title={`REX saisi${slotObs.author ? ` par ${slotObs.author}` : ''}${slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : slotObs.notes ? ` · ${slotObs.notes}` : ''}`}
+              >
+                <span>📝 REX :</span>
+                {slotObs.status === 'cancelled' ? (
+                  <span>
+                    {slotObsReasonInfo?.icon || '⛔'} {slotObsReasonInfo?.shortLabel || 'Annulé'}
+                    {slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : ''}
+                  </span>
+                ) : (
+                  <span>
+                    ✓ Réalisé
+                    {slotObs.charsCount != null
+                      ? ` · ${slotObs.charsCount} char${slotObs.charsCount > 1 ? 's' : ''}`
+                      : ''}
+                  </span>
+                )}
+              </span>
+            )}
+
             {sub && (
               <small style={{ color: '#64748b', fontSize: '0.72rem' }}>
                 {sub + (x.past ? ' · passée' : '')}
@@ -710,51 +779,55 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     secondaryFormula: valItem?.secondaryFormula,
                   })
                 }
-                title="Ouvrir la fiche numérique des réservations (déclenche Cycle 2 dès 1 char)"
+                title="Ouvrir la fiche numérique des réservations"
               >
                 👥 Inscriptions ({effectiveChars}/{slotMaxChars})
               </button>
 
               {!isReadOnly && onCycle2Action && (
                 <>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '5px 9px',
-                      fontSize: '0.72rem',
-                      fontWeight: 800,
-                      color: '#fff',
-                      background: '#16a34a',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => {
-                      if (effectiveChars >= 1) {
-                        onCycle2Action(f, x, {
-                          type: 'confirm',
-                          monoCount: effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
-                          biCount: effectiveBi,
-                          pilotsCount: effectivePeople || effectiveChars,
-                          instructor: 'Jérôme',
-                        });
-                        setOpenTool(null);
-                      } else {
-                        setConfirmMono(1);
-                        setConfirmBi(0);
-                        setOpenTool(
-                          isToolOpen('confirm_chars') ? null : { slotKey, mode: 'confirm_chars' }
-                        );
-                      }
-                    }}
-                    title="Maintenir la séance (exige au moins 1 char inscrit)"
-                  >
-                    ✓ Maintenir
-                  </button>
+                  {c1Status !== 'closed_no_bookings' &&
+                    c1Status !== 'not_published' &&
+                    c2Status !== 'cancelled_weather' && (
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: '#fff',
+                          background: '#16a34a',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          if (effectiveChars >= 1) {
+                            onCycle2Action(f, x, {
+                              type: 'confirm',
+                              monoCount: effectiveMono > 0 || effectiveBi > 0 ? effectiveMono : effectiveChars,
+                              biCount: effectiveBi,
+                              pilotsCount: effectivePeople || effectiveChars,
+                              instructor: 'Jérôme',
+                            });
+                            setOpenTool(null);
+                          } else {
+                            setConfirmMono(0);
+                            setConfirmBi(0);
+                            setOpenTool(
+                              isToolOpen('confirm_chars') ? null : { slotKey, mode: 'confirm_chars' }
+                            );
+                          }
+                        }}
+                        title="Maintenir la séance en Cycle 2 (nombre de chars optionnel avant lien réservation)"
+                      >
+                        ✓ Maintenir
+                      </button>
+                    )}
 
-                  {(c1Status === 'published' || inCycle2) && (
+                  {(c1Status === 'published' || inCycle2) && c2Status !== 'cancelled_weather' && (
                     <button
                       type="button"
                       className="fbtn"
@@ -790,7 +863,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     </button>
                   )}
 
-                  {inCycle2 && (
+                  {(c1Status === 'published' || inCycle2) && (
                     <button
                       type="button"
                       className="fbtn"
@@ -831,10 +904,22 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     margin: 0,
                     padding: '5px 8px',
                     fontSize: '0.72rem',
-                    fontWeight: 700,
-                    color: '#0369a1',
-                    background: '#f0f9ff',
-                    border: '1px solid #bae6fd',
+                    fontWeight: slotObs ? 800 : 700,
+                    color: slotObs
+                      ? slotObs.status === 'cancelled'
+                        ? '#b91c1c'
+                        : '#047857'
+                      : '#0369a1',
+                    background: slotObs
+                      ? slotObs.status === 'cancelled'
+                        ? '#fee2e2'
+                        : '#dcfce7'
+                      : '#f0f9ff',
+                    border: slotObs
+                      ? slotObs.status === 'cancelled'
+                        ? '1.5px solid #f87171'
+                        : '1.5px solid #34d399'
+                      : '1px solid #bae6fd',
                     borderRadius: '6px',
                     cursor: 'pointer',
                   }}
@@ -851,9 +936,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       secondaryInstructor,
                     })
                   }
-                  title="Saisir le REX complet de la séance (hauteurs d'eau, chars, météo)"
+                  title={
+                    slotObs
+                      ? `Modifier le REX existant (${slotObs.status === 'cancelled' ? slotObsReasonInfo?.shortLabel || 'Annulé' : 'Réalisé'})`
+                      : "Saisir le REX complet de la séance (hauteurs d'eau, chars, météo)"
+                  }
                 >
-                  📝 REX
+                  {slotObs ? '📝 REX ✓' : '📝 REX'}
                 </button>
               )}
             </div>
@@ -871,8 +960,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   fontWeight: 900,
                   letterSpacing: '-0.02em',
                   color:
-                    c2Status === 'cancelled_weather'
+                    c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
                       ? '#991b1b'
+                      : c1Status === 'not_published'
+                      ? '#64748b'
                       : c2Status === 'merged'
                       ? '#6d28d9'
                       : c2Status === 'shifted'
@@ -881,7 +972,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       ? '#14532d'
                       : '#0f172a',
                   textDecoration:
-                    c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
+                    c2Status === 'cancelled_weather' ||
+                    c1Status === 'closed_no_bookings' ||
+                    c1Status === 'not_published'
                       ? 'line-through'
                       : 'none',
                 }}
@@ -893,7 +986,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         </div>
 
         {/* MENU DÉPLIANT ⚙️ AJUSTER : Décaler / Regrouper / Annuler (Vie 2) / Revenir C1 */}
-        {inCycle2 && isAdjustOpen && !isReadOnly && onCycle2Action && (
+        {(c1Status === 'published' || inCycle2) && isAdjustOpen && !isReadOnly && onCycle2Action && (
           <div
             style={{
               display: 'flex',
@@ -1261,7 +1354,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <strong style={{ color: '#166534' }}>
-                ⚡ Déclencher Cycle 2 (≥ 1 char requis, max {MAX_CHARS_PER_INSTRUCTOR}) :
+                ⚡ Maintenir en Cycle 2 (chars optionnels tant que le logiciel de réservation n’est pas relié, max {MAX_CHARS_PER_INSTRUCTOR}) :
               </strong>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
                 Mono :
@@ -1292,10 +1385,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 type="button"
-                disabled={confirmMono + confirmBi < 1}
                 onClick={() => {
-                  const total = confirmMono + confirmBi;
-                  if (total < 1) return;
                   onCycle2Action(f, x, {
                     type: 'confirm',
                     monoCount: confirmMono,
@@ -1309,10 +1399,10 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   padding: '6px 12px',
                   borderRadius: '6px',
                   border: 'none',
-                  background: confirmMono + confirmBi >= 1 ? '#16a34a' : '#94a3b8',
+                  background: '#16a34a',
                   color: '#fff',
                   fontWeight: 800,
-                  cursor: confirmMono + confirmBi >= 1 ? 'pointer' : 'not-allowed',
+                  cursor: 'pointer',
                 }}
               >
                 ✓ Confirmer en Cycle 2

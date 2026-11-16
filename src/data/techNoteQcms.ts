@@ -34,6 +34,184 @@ export interface TechNoteQcmDefinition {
 }
 
 export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
+  'note-validation-parcours-6-etapes': {
+    noteId: 'note-validation-parcours-6-etapes',
+    title: 'QCM · Validation du Cheminement en 6 Étapes & Dernières Évolutions',
+    subtitle: 'Comprendre la logique bout-en-bout (Cycle 1 → Cycle 2 → Stats → Modèle Empirique → Équipe → Clients) et valider les nouveautés',
+    accentColor: '#0284c7',
+    contextTitle: '🧭 Notre cheminement complet en 6 étapes',
+    contextBullets: [
+      'Étape 1 · Validation des créneaux (Onglet C1) : prépare l’offre publiable pour l’outil de réservation (règle 09h, coef ≤ 50) et distingue « À publier » vs « À ne pas publier » (Réunion, Impératif personnel, Vacances…). Le « bouclier 0 inscrit » reste en attente : il ne sera activé qu’une fois le lien avec le logiciel de réservation en place.',
+      'Étape 2 · Adaptation Météo (Onglet C2) : VERROU STRICT — on ne peut modifier en Étape 2 QUE les créneaux préalablement validés en Étape 1 (actions Maintenir / ⚙️ Ajuster accessibles même à 0 char saisi tant que la passerelle réservation n’est pas reliée). Outils terrain : Winds-Up + AROME + axe 335°/155°, double courbe Réel vs SHOM + Loupe Δ (cm), + Doubler 2e moniteur (Youenn CQP +8 → 20 chars, Katleen +12 → 24 chars), REX.',
+      'Étape 3 · Module Statistique : pilotage sans double saisie issu des Étapes 1 & 2, remplissage dynamique (12 / 20 / 24 chars), séparation Vie 1 / Vie 2 / Absentéisme, fusion « Ferme / Fermé » & bouton « ✏️ Préciser ».',
+      'Étape 4 · Modèle Empirique & Étalonnage GPS : passage du théorique SHOM au réel terrain (pression +1 cm/hPa, cadre Dune/Mairie, 300 relevés GPS 3 zones + bâches, schéma Litto3D pente 1,15 % avec double ligne d’eau Théorique SHOM vs Réelle surcote/sous-cote).',
+      'Étape 5 · Hypothèses, Comptes & Liaison : droits séparés (Admin Jérôme/Benoît vs Moniteur Youenn/Katleen en REX vs Lecture seule), notes + QCM synchronisés Cloud et fil d’échange Ben ↔ Jérôme.',
+      'Étape 6 · Base de Données Clients (CRM École) : alimentation continue depuis les réservations par créneau (mono/bi, formule, règlement), historique pilotes, export CSV et préparation du Pont 2 billetterie.',
+    ],
+    questions: [
+      {
+        id: 'q1',
+        title: 'Validation 1 · Étape 1 (Validation C1) : alimentation de la réservation & motifs de fermeture',
+        tag: 'Étape 1 · Cycle 1',
+        description: 'Le principe de valider ici les créneaux destinés à l’outil de réservation (jour/semaine/mois) et de distinguer « À ne pas publier » (Réunion, Impératif personnel, Vacances…) des aléas météo te convient-il ?',
+        type: 'radio',
+        placeholder: 'Autres motifs souhaités, règles d’ouverture ou ergonomie Cycle 1…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Validé tel quel · Séparation offre commerciale / motifs personnels claire et prête pour la réservation',
+            detail: 'Règles de base (9h00, coef ≤ 50, seuils Lestrevet) ; le bouclier « 0 inscrit » reste désactivé jusqu’à la connexion avec le logiciel de réservation.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Validé avec ajustement mineur · Principe bon, j’ajoute une précision ci-dessous',
+            detail: 'Ex. ajout d’un motif de fermeture spécifique ou ajustement de règle d’ouverture.',
+          },
+          {
+            id: 'opt_c',
+            label: 'À revoir ensemble · Besoin d’adapter le fonctionnement de Cycle 1',
+            detail: 'Nous réajusterons ensemble l’étape de validation des créneaux.',
+          },
+        ],
+      },
+      {
+        id: 'q2',
+        title: 'Validation 2 · Étape 2 (Adaptation Météo C2) : verrou strict sur les créneaux validés en Étape 1 & outils terrain',
+        tag: 'Étape 2 · Cycle 2',
+        description: 'Valides-tu la règle stricte selon laquelle on ne peut modifier/piloter en Étape 2 QUE les créneaux validés en Étape 1, ainsi que les derniers ajouts (double courbe + Loupe Δ cm, dédoublement Youenn/Katleen) ?',
+        type: 'radio',
+        placeholder: 'Retours sur le verrou C1→C2, la Loupe Δ cm, les créneaux doublés ou le pilotage météo…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Validé tel quel · Le verrou Étape 1 → Étape 2 sécurise le planning et la double courbe + Loupe cm est très lisible',
+            detail: 'On reste garanti qu’aucun créneau fermé en C1 ne soit rouvert par erreur en C2.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Validé avec ajustement · Verrou validé, un détail d’affichage ou d’action terrain à ajuster',
+            detail: 'Je précise ci-dessous le détail souhaité (bouton, seuil, affichage marée ou vent).',
+          },
+          {
+            id: 'opt_c',
+            label: 'À assouplir · Je souhaite pouvoir ajouter/débloquer exceptionnellement un créneau depuis Cycle 2',
+            detail: 'Prévoir une dérogation manuelle exceptionnelle directement en Cycle 2.',
+          },
+        ],
+      },
+      {
+        id: 'q3',
+        title: 'Validation 3 · Étape 3 (Module Statistique) : fusion Ferme/Fermé & précision des motifs',
+        tag: 'Étape 3 · Stats',
+        description: 'La séparation Vie 1 / Vie 2 / Absentéisme, le calcul de remplissage dynamique (12 / 20 / 24 chars), la fusion « Ferme / Fermé » et le bouton « ✏️ Préciser » répondent-ils à ton besoin de suivi ?',
+        type: 'radio',
+        placeholder: 'Autres indicateurs utiles pour le bilan de saison ou remarques sur les motifs…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Validé tel quel · Indicateurs fidèles à mon activité et reclassement simple des anciens créneaux « Fermé »',
+            detail: 'Aucune double saisie, bilan lisible en temps réel.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Validé + idée complémentaire · C’est bon, j’aimerais un indicateur supplémentaire noté ci-dessous',
+            detail: 'J’ajoute ma suggestion dans le commentaire.',
+          },
+          {
+            id: 'opt_c',
+            label: 'À revoir ensemble · Un calcul ou libellé statistique reste à ajuster',
+            detail: 'À reprendre ensemble lors du prochain point.',
+          },
+        ],
+      },
+      {
+        id: 'q4',
+        title: 'Validation 4 · Étape 4 (Modèle Empirique & Litto3D) : double ligne d’eau Théorique vs Réelle',
+        tag: 'Étape 4 · Empirique',
+        description: 'La visualisation sur Litto3D (ligne théorique SHOM en pointillés vs ligne réelle avec surcote/sous-cote et bande hachurée sur le sable) et le protocole de relevés GPS te paraissent-ils parlants sur le terrain ?',
+        type: 'radio',
+        placeholder: 'Impressions après test sur la plage ou lors de dépressions/anticyclones…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Validé tel quel · Visualisation claire de l’impact surcote/sous-cote en mètres de plage utilisables',
+            detail: 'Le lien entre cm verticaux et mètres de sable (pente 1,15 %) aide directement la décision.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Validé avec ajustement · À affiner après les prochains relevés GPS sur la plage',
+            detail: 'On continue les mesures terrain pour caler le modèle empirique réel.',
+          },
+          {
+            id: 'opt_c',
+            label: 'À simplifier · Trop technique, je préfère un affichage plus synthétique',
+            detail: 'Alléger la lecture du schéma Litto3D.',
+          },
+        ],
+      },
+      {
+        id: 'q5',
+        title: 'Validation 5 · Étape 5 (Hypothèses, Comptes Utilisateurs & Espace d’Échange)',
+        tag: 'Étape 5 · Équipe & Suivi',
+        description: 'La séparation des comptes (Admin Jérôme/Benoît vs Moniteur REX Youenn/Katleen) et le fonctionnement par Notes + QCM + messagerie 💬 Liaison conviennent-ils pour piloter l’évolution de l’app ?',
+        type: 'radio',
+        placeholder: 'Besoin d’un compte supplémentaire, droits moniteurs ou retour sur Liaison…',
+        options: [
+          {
+            id: 'opt_a',
+            recommended: true,
+            label: 'Validé tel quel · Droits bien sécurisés pour l’équipe et suivi clair des décisions avec Benoît',
+            detail: 'Les moniteurs accèdent au terrain/REX sans risque de modifier les seuils ou le Cycle 1.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Validé avec précision · Ok sur le principe, avec une demande sur les droits ou un compte moniteur ci-dessous',
+            detail: 'Précision ajoutée en commentaire.',
+          },
+          {
+            id: 'opt_c',
+            label: 'À ajuster · Je souhaite modifier les permissions d’accès ou la présentation des notes',
+            detail: 'À revoir ensemble.',
+          },
+        ],
+      },
+      {
+        id: 'q6',
+        title: 'Validation 6 · Étape 6 (Base de Données Clients) & Priorité pour la suite',
+        tag: 'Étape 6 · Clients & Suite',
+        description: 'La constitution progressive de la base clients depuis les créneaux te convient-elle, et quelle est ta priorité principale pour la prochaine étape ? (plusieurs choix possibles)',
+        type: 'checkbox',
+        placeholder: 'Ex. champs client manquants (poids, âge, formule favorite, certificat…), priorités de saison…',
+        options: [
+          {
+            id: 'opt_1',
+            recommended: true,
+            label: 'Base Clients validée · L’alimentation automatique depuis les réservations créneau correspond à mon besoin',
+            detail: 'Chaque élève inscrit enrichit automatiquement le CRM école sans ressaisie.',
+          },
+          {
+            id: 'opt_2',
+            label: 'Priorité terrain · Enchaîner les relevés GPS sur la plage pour caler le modèle empirique réel',
+            detail: 'Objectif 300 mesures sur Lestrevet / Lieue de Grève / Pentrez.',
+          },
+          {
+            id: 'opt_3',
+            label: 'Priorité réservation · Préparer la connexion avec l’outil de réservation externe (« Deux Ponts »)',
+            detail: 'Synchroniser les créneaux validés (Pont 1) et les inscrits clients (Pont 2).',
+          },
+          {
+            id: 'opt_4',
+            label: 'Champs CRM complémentaires · Ajouter des infos utiles sur la fiche client (précisées ci-dessous)',
+            detail: 'Compléter la fiche pilote avec des informations métier.',
+          },
+        ],
+      },
+    ],
+  },
   'note-creneaux-simultanes-ete': {
     noteId: 'note-creneaux-simultanes-ete',
     title: 'QCM · Créneaux Simultanés d’Été & Multi-Moniteurs',

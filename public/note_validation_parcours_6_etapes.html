@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note de Validation &amp; Cheminement en 6 Étapes · Char à Voile du Bout du Monde</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 10mm 12mm 10mm 12mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      color: #0f172a;
+      line-height: 1.44;
+      font-size: 11px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn-word { background: #1d4ed8; }
+    .btn-html { background: #16a34a; }
+    .btn-secondary { background: #334155; }
+    .btn-reset { background: #475569; }
+    .toast {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      background: #0f172a;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      font-weight: 700;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+      z-index: 2000;
+      display: none;
+      border-left: 4px solid #22c55e;
+    }
+    .sheet {
+      background: #ffffff;
+      width: 210mm;
+      max-width: calc(100% - 20px);
+      margin: 14px auto;
+      padding: 12mm 14mm;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 6px;
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar, .toast { display: none !important; }
+      .sheet {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      .q-card, .step-card { break-inside: avoid; page-break-inside: avoid; }
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2.5px solid #0284c7;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-collapse: collapse;
+    }
+    .title-badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8.5px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 { margin: 4px 0 2px; font-size: 15.5px; font-weight: 900; color: #0f172a; line-height: 1.25; }
+    .sub { color: #475569; font-size: 9.8px; }
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 7px 10px;
+      margin-bottom: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 9.5px;
+    }
+    .flow-banner {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border: 1.5px solid #38bdf8;
+      border-radius: 7px;
+      padding: 9px 12px;
+      margin-bottom: 12px;
+    }
+    .flow-banner h2 {
+      margin: 0 0 5px;
+      font-size: 11px;
+      font-weight: 900;
+      color: #0369a1;
+    }
+    .steps-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .step-card {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-left: 4px solid #0284c7;
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .step-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .step-title {
+      font-size: 10.5px;
+      font-weight: 900;
+      color: #0f172a;
+    }
+    .step-tab {
+      font-size: 8px;
+      font-weight: 800;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .step-body {
+      font-size: 9.5px;
+      color: #334155;
+      margin: 0;
+    }
+    .step-body ul {
+      margin: 4px 0 0 14px;
+      padding: 0;
+    }
+    .step-body li {
+      margin-bottom: 2px;
+    }
+    .q-card {
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 7px;
+      padding: 9px 11px;
+      margin-bottom: 9px;
+    }
+    .q-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .q-title {
+      font-size: 10.8px;
+      font-weight: 900;
+      color: #0f172a;
+      margin: 0;
+    }
+    .q-tag {
+      font-size: 8px;
+      font-weight: 800;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .q-desc {
+      margin: 0 0 6px;
+      color: #475569;
+      font-size: 9.4px;
+    }
+    .opt-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      padding: 5px 8px;
+      margin-bottom: 4px;
+      border: 1px solid #e2e8f0;
+      border-radius: 5px;
+      background: #f8fafc;
+      cursor: pointer;
+      font-size: 9.6px;
+    }
+    .opt-label.checked {
+      background: #f0f9ff;
+      border-color: #0284c7;
+    }
+    .opt-label input {
+      margin-top: 2px;
+      accent-color: #0284c7;
+    }
+    .comment-label {
+      display: block;
+      margin-top: 5px;
+      font-size: 8.6px;
+      font-weight: 800;
+      color: #475569;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-family: inherit;
+      font-size: 9.5px;
+      color: #0f172a;
+      background: #fff;
+      margin-top: 3px;
+    }
+    textarea { min-height: 36px; resize: vertical; }
+    .general-box {
+      background: #fffbeb;
+      border: 1.5px solid #fcd34d;
+      border-radius: 7px;
+      padding: 9px 11px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div style="font-size:12px;font-weight:800;">
+      🧭 Validation Parcours en 6 Étapes &amp; Dernières Évolutions · « Ça roule ? »
+    </div>
+    <div class="toolbar-actions">
+      <button type="button" class="btn btn-word" onclick="exportFillableWord()">📘 Télécharger Word (.doc)</button>
+      <button type="button" class="btn btn-html" onclick="exportFillableHtml()">💾 Télécharger HTML remplissable</button>
+      <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer / PDF A4</button>
+      <button type="button" class="btn btn-reset" onclick="resetForm()">↺ Réinitialiser</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div class="sheet">
+    <table class="header-table">
+      <tr>
+        <td>
+          <span class="title-badge">Bilan Pédagogique &amp; QCM de Validation · Jérôme</span>
+          <h1>Architecture Complète en 6 Étapes &amp; Validation des Dernières Évolutions</h1>
+          <div class="sub">
+            Char à Voile du Bout du Monde · Plage de Lestrevet (29550 Plomodiern) · Logique métier bout-en-bout
+          </div>
+        </td>
+        <td style="text-align:right;vertical-align:bottom;font-size:9px;color:#475569;">
+          <strong>Destinataire :</strong> Jérôme Bouchez<br>
+          <strong>Concepteur :</strong> Benoît Marchadour
+        </td>
+      </tr>
+    </table>
+
+    <div class="meta-box">
+      <div>
+        <strong>Répondant :</strong><br>
+        <input id="resp_name" type="text" value="Jérôme Bouchez" oninput="saveState()">
+      </div>
+      <div>
+        <strong>Date de relecture :</strong><br>
+        <input id="resp_date" type="text" placeholder="ex: __ / 11 / 2026" oninput="saveState()">
+      </div>
+      <div>
+        <strong>Verdict global :</strong><br>
+        <input id="resp_verdict" type="text" placeholder="ex: Validé / À ajuster..." oninput="saveState()">
+      </div>
+    </div>
+
+    <div class="flow-banner">
+      <h2>🧭 Pourquoi ce cheminement en 6 étapes ?</h2>
+      <div style="font-size:9.6px;color:#0f172a;">
+        L'outil a été bâti pour suivre exactement le cycle réel d'une journée de char à voile à Lestrevet, depuis la <strong>mise en vente commerciale (Étape 1)</strong> jusqu'à la <strong>relation client long terme (Étape 6)</strong>, sans jamais mélanger les décisions commerciales, les aléas météo du jour J et l'apprentissage scientifique du spot.
+      </div>
+    </div>
+
+    <!-- LES 6 ÉTAPES DÉTAILLÉES -->
+    <div class="steps-grid">
+      <div class="step-card" style="border-left-color:#16a34a;">
+        <div class="step-head">
+          <span class="step-title">Étape 1 · Validation des Créneaux (Offre de Vente)</span>
+          <span class="step-tab">Onglet 1 · Validation C1</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Préparer le planning publiable qui alimentera directement l'outil de réservation (<em>Pont 1</em>).
+          <ul>
+            <li><strong>Calcul marées &amp; règles école :</strong> règle des 09h00, coef ≤ 50, seuil Lestrevet, durée + pauses.</li>
+            <li><strong>Décision commerciale :</strong> « <em>✅ À publier</em> » (à la journée, semaine ou mois) ou « <em>🚫 À ne pas publier</em> » avec motif réel (<strong>Réunion, Impératif personnel, Vacances</strong>…).</li>
+            <li><strong>Option future (en attente) :</strong> le « bouclier 0 inscrit » (attente automatique du 1er char pour débloquer le Cycle 2) ne sera activé qu'une fois la passerelle avec le logiciel de réservation connectée (non pertinent tant que les réservations ne remontent pas automatiquement).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-card" style="border-left-color:#0284c7;">
+        <div class="step-head">
+          <span class="step-title">Étape 2 · Adaptation Météo (Pilotage Terrain)</span>
+          <span class="step-tab">Onglet 2 · Adaptation C2</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Adapter et piloter la journée face au vent, à la houle et aux marées réelles.
+          <ul>
+            <li><strong>Verrou strict d'accès :</strong> <strong>on ne peut modifier en Étape 2 QUE les créneaux préalablement validés (« À publier ») en Étape 1</strong>. En attendant le lien logiciel de réservation, tous les créneaux validés en C1 restent directement pilotables (Maintenir / Ajuster) même à 0 char saisi dans l'app.</li>
+            <li><strong>Boîte à outils :</strong> Balise Winds-Up live + AROME + orientation plage (~335°/155°), double courbe Réel vs SHOM + <strong>Loupe Δ (cm)</strong>, actions <em>Maintenir / Décaler / Regrouper / + Doubler 2e moniteur (Youenn CQP +8 ➔ 20, Katleen +12 ➔ 24) / Annuler Vie 2</em> &amp; REX rapide.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-card" style="border-left-color:#7c3aed;">
+        <div class="step-head">
+          <span class="step-title">Étape 3 · Module Statistique &amp; Pilotage</span>
+          <span class="step-tab">Onglet 4 · Statistiques</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Mesurer la vraie performance sans double saisie à partir des Étapes 1 &amp; 2.
+          <ul>
+            <li><strong>Taux de réalisation &amp; remplissage chars :</strong> calculés sur le vrai plafond matériel (12, 20 ou 24 chars si créneau doublé).</li>
+            <li><strong>3 causes clairement séparées :</strong> manque d'inscrits (<em>Vie 1</em>), annulations météo/plage (<em>Vie 2</em> + % clients replacés/perdus) et absentéisme/fermetures.</li>
+            <li><strong>Dernière amélioration :</strong> fusion automatique « <em>Ferme / Fermé</em> » + bouton « <em>✏️ Préciser</em> » pour reclasser d'un clic en <em>Réunion, Impératif personnel, Vacances</em>…</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-card" style="border-left-color:#ea580c;">
+        <div class="step-head">
+          <span class="step-title">Étape 4 · Modèle Empirique &amp; Étalonnage Plage</span>
+          <span class="step-tab">Onglet 7 · Étalonnage GPS</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Passer des tables théoriques SHOM à la réalité physique mesurée sur le sable de Lestrevet.
+          <ul>
+            <li><strong>Cadre &amp; relevés GPS :</strong> repères Dune + bornes Mairie, objectif 300 mesures sur 3 zones (Lestrevet / Lieue de Grève / Pentrez) + tag bâches.</li>
+            <li><strong>Litto3D &amp; double ligne d'eau :</strong> comparaison directe sur le schéma plage (<em>Vue Piste &amp; Coupe</em>) entre la <strong>ligne d'eau théorique SHOM</strong> et la <strong>ligne réelle avec surcote/sous-cote</strong> (pente 1,15 % : 1 cm vertical ≈ 87 cm de plage).</li>
+            <li><strong>Mode Réel :</strong> applique la correction pression (+1 cm/hPa) + décalage empirique constaté dans la prise de décision.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-card" style="border-left-color:#d97706;">
+        <div class="step-head">
+          <span class="step-title">Étape 5 · Hypothèses, Comptes &amp; Échanges</span>
+          <span class="step-tab">Onglet 6 + 💬 Liaison + 👥 Comptes</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Faire vivre l'application en sécurité entre le terrain et le concepteur.
+          <ul>
+            <li><strong>Gestion des comptes :</strong> <em>Admin</em> (Jérôme &amp; Benoît : accès complet réglages, Cycle 1, parc matériel, clients), <em>Moniteur</em> (Youenn, Katleen : lecture planning/élèves + saisie REX terrain sans toucher aux seuils) et <em>Lecture seule</em>.</li>
+            <li><strong>Hypothèses &amp; QCM :</strong> chaque règle physique ou évolution est documentée, arbitrée par QCM puis archivée une fois appliquée.</li>
+            <li><strong>Liaison Ben ↔ Jérôme :</strong> fil d'échange direct intégré dans l'application pour remonter chaque besoin terrain.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-card" style="border-left-color:#059669;">
+        <div class="step-head">
+          <span class="step-title">Étape 6 · Base de Données Clients (CRM École)</span>
+          <span class="step-tab">Onglet 5 · Clients</span>
+        </div>
+        <div class="step-body">
+          <strong>Objectif :</strong> Construire automatiquement le fichier pilotes de l'école à partir des séances.
+          <ul>
+            <li><strong>Alimentation continue :</strong> chaque pilote saisi dans une fiche créneau (nom, téléphone, email, formule, règlement, mono/bi) crée ou met à jour sa fiche CRM.</li>
+            <li><strong>Historique &amp; fidélisation :</strong> nombre de séances roulées, préférences matériel, notes moniteur, recherche instantanée et export CSV propre.</li>
+            <li><strong>Tremplin Réservation :</strong> prépare directement la future synchronisation bidirectionnelle avec l'outil de vente (<em>Pont 2</em>).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- QCM DE VALIDATION POUR JÉRÔME -->
+    <div class="q-card" data-qid="q1">
+      <div class="q-header">
+        <h3 class="q-title">Validation 1 · Étape 1 (Validation C1) : préparation commerciale &amp; motifs de fermeture</h3>
+        <span class="q-tag">Étape 1 · Cycle 1</span>
+      </div>
+      <p class="q-desc">
+        Le principe de valider ici les créneaux destinés à l'outil de réservation (jour/semaine/mois) et de distinguer « À ne pas publier » (Réunion, Impératif personnel, Vacances…) des aléas météo te convient-il ?
+      </p>
+      <label class="opt-label"><input type="radio" name="q1" value="opt_a" onchange="saveState()"><span><strong>Validé tel quel</strong> · La séparation offre commerciale / motifs personnels est claire et prête pour la future billetterie.</span></label>
+      <label class="opt-label"><input type="radio" name="q1" value="opt_b" onchange="saveState()"><span><strong>Validé avec ajustement mineur</strong> · Le principe est bon, j'ajoute une précision ci-dessous sur les motifs ou la publication.</span></label>
+      <label class="opt-label"><input type="radio" name="q1" value="opt_c" onchange="saveState()"><span><strong>À revoir ensemble</strong> · J'ai besoin d'adapter le fonctionnement de Cycle 1.</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 1 :</span>
+      <textarea id="note_q1" placeholder="Autres motifs souhaités, règles d'ouverture ou ergonomie Cycle 1..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="q-card" data-qid="q2">
+      <div class="q-header">
+        <h3 class="q-title">Validation 2 · Étape 2 (Adaptation Météo C2) : verrou sur les seuls créneaux validés en Étape 1 &amp; outils terrain</h3>
+        <span class="q-tag">Étape 2 · Cycle 2</span>
+      </div>
+      <p class="q-desc">
+        Valides-tu la règle stricte selon laquelle on ne peut modifier/piloter en Étape 2 QUE les créneaux validés en Étape 1, ainsi que les derniers ajouts (double courbe + Loupe Δ cm, dédoublement Youenn/Katleen) ?
+      </p>
+      <label class="opt-label"><input type="radio" name="q2" value="opt_a" onchange="saveState()"><span><strong>Validé tel quel</strong> · Le verrou Étape 1 ➔ Étape 2 sécurise le planning et la double courbe + Loupe cm est très lisible.</span></label>
+      <label class="opt-label"><input type="radio" name="q2" value="opt_b" onchange="saveState()"><span><strong>Validé avec ajustement</strong> · Le verrou est validé, mais j'aimerais ajuster un détail d'affichage ou d'action terrain.</span></label>
+      <label class="opt-label"><input type="radio" name="q2" value="opt_c" onchange="saveState()"><span><strong>À assouplir</strong> · Je souhaite pouvoir ajouter/débloquer exceptionellement un créneau depuis Cycle 2.</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 2 :</span>
+      <textarea id="note_q2" placeholder="Retours sur la Loupe Δ cm, les créneaux doublés ou le pilotage météo..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="q-card" data-qid="q3">
+      <div class="q-header">
+        <h3 class="q-title">Validation 3 · Étape 3 (Module Statistique) : fusion Ferme/Fermé &amp; précision des motifs</h3>
+        <span class="q-tag">Étape 3 · Stats</span>
+      </div>
+      <p class="q-desc">
+        La séparation Vie 1 / Vie 2 / Absentéisme, le calcul de remplissage dynamique (12 / 20 / 24 chars), la fusion « Ferme / Fermé » et le bouton « ✏️ Préciser » répondent-ils à ton besoin de suivi ?
+      </p>
+      <label class="opt-label"><input type="radio" name="q3" value="opt_a" onchange="saveState()"><span><strong>Validé tel quel</strong> · Indicateurs fidèles à mon activité et reclassement simple des anciens créneaux « Fermé ».</span></label>
+      <label class="opt-label"><input type="radio" name="q3" value="opt_b" onchange="saveState()"><span><strong>Validé + idée complémentaire</strong> · C'est bon, mais j'aimerais un indicateur supplémentaire noté ci-dessous.</span></label>
+      <label class="opt-label"><input type="radio" name="q3" value="opt_c" onchange="saveState()"><span><strong>À revoir ensemble</strong> · Un calcul ou libellé statistique reste à ajuster.</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 3 :</span>
+      <textarea id="note_q3" placeholder="Ex. autres indicateurs utiles pour le bilan de fin de saison..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="q-card" data-qid="q4">
+      <div class="q-header">
+        <h3 class="q-title">Validation 4 · Étape 4 (Modèle Empirique &amp; Litto3D) : double ligne d'eau Théorique vs Réelle</h3>
+        <span class="q-tag">Étape 4 · Empirique</span>
+      </div>
+      <p class="q-desc">
+        La visualisation sur Litto3D (ligne théorique SHOM en pointillés vs ligne réelle avec surcote/sous-cote et bande hachurée sur le sable) et le protocole de relevés GPS te paraissent-ils parlants sur le terrain ?
+      </p>
+      <label class="opt-label"><input type="radio" name="q4" value="opt_a" onchange="saveState()"><span><strong>Validé tel quel</strong> · Visualisation claire de l'impact surcote/sous-cote en mètres de plage utilisables.</span></label>
+      <label class="opt-label"><input type="radio" name="q4" value="opt_b" onchange="saveState()"><span><strong>Validé avec ajustement</strong> · À affiner après les prochains relevés GPS sur la plage.</span></label>
+      <label class="opt-label"><input type="radio" name="q4" value="opt_c" onchange="saveState()"><span><strong>À simplifier</strong> · Trop technique, je préfère un affichage plus synthétique.</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 4 :</span>
+      <textarea id="note_q4" placeholder="Impressions après test sur la plage ou lors de dépressions/anticyclones..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="q-card" data-qid="q5">
+      <div class="q-header">
+        <h3 class="q-title">Validation 5 · Étape 5 (Hypothèses, Comptes Utilisateurs &amp; Espace d'Échange)</h3>
+        <span class="q-tag">Étape 5 · Équipe &amp; Suivi</span>
+      </div>
+      <p class="q-desc">
+        La séparation des comptes (Admin Jérôme/Benoît vs Moniteur REX Youenn/Katleen) et le fonctionnement par Notes + QCM + messagerie 💬 Liaison conviennent-ils pour piloter l'évolution de l'app ?
+      </p>
+      <label class="opt-label"><input type="radio" name="q5" value="opt_a" onchange="saveState()"><span><strong>Validé tel quel</strong> · Droits bien sécurisés pour l'équipe et suivi clair des décisions avec Benoît.</span></label>
+      <label class="opt-label"><input type="radio" name="q5" value="opt_b" onchange="saveState()"><span><strong>Validé avec précision</strong> · Ok sur le principe, avec une demande sur les droits ou un compte moniteur ci-dessous.</span></label>
+      <label class="opt-label"><input type="radio" name="q5" value="opt_c" onchange="saveState()"><span><strong>À ajuster</strong> · Je souhaite modifier les permissions d'accès ou la présentation des notes.</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 5 :</span>
+      <textarea id="note_q5" placeholder="Besoin d'un compte supplémentaire, droits moniteurs ou retour sur Liaison..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="q-card" data-qid="q6">
+      <div class="q-header">
+        <h3 class="q-title">Validation 6 · Étape 6 (Base de Données Clients) &amp; Priorité pour la suite</h3>
+        <span class="q-tag">Étape 6 · Clients &amp; Suite</span>
+      </div>
+      <p class="q-desc">
+        La constitution progressive de la base clients depuis les créneaux te convient-elle, et quelle est ta priorité principale pour la prochaine étape ? (plusieurs choix possibles)
+      </p>
+      <label class="opt-label"><input type="checkbox" name="q6" value="opt_1" onchange="saveState()"><span><strong>Base Clients validée</strong> · L'alimentation automatique depuis les réservations créneau correspond à mon besoin.</span></label>
+      <label class="opt-label"><input type="checkbox" name="q6" value="opt_2" onchange="saveState()"><span><strong>Priorité terrain</strong> · Enchaîner les relevés GPS sur la plage pour caler le modèle empirique réel.</span></label>
+      <label class="opt-label"><input type="checkbox" name="q6" value="opt_3" onchange="saveState()"><span><strong>Priorité réservation</strong> · Préparer la connexion avec l'outil de réservation externe (« Deux Ponts »).</span></label>
+      <label class="opt-label"><input type="checkbox" name="q6" value="opt_4" onchange="saveState()"><span><strong>Champs CRM complémentaires</strong> · Ajouter des infos utiles sur la fiche client (précisées ci-dessous).</span></label>
+      <span class="comment-label">Remarque de Jérôme sur l'Étape 6 &amp; la suite :</span>
+      <textarea id="note_q6" placeholder="Ex. champs client manquants (poids, âge, formule favorite, certificat...), priorités de saison..." oninput="saveState()"></textarea>
+    </div>
+
+    <div class="general-box">
+      <strong style="color:#92400e;font-size:10.5px;">✍️ Synthèse libre &amp; validation finale de Jérôme :</strong>
+      <textarea id="general_notes" placeholder="Avis global sur l'ensemble du cheminement en 6 étapes et points à prioriser ensemble..." oninput="saveState()"></textarea>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'cv_note_qcm_parcours_6_etapes_v1';
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      if (!t) return;
+      t.textContent = msg;
+      t.style.display = 'block';
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2800);
+    }
+
+    function updateCheckedStyles() {
+      document.querySelectorAll('.opt-label').forEach(lbl => {
+        const inp = lbl.querySelector('input');
+        lbl.classList.toggle('checked', Boolean(inp && inp.checked));
+      });
+    }
+
+    function saveState() {
+      const state = {
+        resp_name: document.getElementById('resp_name')?.value || '',
+        resp_date: document.getElementById('resp_date')?.value || '',
+        resp_verdict: document.getElementById('resp_verdict')?.value || '',
+        general_notes: document.getElementById('general_notes')?.value || '',
+        answers: {},
+        notes: {},
+      };
+      ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].forEach(q => {
+        const checked = Array.from(document.querySelectorAll(`input[name="${q}"]:checked`)).map(i => i.value);
+        state.answers[q] = checked;
+        state.notes[q] = document.getElementById(`note_${q}`)?.value || '';
+      });
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {}
+      updateCheckedStyles();
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) { updateCheckedStyles(); return; }
+        const st = JSON.parse(raw);
+        if (st.resp_name !== undefined && document.getElementById('resp_name')) document.getElementById('resp_name').value = st.resp_name;
+        if (st.resp_date !== undefined && document.getElementById('resp_date')) document.getElementById('resp_date').value = st.resp_date;
+        if (st.resp_verdict !== undefined && document.getElementById('resp_verdict')) document.getElementById('resp_verdict').value = st.resp_verdict;
+        if (st.general_notes !== undefined && document.getElementById('general_notes')) document.getElementById('general_notes').value = st.general_notes;
+        ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].forEach(q => {
+          const vals = st.answers?.[q] || [];
+          document.querySelectorAll(`input[name="${q}"]`).forEach(inp => {
+            inp.checked = vals.includes(inp.value);
+          });
+          const noteEl = document.getElementById(`note_${q}`);
+          if (noteEl && st.notes?.[q] !== undefined) noteEl.value = st.notes[q];
+        });
+      } catch (e) {}
+      updateCheckedStyles();
+    }
+
+    function resetForm() {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      document.querySelectorAll('.q-card input').forEach(inp => { inp.checked = false; });
+      document.querySelectorAll('textarea').forEach(t => { t.value = ''; });
+      document.getElementById('resp_date').value = '';
+      document.getElementById('resp_verdict').value = '';
+      updateCheckedStyles();
+      showToast('Questionnaire réinitialisé.');
+    }
+
+    function syncFormStateToDomAttributes() {
+      document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(el => {
+        if (el.checked) el.setAttribute('checked', 'checked');
+        else el.removeAttribute('checked');
+      });
+      document.querySelectorAll('input[type="text"]').forEach(el => {
+        el.setAttribute('value', el.value || '');
+      });
+      document.querySelectorAll('textarea').forEach(el => {
+        el.textContent = el.value || '';
+      });
+    }
+
+    function exportFillableHtml() {
+      syncFormStateToDomAttributes();
+      const cloned = document.documentElement.cloneNode(true);
+      const toastEl = cloned.querySelector('#toast');
+      if (toastEl) toastEl.style.display = 'none';
+      const htmlContent = '<!DOCTYPE html>\n' + cloned.outerHTML;
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Note_Validation_Parcours_6_Etapes_Jerome.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Fichier HTML remplissable téléchargé !');
+    }
+
+    function escapeXmlHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function exportFillableWord() {
+      const respName = document.getElementById('resp_name')?.value || 'Jérôme Bouchez';
+      const respDate = document.getElementById('resp_date')?.value || '';
+      const respVerdict = document.getElementById('resp_verdict')?.value || '';
+      const generalNotes = document.getElementById('general_notes')?.value || '';
+
+      let stepsHtml = '';
+      document.querySelectorAll('.step-card').forEach(card => {
+        const title = card.querySelector('.step-title')?.textContent || '';
+        const tab = card.querySelector('.step-tab')?.textContent || '';
+        const body = card.querySelector('.step-body')?.innerHTML || '';
+        stepsHtml += `
+          <div style="margin-bottom:8pt;border:1pt solid #cbd5e1;border-left:4pt solid #0284c7;padding:6pt 9pt;">
+            <p style="margin:0 0 3pt;font-weight:bold;font-size:10.5pt;color:#0f172a;">${escapeXmlHtml(title)} <span style="color:#0369a1;font-size:8.5pt;">[${escapeXmlHtml(tab)}]</span></p>
+            <div style="font-size:9.2pt;color:#334155;">${body}</div>
+          </div>`;
+      });
+
+      let sectionsHtml = '';
+      document.querySelectorAll('.q-card').forEach(card => {
+        const title = card.querySelector('.q-title')?.textContent || '';
+        const tag = card.querySelector('.q-tag')?.textContent || '';
+        const desc = card.querySelector('.q-desc')?.textContent || '';
+        const comment = card.querySelector('textarea')?.value || '';
+
+        let optsHtml = '';
+        card.querySelectorAll('.opt-label').forEach(lbl => {
+          const inp = lbl.querySelector('input');
+          const box = inp && inp.checked ? '☑' : '☐';
+          const text = lbl.querySelector('span')?.innerHTML || '';
+          optsHtml += `
+            <tr>
+              <td style="width:26pt;text-align:center;font-size:13pt;font-weight:bold;color:${inp && inp.checked ? '#0284c7' : '#475569'};border:1pt solid #e2e8f0;background:${inp && inp.checked ? '#f0f9ff' : '#ffffff'};">${box}</td>
+              <td style="padding:5pt 8pt;font-size:9.5pt;border:1pt solid #e2e8f0;background:${inp && inp.checked ? '#f0f9ff' : '#ffffff'};">${text}</td>
+            </tr>`;
+        });
+
+        sectionsHtml += `
+          <div style="margin-bottom:12pt;border:1pt solid #cbd5e1;padding:8pt 10pt;">
+            <p style="margin:0 0 3pt;font-size:11pt;font-weight:bold;color:#0f172a;">
+              ${escapeXmlHtml(title)} <span style="font-size:8.5pt;color:#0369a1;">[${escapeXmlHtml(tag)}]</span>
+            </p>
+            <p style="margin:0 0 6pt;font-size:9.5pt;color:#475569;">${escapeXmlHtml(desc)}</p>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:6pt;">${optsHtml}</table>
+            <p style="margin:0;font-size:9pt;color:#334155;background:#f8fafc;padding:5pt 7pt;border:1pt dashed #cbd5e1;">
+              <strong>Commentaire de Jérôme :</strong><br/>
+              ${comment ? escapeXmlHtml(comment).replace(/\n/g, '<br/>') : '&nbsp;<br/>&nbsp;'}
+            </p>
+          </div>`;
+      });
+
+      const docHtml = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:w="urn:schemas-microsoft-com:office:word"
+              xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8" />
+          <title>Note Validation Parcours en 6 Étapes - Jérôme</title>
+          <style>
+            body { font-family: Calibri, Arial, sans-serif; color: #0f172a; font-size: 10.5pt; }
+            h1 { font-size: 15pt; color: #0284c7; margin: 0 0 4pt; }
+          </style>
+        </head>
+        <body>
+          <h1>Validation du Cheminement en 6 Étapes &amp; Dernières Évolutions</h1>
+          <p style="margin:0 0 8pt;color:#475569;font-size:9.5pt;">
+            Char à Voile du Bout du Monde · Plage de Lestrevet (29550 Plomodiern)
+          </p>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:10pt;background:#f8fafc;">
+            <tr>
+              <td style="border:1pt solid #cbd5e1;padding:5pt 8pt;font-size:9.5pt;"><strong>Répondant :</strong> ${escapeXmlHtml(respName)}</td>
+              <td style="border:1pt solid #cbd5e1;padding:5pt 8pt;font-size:9.5pt;"><strong>Date :</strong> ${escapeXmlHtml(respDate || '____ / ____ / 2026')}</td>
+              <td style="border:1pt solid #cbd5e1;padding:5pt 8pt;font-size:9.5pt;"><strong>Verdict :</strong> ${escapeXmlHtml(respVerdict || 'À compléter')}</td>
+            </tr>
+          </table>
+          ${stepsHtml}
+          <h2 style="font-size:12pt;color:#0f172a;margin:12pt 0 6pt;">QCM de validation par étape</h2>
+          ${sectionsHtml}
+          <div style="background:#fffbeb;border:1pt solid #fcd34d;padding:8pt 10pt;margin-top:8pt;">
+            <p style="margin:0 0 4pt;font-weight:bold;color:#92400e;font-size:10pt;">Synthèse libre de Jérôme :</p>
+            <p style="margin:0;font-size:9.5pt;">${generalNotes ? escapeXmlHtml(generalNotes).replace(/\n/g, '<br/>') : '&nbsp;<br/>&nbsp;<br/>&nbsp;'}</p>
+          </div>
+        </body>
+        </html>`;
+
+      const blob = new Blob(['\ufeff', docHtml], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Note_Validation_Parcours_6_Etapes_Jerome.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Document Word remplissable (.doc) téléchargé !');
+    }
+
+    loadState();
+  </script>
+</body>
+</html>

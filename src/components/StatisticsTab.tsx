@@ -33,6 +33,7 @@ interface StatisticsTabProps {
   isReadOnly?: boolean;
   onAddCustomNonPublishReason?: (reason: string) => void;
   onReclassifyValidationReason?: (targets: { ds: string; slotKey: string }[], newReason: string) => void;
+  onObservationSaved?: (savedObs: SlotObservation) => void;
 }
 
 export const StatisticsTab: React.FC<StatisticsTabProps> = ({
@@ -45,6 +46,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   isReadOnly = false,
   onAddCustomNonPublishReason,
   onReclassifyValidationReason,
+  onObservationSaved,
 }) => {
   // Liste des observations terrain enregistrées (données réelles uniquement)
   const [observations, setObservations] = useState<SlotObservation[]>(() =>
@@ -947,8 +949,8 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               <span>• Non publié C1 / Absentéisme :</span>
               <strong>{periodStats.instructorAbsentSlotsCount}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', background: '#f0f9ff', padding: '2px 6px', borderRadius: '4px' }}>
-              <span>• Faute d&apos;inscrits (Vie 1) :</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#991b1b', background: '#fff1f2', padding: '2px 6px', borderRadius: '4px' }}>
+              <span>• Pas d&apos;inscrits (Vie 2) :</span>
               <strong>{periodStats.unbookedSlotsCount}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#991b1b', background: '#fef2f2', padding: '2px 6px', borderRadius: '4px' }}>
@@ -1784,10 +1786,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                         </td>
                         <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
                           {isRealized ? (
-                            <span style={{ color: '#166534', fontWeight: 800 }}>✓ Réalisée</span>
+                            <span style={{ color: '#166534', fontWeight: 800 }}>
+                              ✓ Réalisée{obs.charsCount != null ? ` (${obs.charsCount} ch.)` : ''}
+                            </span>
                           ) : (
                             <span style={{ color: '#b91c1c', fontWeight: 800 }}>
                               ⛔ {obs.cancellationReason ? CANCELLATION_REASONS_INFO[obs.cancellationReason]?.shortLabel : 'Annulée'}
+                              {obs.cancellationNote ? ` · ${obs.cancellationNote}` : ''}
+                            </span>
+                          )}
+                          {obs.author && (
+                            <span style={{ marginLeft: '6px', fontSize: '0.62rem', color: '#64748b', fontWeight: 700 }}>
+                              ({obs.author})
                             </span>
                           )}
                         </td>
@@ -1810,11 +1820,18 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                           )}
                         </td>
                         <td style={{ padding: '6px 8px', color: '#334155', whiteSpace: 'nowrap' }}>
-                          {obs.observedPressure ? `${obs.observedPressure} hPa` : '—'}
+                          {obs.observedPressure != null ? `${obs.observedPressure} hPa` : '—'}
                         </td>
                         <td style={{ padding: '6px 8px', color: '#334155', whiteSpace: 'nowrap' }}>
-                          {obs.observedWindKts ? `${obs.observedWindKts} nds ${obs.observedWindDir || ''}` : '—'}
-                          {obs.observedWaveH ? ` · ${obs.observedWaveH}m` : ''}
+                          {obs.observedWindKts != null || obs.observedWindDir || obs.observedWaveH != null ? (
+                            <>
+                              {obs.observedWindKts != null ? `${obs.observedWindKts} nds` : ''}
+                              {obs.observedWindDir ? `${obs.observedWindKts != null ? ' ' : ''}${obs.observedWindDir}` : ''}
+                              {obs.observedWaveH != null ? `${obs.observedWindKts != null || obs.observedWindDir ? ' · ' : ''}${obs.observedWaveH}m` : ''}
+                            </>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td style={{ padding: '6px 8px', color: '#475569', fontSize: '0.66rem' }}>
                           {obs.beachCondition === 'dur' ? 'Sable dur' : obs.beachCondition === 'mou' ? 'Sable mou' : obs.beachCondition ? 'Bâches' : '—'}
@@ -1869,7 +1886,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           initialObservation={editingObservation}
           customNonPublishReasons={settings.customNonPublishReasons}
           isReadOnly={isReadOnly}
-          onSaveSuccess={updated => setObservations(updated)}
+          onSaveSuccess={(updated, savedObs) => {
+            setObservations(updated);
+            if (savedObs) {
+              onObservationSaved?.(savedObs);
+            }
+          }}
         />
       )}
 

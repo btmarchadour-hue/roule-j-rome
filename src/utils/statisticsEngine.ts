@@ -14,8 +14,8 @@ export const CANCELLATION_REASONS_INFO: Record<
   { label: string; shortLabel: string; color: string; icon: string }
 > = {
   wind_low: {
-    label: 'Vent insuffisant (< 8 nds)',
-    shortLabel: 'Vent trop faible',
+    label: 'Vent insuffisant / sans vent (< 8 nds)',
+    shortLabel: 'Sans vent / faible',
     color: '#0284c7', // Bleu ciel
     icon: '🍃',
   },
@@ -402,11 +402,28 @@ export function computePeriodStats(
     const dayObs = Array.from(dedupObsMap.values());
 
     const handledSlotKeys = new Set<string>();
+    const handledObsIds = new Set<string>();
+    const normT = (v?: string) => (v || '').replace('h', ':');
 
     if (dayVal && dayVal.items) {
       dayVal.items.forEach(item => {
         handledSlotKeys.add(item.k);
-        const matchedObs = dayObs.find(o => o.slotKey === item.k);
+        const matchedObs =
+          dayObs.find(o => o.slotKey === item.k) ||
+          dayObs.find(
+            o =>
+              !handledObsIds.has(o.id) &&
+              Boolean(o.slotStart) &&
+              Boolean(o.slotEnd) &&
+              (normT(o.slotStart) === normT(item.publishedStart || item.s) ||
+                normT(o.slotStart) === normT(item.actualStart)) &&
+              (normT(o.slotEnd) === normT(item.publishedEnd || item.e) ||
+                normT(o.slotEnd) === normT(item.actualEnd))
+          );
+        if (matchedObs) {
+          handledObsIds.add(matchedObs.id);
+          handledSlotKeys.add(matchedObs.slotKey);
+        }
 
         if (item.cycle2Status === 'shifted') cycle2ShiftedCount++;
         if (item.cycle2Status === 'merged') cycle2MergedCount++;
@@ -424,7 +441,7 @@ export function computePeriodStats(
           return;
         }
 
-        if (item.status === 'valid') {
+        if (item.status === 'valid' && matchedObs?.status !== 'cancelled') {
           if (item.cycle2Status === 'merged') {
             // Créneau fusionné dans un autre : ses chars sont déjà portés par la séance cible
             return;
@@ -444,7 +461,7 @@ export function computePeriodStats(
           const slotChars = obsChars > 0 ? obsChars : itemCharsInfo.totalChars;
           totalRealizedChars += slotChars;
           totalRealizedCapacity += getSlotMaxCapacity(item);
-        } else if (item.status === 'rejected') {
+        } else if (item.status === 'rejected' || matchedObs?.status === 'cancelled') {
           totalCancelledSlots++;
           // Recherche motif
           let reason: CancellationReason = 'wind_low';

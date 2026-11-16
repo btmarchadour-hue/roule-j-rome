@@ -6,6 +6,7 @@ import {
   onSnapshot,
   getDocs,
   writeBatch,
+  deleteField,
 } from 'firebase/firestore';
 import { auth, db, ensureAuth } from '../firebase';
 import {
@@ -317,8 +318,10 @@ export const saveObservationToFirestore = async (
     });
     await setDoc(docRef, payload);
     console.info(`✓ Relevé terrain [${docId}] synchronisé dans Firestore`);
+    notifySync('✓ REX terrain enregistré et synchronisé');
   } catch (error) {
     console.error('Erreur enregistrement observation Firestore:', error);
+    notifySync('⚠️ Erreur synchro REX terrain');
     throw error;
   }
 };
@@ -329,6 +332,7 @@ export const deleteObservationFromFirestore = async (obsId: string) => {
     const docRef = doc(db, 'observations', obsId);
     await deleteDoc(docRef);
     console.info(`✓ Relevé terrain [${obsId}] supprimé de Firestore`);
+    notifySync('🗑️ REX terrain supprimé');
   } catch (error) {
     console.error('Erreur suppression observation Firestore:', error);
     throw error;
@@ -780,8 +784,14 @@ export const subscribeToTeamNotes = (
     snapshot => {
       const list: TeamNote[] = [];
       snapshot.forEach(docSnap => {
-        // Ignorer les documents techniques d'état et de QCM des notes (stockés dans team_notes)
-        if (docSnap.id === 'status_tech_notes' || docSnap.id === 'qcm_tech_notes') return;
+        // Ignorer les documents techniques d'état, QCM et audit des données (stockés dans team_notes)
+        if (
+          docSnap.id === 'status_tech_notes' ||
+          docSnap.id === 'qcm_tech_notes' ||
+          docSnap.id === 'audit_data_c1_c2'
+        ) {
+          return;
+        }
         const d = docSnap.data();
         const text = typeof d.content === 'string' ? d.content.trim() : '';
         if (!text) return;
@@ -1153,5 +1163,117 @@ export const saveTechNoteQcmToFirestore = async (
   }
 };
 
+export const deleteTechNoteQcmFromFirestore = async (noteId: string): Promise<void> => {
+  const path = 'team_notes/qcm_tech_notes';
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', 'qcm_tech_notes');
+    await setDoc(
+      docRef,
+      {
+        [noteId]: deleteField(),
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+    notifySync('↩️ Réponses QCM réinitialisées dans le Cloud');
+  } catch (error) {
+    notifySync('⚠️ Erreur lors de la réinitialisation du QCM');
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
 
+/* -------------------------------------------------------------------------- */
+/* 10. AUDIT & VALIDATION DE COHÉRENCE DES DONNÉES EXISTANTES (C1 / C2)       */
+/* -------------------------------------------------------------------------- */
+export interface DataAuditEntrySignOff {
+  entryKey: string;
+  verified: boolean;
+  verifiedBy: string;
+  verifiedAt: number;
+  note?: string;
+}
 
+export type DataAuditSignOffMap = Record<string, DataAuditEntrySignOff>;
+
+export const subscribeToDataAudit = (
+  onData: (data: DataAuditSignOffMap) => void,
+  onError?: (err: Error) => void
+) => {
+  const docRef = doc(db, 'team_notes', 'audit_data_c1_c2');
+  return onSnapshot(
+    docRef,
+    snap => {
+      if (snap.exists()) {
+        const raw = snap.data();
+        const clean: DataAuditSignOffMap = {};
+        Object.entries(raw).forEach(([k, v]) => {
+          if (k !== 'updatedAt' && v && typeof v === 'object') {
+            clean[k] = v as DataAuditEntrySignOff;
+          }
+        });
+        onData(clean);
+      } else {
+        onData({});
+      }
+    },
+    error => {
+      console.warn('Erreur écoute audit données Firestore:', error);
+      onError?.(error);
+    }
+  );
+};
+
+export const saveDataAuditSignOffToFirestore = async (
+  entryKey: string,
+  signOff: DataAuditEntrySignOff | null
+): Promise<void> => {
+  const path = 'team_notes/audit_data_c1_c2';
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', 'audit_data_c1_c2');
+    const updatePayload = {
+      [entryKey]: signOff ? cleanForFirestore(signOff) : null,
+      updatedAt: Date.now(),
+    };
+    await setDoc(docRef, updatePayload, { merge: true });
+    notifySync(
+      signOff?.verified
+        ? '✓ Donnée validée comme cohérente dans le Cloud'
+        : '↩️ Validation retirée pour réexamen'
+    );
+  } catch (error) {
+    notifySync('⚠️ Erreur de sauvegarde du visa d’audit');
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const batchSaveDataAuditSignOffsToFirestore = async (
+  entries: Record<string, DataAuditEntrySignOff | null>
+): Promise<void> => {
+  const keys = Object.keys(entries);
+  if (keys.length === 0) return;
+  const path = 'team_notes/audit_data_c1_c2';
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'team_notes', 'audit_data_c1_c2');
+    const updatePayload: Record<string, any> = {
+      updatedAt: Date.now(),
+    };
+    let approvedCount = 0;
+    keys.forEach(k => {
+      const val = entries[k];
+      if (val && val.verified) approvedCount++;
+      updatePayload[k] = val ? cleanForFirestore(val) : null;
+    });
+    await setDoc(docRef, updatePayload, { merge: true });
+    notifySync(
+      approvedCount > 0
+        ? `✓ ${approvedCount} entrée${approvedCount > 1 ? 's' : ''} validée${approvedCount > 1 ? 's' : ''} dans le Cloud`
+        : `↩️ ${keys.length} visa${keys.length > 1 ? 's' : ''} retiré${keys.length > 1 ? 's' : ''}`
+    );
+  } catch (error) {
+    notifySync('⚠️ Erreur lors de la mise à jour groupée');
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};

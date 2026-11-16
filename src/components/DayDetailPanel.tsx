@@ -6,6 +6,7 @@ import {
   DayFocusData,
   MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
+  SlotObservation,
   TidePoint,
   ValidationsMap,
   WindPoint,
@@ -44,6 +45,7 @@ import { CustomSlotsManager } from './CustomSlotsManager';
 import { DayCycle1Banner } from './DayCycle1Banner';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
+import { CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
 import { WindPanel } from './WindPanel';
 
 interface DayDetailPanelProps {
@@ -94,6 +96,7 @@ interface DayDetailPanelProps {
     primaryInstructor?: string;
     secondaryInstructor?: string;
   }) => void;
+  observations?: SlotObservation[];
   isReadOnly?: boolean;
 }
 
@@ -119,6 +122,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   canNextDay = false,
   onOpenCycle2,
   onOpenObservationModal,
+  observations = [],
   isReadOnly = false,
 }) => {
   const onValidateDay = isReadOnly ? undefined : rawOnValidateDay;
@@ -677,10 +681,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             settings.parkMaxBi
           );
 
-          const c1Status = getEffectiveCycle1Status(valItem);
-          const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
-          const c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
-
           const sessItem: SessionItem =
             focusData.list.find(
               s =>
@@ -704,18 +704,57 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
           const displayStart = valItem?.actualStart || startTimeStr;
           const displayEnd = valItem?.actualEnd || endTimeStr;
+          const normT = (v?: string) => (v || '').replace('h', ':');
+          const slotObs = observations
+            .filter(
+              o =>
+                o.ds === selectedDate &&
+                (o.slotKey === slotKey ||
+                  (Boolean(o.slotStart) &&
+                    Boolean(o.slotEnd) &&
+                    (normT(o.slotStart) === normT(startTimeStr) || normT(o.slotStart) === normT(displayStart)) &&
+                    (normT(o.slotEnd) === normT(endTimeStr) || normT(o.slotEnd) === normT(displayEnd))))
+            )
+            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
+          const slotObsReasonInfo =
+            slotObs?.status === 'cancelled' && slotObs.cancellationReason
+              ? CANCELLATION_REASONS_INFO[slotObs.cancellationReason]
+              : null;
+
+          let c1Status = getEffectiveCycle1Status(valItem);
+          let inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+          let c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
+
+          if (slotObs?.status === 'cancelled') {
+            if (slotObs.cancellationReason === 'no_clients') {
+              c1Status = 'closed_no_bookings';
+              inCycle2 = false;
+              c2Status = 'none';
+            } else if (slotObs.cancellationReason === 'instructor') {
+              c1Status = 'not_published';
+              inCycle2 = false;
+              c2Status = 'none';
+            } else {
+              c1Status = 'published';
+              inCycle2 = true;
+              c2Status = 'cancelled_weather';
+            }
+          } else if (slotObs?.status === 'realized' && (c2Status === 'none' || c2Status === 'awaiting_booking')) {
+            c1Status = 'published';
+            inCycle2 = true;
+            c2Status = 'realized';
+          }
+
           const isShifted =
             c2Status === 'shifted' &&
             Boolean(valItem?.actualStart) &&
             (valItem?.actualStart !== startTimeStr || valItem?.actualEnd !== endTimeStr);
 
           const cardBg =
-            c2Status === 'cancelled_weather'
+            c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '#fef2f2'
               : c1Status === 'not_published'
               ? '#f1f5f9'
-              : c1Status === 'closed_no_bookings'
-              ? '#f8fafc'
               : inCycle2
               ? '#f0fdf4'
               : c1Status === 'published'
@@ -723,12 +762,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               : '#ffffff';
 
           const cardBorder =
-            c2Status === 'cancelled_weather'
+            c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '2px solid #ef4444'
               : c1Status === 'not_published'
               ? '2px solid #64748b'
-              : c1Status === 'closed_no_bookings'
-              ? '1.5px solid #cbd5e1'
               : inCycle2
               ? '2px solid #22c55e'
               : c1Status === 'published'
@@ -736,12 +773,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               : '2px dashed #cbd5e1';
 
           const cardBarColor =
-            c2Status === 'cancelled_weather'
+            c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '#dc2626'
               : c1Status === 'not_published'
               ? '#475569'
-              : c1Status === 'closed_no_bookings'
-              ? '#64748b'
               : inCycle2
               ? '#16a34a'
               : c1Status === 'published'
@@ -1004,16 +1039,17 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '5px',
-                      background: '#475569',
+                      background: '#dc2626',
                       color: '#ffffff',
                       padding: '4px 10px',
                       borderRadius: '6px',
                       fontWeight: 900,
                       fontSize: '0.76rem',
+                      letterSpacing: '0.02em',
                     }}
                   >
-                    <span>🌑</span>
-                    <span>FERMÉ · FAUTE D&apos;INSCRITS (VIE 1)</span>
+                    <span>⛔</span>
+                    <span>ANNULÉ (VIE 2) · PAS D&apos;INSCRIT</span>
                   </span>
                 ) : (
                   <span
@@ -1051,6 +1087,39 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                 >
                   {ok === true ? '● VENT OK' : ok === false ? 'VENT HORS PLAGE' : '🌊 Marée seule'}
                 </span>
+
+                {slotObs && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      fontSize: '0.70rem',
+                      fontWeight: 900,
+                      background: slotObs.status === 'cancelled' ? '#fef2f2' : '#ecfdf5',
+                      color: slotObs.status === 'cancelled' ? '#b91c1c' : '#047857',
+                      border: slotObs.status === 'cancelled' ? '1.5px solid #fca5a5' : '1.5px solid #6ee7b7',
+                    }}
+                    title={`REX saisi${slotObs.author ? ` par ${slotObs.author}` : ''}${slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : slotObs.notes ? ` · ${slotObs.notes}` : ''}`}
+                  >
+                    <span>📝 REX :</span>
+                    {slotObs.status === 'cancelled' ? (
+                      <span>
+                        {slotObsReasonInfo?.icon || '⛔'} {slotObsReasonInfo?.shortLabel || 'Annulé'}
+                        {slotObs.cancellationNote ? ` · ${slotObs.cancellationNote}` : ''}
+                      </span>
+                    ) : (
+                      <span>
+                        ✓ Réalisé
+                        {slotObs.charsCount != null
+                          ? ` · ${slotObs.charsCount} char${slotObs.charsCount > 1 ? 's' : ''}`
+                          : ''}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
 
               {/* SECTION DROITE : ACTIONS NUMÉRIQUES + REPOSITIONNEMENT C1 + HORAIRE */}
@@ -1216,10 +1285,22 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         margin: 0,
                         padding: '5px 8px',
                         fontSize: '0.72rem',
-                        fontWeight: 700,
-                        color: '#0369a1',
-                        background: '#f0f9ff',
-                        border: '1px solid #bae6fd',
+                        fontWeight: slotObs ? 800 : 700,
+                        color: slotObs
+                          ? slotObs.status === 'cancelled'
+                            ? '#b91c1c'
+                            : '#047857'
+                          : '#0369a1',
+                        background: slotObs
+                          ? slotObs.status === 'cancelled'
+                            ? '#fee2e2'
+                            : '#dcfce7'
+                          : '#f0f9ff',
+                        border: slotObs
+                          ? slotObs.status === 'cancelled'
+                            ? '1.5px solid #f87171'
+                            : '1.5px solid #34d399'
+                          : '1px solid #bae6fd',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'inline-flex',
@@ -1239,10 +1320,14 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           secondaryInstructor,
                         })
                       }
-                      title="Saisir le REX terrain (chars sortis, météo réelle, annulation)"
+                      title={
+                        slotObs
+                          ? `Modifier le REX existant (${slotObs.status === 'cancelled' ? slotObsReasonInfo?.shortLabel || 'Annulé' : 'Réalisé'})`
+                          : 'Saisir le REX terrain (chars sortis, météo réelle, annulation)'
+                      }
                     >
                       <span>📝</span>
-                      <span>REX</span>
+                      <span>{slotObs ? 'REX ✓' : 'REX'}</span>
                     </button>
                   )}
                 </div>
@@ -1323,12 +1408,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           fontWeight: 900,
                           letterSpacing: '-0.02em',
                           color:
-                            c2Status === 'cancelled_weather'
+                            c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
                               ? '#991b1b'
                               : c1Status === 'not_published'
                               ? '#475569'
-                              : c1Status === 'closed_no_bookings'
-                              ? '#64748b'
                               : inCycle2
                               ? '#14532d'
                               : c1Status === 'published'

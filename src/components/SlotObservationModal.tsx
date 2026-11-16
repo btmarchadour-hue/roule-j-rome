@@ -23,7 +23,7 @@ interface SlotObservationModalProps {
   defaultWindDir?: string | null;
   defaultWaveH?: number | null;
   initialObservation?: SlotObservation | null;
-  onSaveSuccess: (updatedList: SlotObservation[]) => void;
+  onSaveSuccess: (updatedList: SlotObservation[], savedObs?: SlotObservation) => void;
   isReadOnly?: boolean;
   maxChars?: number;
   primaryInstructor?: string;
@@ -55,8 +55,6 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   currentUserName,
   customNonPublishReasons,
 }) => {
-  if (!isOpen) return null;
-
   const [status, setStatus] = useState<'realized' | 'cancelled'>(
     initialObservation?.status || 'realized'
   );
@@ -68,38 +66,38 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Écarts réels
+  // Écarts réels (vides par défaut si non mesurés)
   const [actualPassableTime, setActualPassableTime] = useState<string>(
-    initialObservation?.actualPassableTime || slotStart
+    initialObservation?.actualPassableTime || ''
   );
   const [timeDeltaMin, setTimeDeltaMin] = useState<number | ''>(
-    initialObservation?.timeDeltaMin ?? 0
+    initialObservation?.timeDeltaMin ?? ''
   );
   const [waterDeltaCm, setWaterDeltaCm] = useState<number | ''>(
-    initialObservation?.waterDeltaCm ?? 0
+    initialObservation?.waterDeltaCm ?? ''
   );
   const [actualWaterHeight, setActualWaterHeight] = useState<number | ''>(
     initialObservation?.actualWaterHeight ?? ''
   );
 
-  // Météo réelle
+  // Météo réelle (laisser vide si non renseigné : aucune valeur par défaut imposée)
   const [observedPressure, setObservedPressure] = useState<number | ''>(
-    initialObservation?.observedPressure ?? defaultPressure ?? 1013
+    initialObservation?.observedPressure ?? defaultPressure ?? ''
   );
   const [observedWindKts, setObservedWindKts] = useState<number | ''>(
-    initialObservation?.observedWindKts ?? defaultWindKts ?? 15
+    initialObservation?.observedWindKts ?? defaultWindKts ?? ''
   );
   const [observedGustKts, setObservedGustKts] = useState<number | ''>(
-    initialObservation?.observedGustKts ?? defaultGustKts ?? 20
+    initialObservation?.observedGustKts ?? defaultGustKts ?? ''
   );
   const [observedWindDir, setObservedWindDir] = useState<string>(
-    initialObservation?.observedWindDir ?? defaultWindDir ?? 'O'
+    initialObservation?.observedWindDir ?? defaultWindDir ?? ''
   );
   const [observedWaveH, setObservedWaveH] = useState<number | ''>(
     initialObservation?.observedWaveH ?? defaultWaveH ?? ''
   );
-  const [beachCondition, setBeachCondition] = useState<SlotObservation['beachCondition']>(
-    initialObservation?.beachCondition || 'dur'
+  const [beachCondition, setBeachCondition] = useState<SlotObservation['beachCondition'] | undefined>(
+    initialObservation?.beachCondition
   );
 
   // Bilan participants
@@ -146,13 +144,13 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     // GARDE-FOU MÉTIER INVIOLABLE (Règle Benoît & Jérôme) :
     // En char à voile, les stagiaires/clients au volant sont les "pilotes".
     // Une séance validée ou marquée "Réalisée" DOIT obligatoirement avoir au moins 1 participant (pilote) !
-    // Si 0 inscrit, elle relève de "Vie 1 : Faute de réservations" et doit être enregistrée comme Annulée.
+    // Si 0 inscrit, elle relève de "Vie 2 : Pas d'inscrits" et doit être enregistrée comme Annulée.
     const computedChars = (Number(monoCount) || 0) + (Number(biCount) || 0);
     if (status === 'realized') {
       const pCount = participantsCount === '' ? 0 : Number(participantsCount);
       if (pCount <= 0 && computedChars <= 0) {
         setErrorMessage(
-          '⛔ Règle métier stricte : Une séance ne peut JAMAIS être enregistrée comme "Réalisée" avec 0 participant (pilote) ! S\'il n\'y avait aucun participant inscrit, cochez "Séance Annulée / Non roulée" avec le motif "Vie 1 : Faute de réservations".'
+          '⛔ Règle métier stricte : Une séance ne peut JAMAIS être enregistrée comme "Réalisée" avec 0 participant (pilote) ! S\'il n\'y avait aucun participant inscrit, cochez "Séance Annulée / Non roulée" avec le motif "Pas d\'inscrits (Vie 2)".'
         );
         return;
       }
@@ -204,7 +202,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       observedGustKts: observedGustKts !== '' ? Number(observedGustKts) : undefined,
       observedWindDir: observedWindDir || undefined,
       observedWaveH: observedWaveH !== '' ? Number(observedWaveH) : undefined,
-      beachCondition: status === 'realized' ? beachCondition : undefined,
+      beachCondition: beachCondition || undefined,
       charsCount: status === 'realized' ? effectiveChars : undefined,
       participantsCount: status === 'realized' ? effectiveParticipants : undefined,
       monoCount: status === 'realized' && monoCount !== '' ? Number(monoCount) : undefined,
@@ -218,7 +216,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     const updated = upsertSlotObservation(obs);
     // Synchro Cloud Firestore en tâche de fond pour Jérôme et l'ensemble des appareils
     saveObservationToFirestore(obs).catch(err => console.warn('Erreur envoi Firestore observation:', err));
-    onSaveSuccess(updated);
+    onSaveSuccess(updated, obs);
     onClose();
   };
 
@@ -231,6 +229,8 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       onClose();
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -520,8 +520,8 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     <span>Suivi des inscrits impactés (Demande Jérôme)</span>
                   </div>
                   {cancellationReason === 'no_clients' ? (
-                    <span style={{ fontSize: '0.65rem', background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                      Vie 1 · Sans réservation
+                    <span style={{ fontSize: '0.65rem', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                      Vie 2 · Pas d&apos;inscrits
                     </span>
                   ) : (
                     <span style={{ fontSize: '0.65rem', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
@@ -531,8 +531,8 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 </div>
 
                 {cancellationReason === 'no_clients' ? (
-                  <div style={{ fontSize: '0.72rem', color: '#0369a1', background: '#f0f9ff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bae6fd', lineHeight: '1.35' }}>
-                    ℹ️ <strong>Créneau fermé faute d'inscrits (Vie 1)</strong> : aucun client n'avait réservé sur ce créneau. Il n'est pas comptabilisé comme perte de clientèle.
+                  <div style={{ fontSize: '0.72rem', color: '#991b1b', background: '#fef2f2', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fecaca', lineHeight: '1.35' }}>
+                    ℹ️ <strong>Séance annulée · Pas d&apos;inscrits (Vie 2)</strong> : aucun client n&apos;avait réservé sur ce créneau publié. Elle est comptabilisée séparément des annulations météo.
                   </div>
                 ) : (
                   <>
@@ -606,7 +606,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               {/* 1. Écart d'horaires & Surcote d'eau */}
               <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#166534', marginBottom: '8px' }}>
-                  🌊 Écart constaté : Marée & Roulage effectif
+                  🌊 Écart constaté : Marée & Roulage effectif (facultatif)
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
@@ -630,7 +630,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                       type="number"
                       value={timeDeltaMin}
                       onChange={e => setTimeDeltaMin(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="-15 = en avance"
+                      placeholder="ex: -15 (vide si N/A)"
                       style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
                     />
                   </div>
@@ -643,7 +643,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                       type="number"
                       value={waterDeltaCm}
                       onChange={e => setWaterDeltaCm(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="+20 = eau plus haute"
+                      placeholder="ex: +20 (vide si N/A)"
                       style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
                     />
                   </div>
@@ -660,123 +660,6 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                       placeholder="ex: 4.45"
                       style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
                     />
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. Paramètres environnementaux réels pour corrélation */}
-              <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a', marginBottom: '8px' }}>
-                  🧭 Paramètres Météo & Mer réels (Calibration)
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Pression (hPa)
-                    </label>
-                    <input
-                      type="number"
-                      value={observedPressure}
-                      onChange={e => setObservedPressure(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="1013"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Vent réel (nds)
-                    </label>
-                    <input
-                      type="number"
-                      value={observedWindKts}
-                      onChange={e => setObservedWindKts(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="16"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Rafales (nds)
-                    </label>
-                    <input
-                      type="number"
-                      value={observedGustKts}
-                      onChange={e => setObservedGustKts(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="22"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Direction
-                    </label>
-                    <select
-                      value={observedWindDir}
-                      onChange={e => setObservedWindDir(e.target.value)}
-                      style={{ width: '100%', padding: '5px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', background: '#fff', boxSizing: 'border-box' }}
-                    >
-                      <option value="O">Ouest (O)</option>
-                      <option value="SO">Sud-Ouest (SO)</option>
-                      <option value="ONO">Ouest-Nord-Ouest (ONO)</option>
-                      <option value="NO">Nord-Ouest (NO)</option>
-                      <option value="N">Nord (N)</option>
-                      <option value="NNE">Nord-Nord-Est (NNE)</option>
-                      <option value="NE">Nord-Est (NE)</option>
-                      <option value="E">Est (E - Terre)</option>
-                      <option value="SE">Sud-Est (SE)</option>
-                      <option value="S">Sud (S)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                      Houle (m)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={observedWaveH}
-                      onChange={e => setObservedWaveH(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="0.8"
-                      style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                </div>
-
-                {/* État de la plage */}
-                <div style={{ marginTop: '8px' }}>
-                  <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
-                    État du sable & de la plage :
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {[
-                      { key: 'dur', label: 'Sable dur / Idéal' },
-                      { key: 'mou', label: 'Sable mou' },
-                      { key: 'baches_faibles', label: 'Bâches faibles' },
-                      { key: 'baches_fortes', label: 'Bâches fortes' },
-                    ].map(opt => (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        onClick={() => setBeachCondition(opt.key as any)}
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          border: beachCondition === opt.key ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                          background: beachCondition === opt.key ? '#e0f2fe' : '#fff',
-                          color: beachCondition === opt.key ? '#0369a1' : '#64748b',
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
                   </div>
                 </div>
               </div>
@@ -897,7 +780,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
                     {noCharsYet && (
                       <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#c2410c', background: '#ffedd5', padding: '6px 10px', borderRadius: '6px', fontWeight: 600 }}>
-                        ⚠️ <strong>Attention Jérôme :</strong> Une séance réalisée doit avoir au moins 1 char (mono ou bi). S&apos;il n&apos;y avait aucun inscrit, classez en « Séance Annulée » motif « Vie 1 : Faute de réservations ».
+                        ⚠️ <strong>Attention Jérôme :</strong> Une séance réalisée doit avoir au moins 1 char (mono ou bi). S&apos;il n&apos;y avait aucun inscrit, classez en « Séance Annulée » motif « Pas d&apos;inscrits (Vie 2) ».
                       </div>
                     )}
                   </div>
@@ -905,6 +788,134 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               })()}
             </>
           )}
+
+          {/* PARAMÈTRES MÉTÉO & MER RÉELS (DISPONIBLE POUR SÉANCES RÉALISÉES ET ANNULÉES) */}
+          <div style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0f172a' }}>
+                🧭 Conditions Météo & Plage observées (facultatif)
+              </div>
+              <span style={{ fontSize: '0.64rem', color: '#64748b', fontWeight: 600 }}>
+                Laissez vide si non relevé (aucune valeur fictive enregistrée)
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
+              <div>
+                <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  Pression (hPa)
+                </label>
+                <input
+                  type="number"
+                  value={observedPressure}
+                  onChange={e => setObservedPressure(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="ex: 1013"
+                  style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  Vent réel (nds)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={observedWindKts}
+                  onChange={e => setObservedWindKts(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="ex: 9"
+                  style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  Rafales (nds)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={observedGustKts}
+                  onChange={e => setObservedGustKts(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="ex: 14"
+                  style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box', background: '#fff' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  Direction
+                </label>
+                <select
+                  value={observedWindDir}
+                  onChange={e => setObservedWindDir(e.target.value)}
+                  style={{ width: '100%', padding: '5px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', background: '#fff', boxSizing: 'border-box' }}
+                >
+                  <option value="">— Vide —</option>
+                  <option value="O">Ouest (O)</option>
+                  <option value="SO">Sud-Ouest (SO)</option>
+                  <option value="ONO">Ouest-Nord-Ouest (ONO)</option>
+                  <option value="NO">Nord-Ouest (NO)</option>
+                  <option value="N">Nord (N)</option>
+                  <option value="NNE">Nord-Nord-Est (NNE)</option>
+                  <option value="NE">Nord-Est (NE)</option>
+                  <option value="E">Est (E - Terre)</option>
+                  <option value="SE">Sud-Est (SE)</option>
+                  <option value="S">Sud (S)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '2px' }}>
+                  Houle (m)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  value={observedWaveH}
+                  onChange={e => setObservedWaveH(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="ex: 0.8"
+                  style={{ width: '100%', padding: '5px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box', background: '#fff' }}
+                />
+              </div>
+            </div>
+
+            {/* État de la plage */}
+            <div style={{ marginTop: '8px' }}>
+              <label style={{ fontSize: '0.66rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '4px' }}>
+                État du sable & de la plage (optionnel — re-cliquer pour désélectionner) :
+              </label>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { key: 'dur', label: 'Sable dur / Idéal' },
+                  { key: 'mou', label: 'Sable mou' },
+                  { key: 'baches_faibles', label: 'Bâches faibles' },
+                  { key: 'baches_fortes', label: 'Bâches fortes' },
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() =>
+                      setBeachCondition(prev => (prev === opt.key ? undefined : (opt.key as SlotObservation['beachCondition'])))
+                    }
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      border: beachCondition === opt.key ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                      background: beachCondition === opt.key ? '#e0f2fe' : '#fff',
+                      color: beachCondition === opt.key ? '#0369a1' : '#64748b',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           {/* Notes générales */}
           <div>
