@@ -834,15 +834,24 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
       cycle2Count: 0,
       closedNoBookingsCount: 0,
       notPublishedCount: 0,
+      excludedCount: 0,
       totalCount: f.list.length,
       isPartial: false,
     };
   }
 
+  const isItemExcluded = (x: ValidationsMap[string]['items'][number]) => {
+    if (x.cycle1Status === 'excluded') return true;
+    const r = (x.rejectReason || '').toLowerCase();
+    return r.includes('hors offre') || r.includes('non pertinent');
+  };
+
   const validItems = V.items.filter(x => x.status !== 'rejected');
   const rejectedItems = V.items.filter(x => x.status === 'rejected');
+  const excludedItems = rejectedItems.filter(isItemExcluded);
   const cycle2Items = V.items.filter(
     x =>
+      !isItemExcluded(x) &&
       x.cycle1Status !== 'not_published' &&
       !x.nonPublishReason &&
       ((x.charsCount ?? 0) > 0 ||
@@ -851,13 +860,15 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
   );
   const notPublishedItems = rejectedItems.filter(
     x =>
-      x.cycle1Status === 'not_published' ||
-      Boolean(x.nonPublishReason) ||
-      (x.rejectReason || '').toLowerCase().includes('non publié') ||
-      (x.rejectReason || '').toLowerCase().includes('non publie')
+      !isItemExcluded(x) &&
+      (x.cycle1Status === 'not_published' ||
+        Boolean(x.nonPublishReason) ||
+        (x.rejectReason || '').toLowerCase().includes('non publié') ||
+        (x.rejectReason || '').toLowerCase().includes('non publie'))
   );
   const closedNoBookingsItems = rejectedItems.filter(
     x =>
+      !isItemExcluded(x) &&
       x.cycle1Status !== 'not_published' &&
       !x.nonPublishReason &&
       (x.cycle1Status === 'closed_no_bookings' ||
@@ -870,6 +881,7 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
   const missing = V.items.filter(x => !curMap.has(x.k));
   const missingCycle2 = missing.filter(
     x =>
+      !isItemExcluded(x) &&
       x.cycle1Status !== 'not_published' &&
       !x.nonPublishReason &&
       ((x.charsCount ?? 0) > 0 ||
@@ -877,7 +889,7 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
         (x.cycle2Status != null && x.cycle2Status !== 'awaiting_booking'))
   );
   const kchg = V.k !== f.k;
-  const isPartial = validItems.length < f.list.length;
+  const isPartial = validItems.length + excludedItems.length < f.list.length;
   const isPast = f.ds < tdy();
 
   // Dissociation Cycle 1 / Cycle 2 :
@@ -896,6 +908,7 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
       cycle2Count: cycle2Items.length,
       closedNoBookingsCount: closedNoBookingsItems.length,
       notPublishedCount: notPublishedItems.length,
+      excludedCount: excludedItems.length,
       totalCount: f.list.length,
       isPartial,
     };
@@ -909,6 +922,7 @@ export function vstat(f: DayFocusData, validations: ValidationsMap) {
     cycle2Count: cycle2Items.length,
     closedNoBookingsCount: closedNoBookingsItems.length,
     notPublishedCount: notPublishedItems.length,
+    excludedCount: excludedItems.length,
     totalCount: f.list.length,
     isPartial,
   };
@@ -1100,19 +1114,26 @@ export function exportValidCsv(validations: ValidationsMap, cap: number) {
       const typedChars =
         x.monoCount != null || x.biCount != null ? (x.monoCount || 0) + (x.biCount || 0) : undefined;
       const chars = x.charsCount ?? typedChars ?? (isRej ? 0 : (x.pilotsCount || cap || 1));
-      const phase =
-        x.cycle1Status === 'not_published' || x.nonPublishReason
-          ? 'Cycle 1 (Non publié)'
-          : x.cycle2Status && x.cycle2Status !== 'awaiting_booking'
-          ? `Cycle 2 (${x.cycle2Status})`
-          : x.cycle1Status || (isRej ? 'Clôturé' : 'Cycle 1');
+      const isExcluded =
+        x.cycle1Status === 'excluded' ||
+        (x.rejectReason || '').toLowerCase().includes('hors offre') ||
+        (x.rejectReason || '').toLowerCase().includes('non pertinent');
+      const phase = isExcluded
+        ? 'Cycle 1 (Hors offre)'
+        : x.cycle1Status === 'not_published' || x.nonPublishReason
+        ? 'Cycle 1 (Non publié)'
+        : x.cycle2Status && x.cycle2Status !== 'awaiting_booking'
+        ? `Cycle 2 (${x.cycle2Status})`
+        : x.cycle1Status || (isRej ? 'Clôturé' : 'Cycle 1');
       rows.push([
         d + '/' + m + '/' + y,
         (x.publishedStart || x.s).replace('h', ':'),
         (x.publishedEnd || x.e).replace('h', ':'),
         (x.actualStart || x.s).replace('h', ':'),
         (x.actualEnd || x.e).replace('h', ':'),
-        x.cycle1Status === 'not_published' || x.nonPublishReason
+        isExcluded
+          ? 'HORS OFFRE (EXCLU)'
+          : x.cycle1Status === 'not_published' || x.nonPublishReason
           ? 'NON PUBLIÉ (C1)'
           : isRej
           ? 'REFUSÉ / ANNULÉ'
@@ -1122,7 +1143,11 @@ export function exportValidCsv(validations: ValidationsMap, cap: number) {
         isRej ? 0 : chars,
         x.over || '',
         x.lim || '',
-        x.nonPublishReason ? `Non publié : ${x.nonPublishReason}` : x.rejectReason || '',
+        isExcluded
+          ? 'Hors offre / Non pertinent (exclu des stats)'
+          : x.nonPublishReason
+          ? `Non publié : ${x.nonPublishReason}`
+          : x.rejectReason || '',
         new Date(validations[ds].ts).toLocaleString('fr-FR'),
       ]);
     }

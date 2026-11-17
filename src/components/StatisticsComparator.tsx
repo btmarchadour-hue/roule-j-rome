@@ -785,9 +785,19 @@ export const StatisticsComparator: React.FC<StatisticsComparatorProps> = ({
                 </td>
                 <td style={{ padding: '10px 10px', fontWeight: 800, color: '#334155' }}>
                   {statsA.totalPossibleSlots} créneaux
+                  {statsA.excludedSlotsCount > 0 && (
+                    <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>
+                      (dont {statsA.excludedSlotsCount} hors offre exclus)
+                    </div>
+                  )}
                 </td>
                 <td style={{ padding: '10px 10px', fontWeight: 800, color: '#334155' }}>
                   {statsB.totalPossibleSlots} créneaux
+                  {statsB.excludedSlotsCount > 0 && (
+                    <div style={{ fontSize: '0.66rem', color: '#64748b', fontWeight: 600 }}>
+                      (dont {statsB.excludedSlotsCount} hors offre exclus)
+                    </div>
+                  )}
                 </td>
                 <td style={{ padding: '10px 10px' }}>
                   {renderDeltaBadge(deltas.diffPossible, ' créneaux')}

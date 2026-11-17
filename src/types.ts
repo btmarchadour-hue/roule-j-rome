@@ -145,7 +145,7 @@ export interface ValidationItem {
   secondaryFormula?: string;    // Formule/note optionnelle pour le 2e groupe (ex: Perfectionnement)
   pilotsCount?: number;   // Nombre de participants / personnes (1 mono = 1, 1 bi = 2)
   // --- Dissociation Cycle 1 (Offre commerciale) & Cycle 2 (Pilotage terrain) ---
-  cycle1Status?: 'published' | 'not_published' | 'closed_no_bookings';
+  cycle1Status?: 'published' | 'not_published' | 'excluded' | 'closed_no_bookings';
   nonPublishReason?: string;
   publishedStart?: string; // Horaire Cycle 1 figé à l'ouverture commerciale
   publishedEnd?: string;

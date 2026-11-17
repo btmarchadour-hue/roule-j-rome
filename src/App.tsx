@@ -492,11 +492,18 @@ export const App: React.FC = () => {
           const matchedExisting = existingRecord.items.find(
             it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
           );
+          const keepExcluded =
+            matchedExisting?.cycle1Status === 'excluded' ||
+            (matchedExisting?.rejectReason || '').toLowerCase().includes('hors offre') ||
+            (matchedExisting?.rejectReason || '').toLowerCase().includes('non pertinent');
           const keepNotPublished =
-            matchedExisting?.cycle1Status === 'not_published' ||
-            Boolean(matchedExisting?.nonPublishReason);
+            !keepExcluded &&
+            (matchedExisting?.cycle1Status === 'not_published' ||
+              Boolean(matchedExisting?.nonPublishReason));
           const keepClosedVie1 =
-            !keepNotPublished && matchedExisting?.cycle1Status === 'closed_no_bookings';
+            !keepExcluded &&
+            !keepNotPublished &&
+            matchedExisting?.cycle1Status === 'closed_no_bookings';
           const notPubReason =
             matchedExisting?.nonPublishReason || 'Impératif personnel';
 
@@ -510,19 +517,23 @@ export const App: React.FC = () => {
             over: x.over,
             lim: x.lim,
             customTitle: x.customTitle,
-            status: keepNotPublished || keepClosedVie1 ? 'rejected' : 'valid',
-            rejectReason: keepNotPublished
+            status: keepExcluded || keepNotPublished || keepClosedVie1 ? 'rejected' : 'valid',
+            rejectReason: keepExcluded
+              ? 'Hors offre / Non pertinent (C1)'
+              : keepNotPublished
               ? `Non publié (C1) : ${notPubReason}`
               : keepClosedVie1
               ? matchedExisting?.rejectReason || "Faute d'inscrits (Vie 1)"
               : undefined,
-            cycle1Status: keepNotPublished
+            cycle1Status: keepExcluded
+              ? 'excluded'
+              : keepNotPublished
               ? 'not_published'
               : keepClosedVie1
               ? 'closed_no_bookings'
               : 'published',
             nonPublishReason: keepNotPublished ? notPubReason : undefined,
-            cycle2Status: keepNotPublished || keepClosedVie1 ? undefined : 'awaiting_booking',
+            cycle2Status: keepExcluded || keepNotPublished || keepClosedVie1 ? undefined : 'awaiting_booking',
             charsCount: 0,
             monoCount: 0,
             biCount: 0,
@@ -1144,11 +1155,13 @@ export const App: React.FC = () => {
         if (!record || record.list.length === 0) continue;
 
         const existingRecord = validations[ds];
-        // Respecter toute journée déjà explicitement marquée "À ne pas publier"
+        // Respecter toute journée déjà explicitement marquée "À ne pas publier" ou "Hors offre"
         if (
           existingRecord &&
           existingRecord.items.length > 0 &&
-          existingRecord.items.every(it => it.cycle1Status === 'not_published')
+          existingRecord.items.every(
+            it => it.cycle1Status === 'not_published' || it.cycle1Status === 'excluded'
+          )
         ) {
           continue;
         }
@@ -1167,7 +1180,7 @@ export const App: React.FC = () => {
         }
 
         const built = buildCycle1DayRecord(ds, record, existingRecord, 'all');
-        // Si certains créneaux étaient déjà marqués individuellement "not_published" ou "closed_no_bookings", les préserver
+        // Si certains créneaux étaient déjà marqués individuellement "not_published", "excluded" ou "closed_no_bookings", les préserver
         if (existingRecord) {
           built.items = built.items.map(it => {
             const prevIt = existingRecord.items.find(
@@ -1175,7 +1188,9 @@ export const App: React.FC = () => {
             );
             if (
               prevIt &&
-              (prevIt.cycle1Status === 'not_published' || prevIt.cycle1Status === 'closed_no_bookings')
+              (prevIt.cycle1Status === 'not_published' ||
+                prevIt.cycle1Status === 'excluded' ||
+                prevIt.cycle1Status === 'closed_no_bookings')
             ) {
               return prevIt;
             }
@@ -1251,7 +1266,28 @@ export const App: React.FC = () => {
       } else {
         const cleanReason = reason?.trim() || 'Impératif personnel';
         const nextItem: ValidationItem =
-          action === 'not_published'
+          action === 'excluded'
+            ? {
+                k: slotKey,
+                s: existingItem?.publishedStart || startTimeStr,
+                e: existingItem?.publishedEnd || endTimeStr,
+                publishedStart: existingItem?.publishedStart || startTimeStr,
+                publishedEnd: existingItem?.publishedEnd || endTimeStr,
+                opt: slot.opt,
+                over: slot.over,
+                lim: slot.lim,
+                customTitle: slot.customTitle,
+                status: 'rejected',
+                rejectReason: 'Hors offre / Non pertinent (C1)',
+                cycle1Status: 'excluded',
+                nonPublishReason: undefined,
+                cycle2Status: undefined,
+                charsCount: 0,
+                monoCount: 0,
+                biCount: 0,
+                pilotsCount: 0,
+              }
+            : action === 'not_published'
             ? {
                 k: slotKey,
                 s: existingItem?.publishedStart || startTimeStr,
@@ -1333,6 +1369,84 @@ export const App: React.FC = () => {
       );
     },
     [isAdminLocked, validations, persistDayValidation]
+  );
+
+  // CYCLE 1 : Écarter d'un clic tous les créneaux encore indécis de la journée en "Hors offre / Non pertinent (hors stats)"
+  const handleExcludeRemainingCycle1Slots = useCallback(
+    (record: DayFocusData) => {
+      if (isAdminLocked) {
+        notifySync('🔒 Mode Moniteur / Contrôle : actions Cycle 1 verrouillées');
+        return;
+      }
+      const ds = record.ds;
+      if (isCycle1PastLocked(ds)) {
+        notifySync('🔒 Archive verrouillée (> 7 jours) : archive Cycle 1 non modifiable');
+        return;
+      }
+
+      const existingRecord = validations[ds];
+      const currentItems = existingRecord?.items ? [...existingRecord.items] : [];
+      let addedCount = 0;
+
+      for (const slot of record.list) {
+        const slotKey = kOf(slot);
+        const startTimeStr = lc(slot.a, record.y, record.m, record.d);
+        const endTimeStr = lc(slot.b, record.y, record.m, record.d);
+        const existingIdx = currentItems.findIndex(
+          it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
+        );
+        const existingItem = existingIdx >= 0 ? currentItems[existingIdx] : undefined;
+        const effectiveKey = existingItem ? existingItem.k : slotKey;
+        const bookingChars = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(ds, effectiveKey)] ||
+            bookingsMap[buildReservationKey(ds, slotKey)] ||
+            []
+        ).totalChars;
+
+        if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
+          continue;
+        }
+        if (existingItem) {
+          continue;
+        }
+
+        currentItems.push({
+          k: slotKey,
+          s: startTimeStr,
+          e: endTimeStr,
+          publishedStart: startTimeStr,
+          publishedEnd: endTimeStr,
+          opt: slot.opt,
+          over: slot.over,
+          lim: slot.lim,
+          customTitle: slot.customTitle,
+          status: 'rejected',
+          rejectReason: 'Hors offre / Non pertinent (C1)',
+          cycle1Status: 'excluded',
+          nonPublishReason: undefined,
+          cycle2Status: undefined,
+          charsCount: 0,
+          monoCount: 0,
+          biCount: 0,
+          pilotsCount: 0,
+        });
+        addedCount++;
+      }
+
+      if (addedCount === 0) return;
+
+      persistDayValidation(ds, {
+        sig: sigOf(record),
+        ts: Date.now(),
+        k: record.k,
+        cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+        items: currentItems,
+      });
+      notifySync(
+        `➖ ${addedCount} créneau${addedCount > 1 ? 'x' : ''} non retenu${addedCount > 1 ? 's' : ''} écarté${addedCount > 1 ? 's' : ''} (hors offre · hors stats)`
+      );
+    },
+    [isAdminLocked, validations, bookingsMap, persistDayValidation]
   );
 
   // Requalification rétroactive de motifs de fermeture / non-publication depuis Statistiques
@@ -1461,12 +1575,15 @@ export const App: React.FC = () => {
           publishedStart: existingItem?.publishedStart || slotStart,
           publishedEnd: existingItem?.publishedEnd || slotEnd,
           cycle1Status:
-            existingItem?.cycle1Status === 'not_published'
+            existingItem?.cycle1Status === 'excluded'
+              ? 'excluded'
+              : existingItem?.cycle1Status === 'not_published'
               ? 'not_published'
               : existingItem?.cycle1Status === 'closed_no_bookings'
               ? 'closed_no_bookings'
               : 'published',
           cycle2Status:
+            existingItem?.cycle1Status === 'excluded' ||
             existingItem?.cycle1Status === 'not_published' ||
             existingItem?.cycle1Status === 'closed_no_bookings'
               ? undefined
@@ -1980,6 +2097,7 @@ export const App: React.FC = () => {
               onValidateDay={handleValidateDay}
               onClearValidation={handleClearValidation}
               onSetSlotCycle1Action={handleSetSlotCycle1Action}
+              onExcludeRemainingCycle1Slots={handleExcludeRemainingCycle1Slots}
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
               onNavigateDay={handleNavigateDay}
               canPrevDay={selectedDate > minDs}

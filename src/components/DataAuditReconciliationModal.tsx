@@ -72,7 +72,7 @@ interface DataAuditReconciliationModalProps {
 type AuditFilterMode = 'all' | 'conflict' | 'warning' | 'ok' | 'unverified' | 'verified';
 
 interface EditDraftState {
-  c1Status: 'published' | 'not_published' | 'closed_no_bookings';
+  c1Status: 'published' | 'not_published' | 'excluded' | 'closed_no_bookings';
   c2Status: 'awaiting_booking' | 'confirmed' | 'shifted' | 'cancelled_weather' | 'realized';
   nonPublishReason: string;
   weatherReason: string;
@@ -93,7 +93,7 @@ interface EditDraftState {
 }
 
 interface DayBulkDraftState {
-  c1Status: 'published' | 'not_published' | 'closed_no_bookings';
+  c1Status: 'published' | 'not_published' | 'excluded' | 'closed_no_bookings';
   c2Status: 'awaiting_booking' | 'confirmed' | 'cancelled_weather' | 'realized';
   nonPublishReason: string;
   weatherReason: string;
@@ -259,6 +259,11 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         c2Status = 'realized';
       } else if (obs.cancellationReason === 'no_clients') {
         c1Status = 'closed_no_bookings';
+      } else if (
+        (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
+        (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
+      ) {
+        c1Status = 'excluded';
       } else if (obs.cancellationReason === 'instructor') {
         c1Status = 'not_published';
         const norm = normalizeClosureReason(obs.cancellationNote);
@@ -374,7 +379,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const firstWithObs = dayEntries.find(e => e.obs)?.obs;
     const effC1 = firstWithVal ? getEffectiveCycle1Status(firstWithVal) : 'not_published';
     const c1Status: DayBulkDraftState['c1Status'] =
-      effC1 === 'closed_no_bookings'
+      effC1 === 'excluded'
+        ? 'excluded'
+        : effC1 === 'closed_no_bookings'
         ? 'closed_no_bookings'
         : effC1 === 'published'
         ? 'published'
@@ -445,12 +452,15 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       }
 
       const isRejected =
+        bulkDraft.c1Status === 'excluded' ||
         bulkDraft.c1Status === 'not_published' ||
         bulkDraft.c1Status === 'closed_no_bookings' ||
         (bulkDraft.c1Status === 'published' && bulkDraft.c2Status === 'cancelled_weather');
 
       const rejectReason =
-        bulkDraft.c1Status === 'not_published'
+        bulkDraft.c1Status === 'excluded'
+          ? 'Hors offre / Non pertinent (C1)'
+          : bulkDraft.c1Status === 'not_published'
           ? `Non publié (C1) : ${cleanNonPubReason}`
           : bulkDraft.c1Status === 'closed_no_bookings'
           ? "Faute d'inscrits (Vie 1)"
@@ -520,7 +530,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         if (shouldSyncObs) {
           const obsStatus: 'realized' | 'cancelled' = isRejected ? 'cancelled' : 'realized';
           const obsCancelReason: CancellationReason | undefined =
-            bulkDraft.c1Status === 'closed_no_bookings'
+            bulkDraft.c1Status === 'excluded'
+              ? 'other'
+              : bulkDraft.c1Status === 'closed_no_bookings'
               ? 'no_clients'
               : bulkDraft.c1Status === 'not_published'
               ? 'instructor'
@@ -528,7 +540,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
               ? mapWeatherTextToCancellationReason(bulkDraft.weatherReason)
               : undefined;
           const obsCancelNote =
-            bulkDraft.c1Status === 'not_published'
+            bulkDraft.c1Status === 'excluded'
+              ? 'Hors offre / Non pertinent (C1)'
+              : bulkDraft.c1Status === 'not_published'
               ? cleanNonPubReason
               : bulkDraft.c1Status === 'closed_no_bookings'
               ? "Faute d'inscrits (Vie 1)"
@@ -738,12 +752,15 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       }
 
       const isRejected =
+        draft.c1Status === 'excluded' ||
         draft.c1Status === 'not_published' ||
         draft.c1Status === 'closed_no_bookings' ||
         (draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather');
 
       const rejectReason =
-        draft.c1Status === 'not_published'
+        draft.c1Status === 'excluded'
+          ? 'Hors offre / Non pertinent (C1)'
+          : draft.c1Status === 'not_published'
           ? `Non publié (C1) : ${cleanNonPubReason}`
           : draft.c1Status === 'closed_no_bookings'
           ? "Faute d'inscrits (Vie 1)"
@@ -825,7 +842,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       if (draft.syncObservation || (entry.obs && targetSlotKey !== entry.slotKey)) {
         const obsStatus: 'realized' | 'cancelled' = isRejected ? 'cancelled' : 'realized';
         const obsCancelReason: CancellationReason | undefined =
-          draft.c1Status === 'closed_no_bookings'
+          draft.c1Status === 'excluded'
+            ? 'other'
+            : draft.c1Status === 'closed_no_bookings'
             ? 'no_clients'
             : draft.c1Status === 'not_published'
             ? 'instructor'
@@ -833,7 +852,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             ? mapWeatherTextToCancellationReason(draft.weatherReason)
             : undefined;
         const obsCancelNote =
-          draft.c1Status === 'not_published'
+          draft.c1Status === 'excluded'
+            ? 'Hors offre / Non pertinent (C1)'
+            : draft.c1Status === 'not_published'
             ? cleanNonPubReason
             : draft.c1Status === 'closed_no_bookings'
             ? "Faute d'inscrits (Vie 1)"
@@ -1553,6 +1574,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                             >
                               <option value="not_published">🚫 Journée fermée · À ne pas publier (motif perso/école)</option>
+                              <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
                               <option value="closed_no_bookings">🌑 Clôturée faute d’inscrits (Vie 1)</option>
                               <option value="published">✅ Publiée (Cycle 1 ouvert)</option>
                             </select>
@@ -2062,6 +2084,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                             >
                               <option value="published">✅ Publié (Cycle 1 ouvert)</option>
+                              <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
                               <option value="not_published">🚫 À ne pas publier (motif perso/école)</option>
                               <option value="closed_no_bookings">🌑 Clôturé faute d’inscrits (Vie 1)</option>
                             </select>

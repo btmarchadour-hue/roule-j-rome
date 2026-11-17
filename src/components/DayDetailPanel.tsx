@@ -81,6 +81,7 @@ interface DayDetailPanelProps {
     action: Cycle1SlotAction,
     reason?: string
   ) => void;
+  onExcludeRemainingCycle1Slots?: (record: DayFocusData) => void;
   onAddCustomNonPublishReason?: (reason: string) => void;
   onNavigateDay?: (deltaDays: number) => void;
   canPrevDay?: boolean;
@@ -125,6 +126,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   onValidateDay: rawOnValidateDay,
   onClearValidation: rawOnClearValidation,
   onSetSlotCycle1Action: rawOnSetSlotCycle1Action,
+  onExcludeRemainingCycle1Slots: rawOnExcludeRemainingCycle1Slots,
   onAddCustomNonPublishReason,
   onNavigateDay,
   canPrevDay = false,
@@ -137,6 +139,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const onValidateDay = isReadOnly ? undefined : rawOnValidateDay;
   const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
   const onSetSlotCycle1Action = isReadOnly ? undefined : rawOnSetSlotCycle1Action;
+  const onExcludeRemainingCycle1Slots = isReadOnly ? undefined : rawOnExcludeRemainingCycle1Slots;
   const onSaveSlotBookings = isReadOnly ? undefined : rawOnSaveSlotBookings;
   const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
     if (isReadOnly) return;
@@ -624,14 +627,67 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
       )}
 
       {/* Sessions list */}
-      <div className="ps" style={{ marginTop: '12px' }}>
-        {replaceDefault
-          ? `Séances sur mesure (${allSlots.length})`
-          : `Séances proposées (${SS.length}${
-              XS.length ? ` + ${XS.length} optionnel${XS.length > 1 ? 's' : ''}` : ''
-            }${hasCustom ? ` + ${customCfg.slots.length} sur-mesure` : ''})`}
-        {` · jauge max ${MAX_CHARS_PER_INSTRUCTOR} chars / moniteur (Mono + Bi)`}
-      </div>
+      {(() => {
+        const valRecForHeader = validations[selectedDate];
+        const remainingUndecidedCount = !isReadOnly && !isPastLocked && onExcludeRemainingCycle1Slots
+          ? focusData.list.filter(s => {
+              const sk = Math.round(s.a) + (s.opt ? 'o' : '') + (s.isCustom ? 'c' : '');
+              const stStr = lc(s.a, y, m, d);
+              const enStr = lc(s.b, y, m, d);
+              const matched = findMatchingValidationItem(valRecForHeader, sk, stStr, enStr);
+              if (matched) return false;
+              const bKey = buildReservationKey(selectedDate, sk);
+              const bChars = getSlotBookingsSummary(bookingsMap[bKey] || []).totalChars;
+              return bChars === 0;
+            }).length
+          : 0;
+        const decidedCount = focusData.list.length - remainingUndecidedCount;
+
+        return (
+          <div
+            className="ps"
+            style={{
+              marginTop: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <span>
+              {replaceDefault
+                ? `Séances sur mesure (${allSlots.length})`
+                : `Séances proposées (${SS.length}${
+                    XS.length ? ` + ${XS.length} optionnel${XS.length > 1 ? 's' : ''}` : ''
+                  }${hasCustom ? ` + ${customCfg.slots.length} sur-mesure` : ''})`}
+              {` · jauge max ${MAX_CHARS_PER_INSTRUCTOR} chars / moniteur (Mono + Bi)`}
+            </span>
+
+            {remainingUndecidedCount > 0 && decidedCount > 0 && onExcludeRemainingCycle1Slots && (
+              <button
+                type="button"
+                className="fbtn"
+                onClick={() => onExcludeRemainingCycle1Slots(focusData)}
+                style={{
+                  margin: 0,
+                  padding: '4px 10px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  background: '#f8fafc',
+                  color: '#475569',
+                  border: '1px dashed #94a3b8',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+                title="Marquer d'un clic les créneaux encore en attente comme « Hors offre / Non pertinent » (exclus des stats d'absentéisme et du taux de concrétisation)"
+              >
+                ➖ Écarter les {remainingUndecidedCount} non retenu{remainingUndecidedCount > 1 ? 's' : ''} (hors offre)
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Ensemble des créneaux : Cycle 1 (Offre) + Passage automatique Cycle 2 dès 1ère inscription */}
       {(() => {
@@ -754,6 +810,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           const cardBg =
             c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '#fef2f2'
+              : c1Status === 'excluded'
+              ? '#f8fafc'
               : c1Status === 'not_published'
               ? '#f1f5f9'
               : inCycle2
@@ -765,6 +823,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           const cardBorder =
             c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '2px solid #ef4444'
+              : c1Status === 'excluded'
+              ? '1.5px dashed #94a3b8'
               : c1Status === 'not_published'
               ? '2px solid #64748b'
               : inCycle2
@@ -776,6 +836,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           const cardBarColor =
             c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
               ? '#dc2626'
+              : c1Status === 'excluded'
+              ? '#94a3b8'
               : c1Status === 'not_published'
               ? '#475569'
               : inCycle2
@@ -998,6 +1060,42 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       <span>🚗 0 / {MAX_CHARS_PER_INSTRUCTOR} chars · En attente 1ère résa</span>
                     </span>
                   </>
+                ) : c1Status === 'excluded' ? (
+                  <>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        background: '#64748b',
+                        color: '#ffffff',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontWeight: 900,
+                        fontSize: '0.76rem',
+                        letterSpacing: '0.02em',
+                      }}
+                    >
+                      <span>➖</span>
+                      <span>HORS OFFRE (CYCLE 1)</span>
+                    </span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: '#e2e8f0',
+                        border: '1px solid #cbd5e1',
+                        color: '#475569',
+                        padding: '2px 8px',
+                        borderRadius: '5px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      <span>Non pertinent · Exclu des stats</span>
+                    </span>
+                  </>
                 ) : c1Status === 'not_published' ? (
                   <>
                     <span
@@ -1182,6 +1280,29 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         title="Valider ce créneau « À publier » en Cycle 1"
                       >
                         ✅ À publier
+                      </button>
+
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: c1Status === 'excluded' ? '#fff' : '#475569',
+                          background: c1Status === 'excluded' ? '#64748b' : '#f8fafc',
+                          border: c1Status === 'excluded' ? '1.5px solid #475569' : '1.5px dashed #94a3b8',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                          onSetSlotCycle1Action(focusData, sessItem, 'excluded');
+                        }}
+                        title="Écarter ce créneau non retenu (exclu de l'absentéisme et du taux de concrétisation)"
+                      >
+                        ➖ Hors offre
                       </button>
 
                       <button
@@ -1447,6 +1568,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           color:
                             c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
                               ? '#991b1b'
+                              : c1Status === 'excluded'
+                              ? '#94a3b8'
                               : c1Status === 'not_published'
                               ? '#475569'
                               : inCycle2
@@ -1457,6 +1580,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           textDecoration:
                             c2Status === 'cancelled_weather' ||
                             c1Status === 'not_published' ||
+                            c1Status === 'excluded' ||
                             c1Status === 'closed_no_bookings'
                               ? 'line-through'
                               : 'none',
@@ -1469,7 +1593,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         !inCycle2 &&
                         !isPastLocked &&
                         c1Status !== 'closed_no_bookings' &&
-                        c1Status !== 'not_published' && (
+                        c1Status !== 'not_published' &&
+                        c1Status !== 'excluded' && (
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
                           <button
                             type="button"

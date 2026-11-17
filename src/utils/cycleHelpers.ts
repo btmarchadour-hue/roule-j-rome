@@ -203,7 +203,7 @@ export function getSlotFleetAlerts(
   };
 }
 
-export type Cycle1SlotAction = 'publish' | 'not_published' | 'close_no_bookings' | 'reset';
+export type Cycle1SlotAction = 'publish' | 'not_published' | 'excluded' | 'close_no_bookings' | 'reset';
 
 export type Cycle2ActionPayload =
   | {
@@ -373,8 +373,15 @@ export function isNoBookingsReason(reason?: string): boolean {
   );
 }
 
-export function isNotPublishedCycle1(item?: ValidationItem): boolean {
+export function isExcludedCycle1(item?: ValidationItem): boolean {
   if (!item) return false;
+  if (item.cycle1Status === 'excluded') return true;
+  const r = (item.rejectReason || '').toLowerCase();
+  return r.includes('hors offre') || r.includes('non pertinent');
+}
+
+export function isNotPublishedCycle1(item?: ValidationItem): boolean {
+  if (!item || isExcludedCycle1(item)) return false;
   if (item.cycle1Status === 'not_published' || Boolean(item.nonPublishReason)) return true;
   const r = (item.rejectReason || '').toLowerCase();
   return r.includes('non publié') || r.includes('non publie');
@@ -385,8 +392,9 @@ export function isNotPublishedCycle1(item?: ValidationItem): boolean {
  */
 export function getEffectiveCycle1Status(
   item?: ValidationItem
-): 'unpublished' | 'published' | 'not_published' | 'closed_no_bookings' {
+): 'unpublished' | 'published' | 'not_published' | 'excluded' | 'closed_no_bookings' {
   if (!item) return 'unpublished';
+  if (isExcludedCycle1(item)) return 'excluded';
   if (isNotPublishedCycle1(item)) return 'not_published';
   if (item.cycle1Status === 'closed_no_bookings') return 'closed_no_bookings';
   if (item.status === 'rejected' && isNoBookingsReason(item.rejectReason)) {
@@ -406,7 +414,7 @@ export function hasCycle2Trigger(
   if (bookingChars > 0) return true;
   if (obs) return true;
   if (!item) return false;
-  if (isNotPublishedCycle1(item)) return false;
+  if (isExcludedCycle1(item) || isNotPublishedCycle1(item)) return false;
   if (
     item.cycle2Status &&
     item.cycle2Status !== 'awaiting_booking'
@@ -433,7 +441,7 @@ export function getEffectiveCycle2Status(
   if (!item) {
     return bookingChars > 0 ? 'confirmed' : 'none';
   }
-  if (isNotPublishedCycle1(item)) {
+  if (isExcludedCycle1(item) || isNotPublishedCycle1(item)) {
     return 'none';
   }
   if (item.cycle1Status === 'closed_no_bookings' || (item.status === 'rejected' && isNoBookingsReason(item.rejectReason))) {

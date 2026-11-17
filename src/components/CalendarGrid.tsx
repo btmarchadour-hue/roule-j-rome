@@ -75,6 +75,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     let valCount = 0;
     let rejCount = 0;
     let notPublishedCount = 0;
+    let excludedCount = 0;
     let cycle2Count = 0;
     let totalCount = 0;
     let isPartial = false;
@@ -113,6 +114,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         valCount = vInfo.valCount;
         rejCount = vInfo.rejCount;
         notPublishedCount = vInfo.notPublishedCount || 0;
+        excludedCount = vInfo.excludedCount || 0;
         cycle2Count = vInfo.cycle2Count;
         totalCount = vInfo.totalCount;
         isPartial = vInfo.isPartial;
@@ -180,6 +182,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
                 ? `${cycle2Count} créneau(x) en Cycle 2${dayBookedChars > 0 ? ` (${dayBookedChars} chars)` : ''}`
                 : isPartial
                 ? `Cycle 1 : ${valCount}/${totalCount} créneau(x) publié(s)`
+                : excludedCount > 0
+                ? `Cycle 1 : ${valCount} publié(s) · ${excludedCount} hors offre`
                 : 'Cycle 1 : journée publiée à la vente'
             }
           >
@@ -198,14 +202,26 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         {valStatus === 'ok' && valCount === 0 && rejCount > 0 && (
           <span
             className="cal-val-tag rej"
-            style={notPublishedCount > 0 ? { background: '#475569' } : undefined}
+            style={
+              excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
+                ? { background: '#64748b' }
+                : notPublishedCount > 0
+                ? { background: '#475569' }
+                : undefined
+            }
             title={
-              notPublishedCount > 0
+              excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
+                ? `${excludedCount} créneau${excludedCount > 1 ? 'x' : ''} hors offre en Cycle 1 (exclu des stats)`
+                : notPublishedCount > 0
                 ? `${notPublishedCount} créneau${notPublishedCount > 1 ? 'x' : ''} non publié${notPublishedCount > 1 ? 's' : ''} en Cycle 1`
                 : `${rejCount} créneau${rejCount > 1 ? 'x' : ''} fermé${rejCount > 1 ? 's' : ''}`
             }
           >
-            {notPublishedCount > 0 ? '🚫' : '✕'}
+            {excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
+              ? '➖'
+              : notPublishedCount > 0
+              ? '🚫'
+              : '✕'}
           </span>
         )}
         {!isPast && valStatus === 'chg' && (
@@ -454,7 +470,12 @@ const BatchCycle1Bar: React.FC<BatchCycle1BarProps> = ({
           pending++;
           continue;
         }
-        if (rec.items.length > 0 && rec.items.every(it => it.cycle1Status === 'not_published')) {
+        if (
+          rec.items.length > 0 &&
+          rec.items.every(
+            it => it.cycle1Status === 'not_published' || it.cycle1Status === 'excluded'
+          )
+        ) {
           continue;
         }
         const covered = fDay.list.filter(x => {

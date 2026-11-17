@@ -383,6 +383,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '#faf5ff'
         : c2Status === 'shifted'
         ? '#fffbeb'
+        : c1Status === 'excluded'
+        ? '#f8fafc'
         : c1Status === 'not_published'
         ? '#f1f5f9'
         : inCycle2
@@ -398,6 +400,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '2px solid #a855f7'
         : c2Status === 'shifted'
         ? '2px solid #f59e0b'
+        : c1Status === 'excluded'
+        ? '1.5px dashed #94a3b8'
         : c1Status === 'not_published'
         ? '2px solid #64748b'
         : inCycle2
@@ -413,6 +417,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '#7c3aed'
         : c2Status === 'shifted'
         ? '#d97706'
+        : c1Status === 'excluded'
+        ? '#94a3b8'
         : c1Status === 'not_published'
         ? '#475569'
         : inCycle2
@@ -624,6 +630,23 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 <span>📅</span>
                 <span>CYCLE 1 PUBLIÉ · Prêt pour Cycle 2</span>
               </span>
+            ) : c1Status === 'excluded' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#64748b',
+                  color: '#ffffff',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 900,
+                  fontSize: '0.74rem',
+                }}
+              >
+                <span>➖</span>
+                <span>HORS OFFRE (CYCLE 1) · EXCLU DES STATS</span>
+              </span>
             ) : c1Status === 'not_published' ? (
               <span
                 style={{
@@ -798,6 +821,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 <>
                   {c1Status !== 'closed_no_bookings' &&
                     c1Status !== 'not_published' &&
+                    c1Status !== 'excluded' &&
                     c2Status !== 'cancelled_weather' && (
                       <button
                         type="button"
@@ -1081,6 +1105,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   color:
                     c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
                       ? '#991b1b'
+                      : c1Status === 'excluded'
+                      ? '#94a3b8'
                       : c1Status === 'not_published'
                       ? '#64748b'
                       : c2Status === 'merged'
@@ -1093,7 +1119,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   textDecoration:
                     c2Status === 'cancelled_weather' ||
                     c1Status === 'closed_no_bookings' ||
-                    c1Status === 'not_published'
+                    c1Status === 'not_published' ||
+                    c1Status === 'excluded'
                       ? 'line-through'
                       : 'none',
                 }}

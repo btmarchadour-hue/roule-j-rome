@@ -898,10 +898,15 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
             {periodStats.totalRealizedSlots > 0 ? (
               <>
-                <strong>{periodStats.totalRealizedSlots}</strong> réalisées sur <strong>{periodStats.totalPossibleSlots}</strong> créneaux possibles
+                <strong>{periodStats.totalRealizedSlots}</strong> réalisées sur <strong>{periodStats.totalPossibleSlots}</strong> créneaux {periodStats.excludedSlotsCount > 0 ? 'retenus' : 'possibles'}
               </>
             ) : (
-              `0 séance validée sur ${periodStats.totalPossibleSlots} créneaux possibles calculés`
+              `0 séance validée sur ${periodStats.totalPossibleSlots} créneaux ${periodStats.excludedSlotsCount > 0 ? 'retenus' : 'possibles calculés'}`
+            )}
+            {periodStats.excludedSlotsCount > 0 && (
+              <div style={{ marginTop: '4px', fontSize: '0.69rem', color: '#475569', fontWeight: 700 }}>
+                ➖ {periodStats.excludedSlotsCount} écarté{periodStats.excludedSlotsCount > 1 ? 's' : ''} hors offre en C1 (sur {periodStats.theoreticalCalculatedSlots} théoriques)
+              </div>
             )}
           </div>
           <div
@@ -914,7 +919,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               lineHeight: '1.25',
             }}
           >
-            ℹ️ <em>Séances courues rapportées à l'ensemble des créneaux praticables (marée & lumière).</em>
+            ℹ️ <em>Séances courues rapportées aux créneaux retenus (hors créneaux écartés « Hors offre » en C1).</em>
           </div>
         </div>
 
@@ -999,7 +1004,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
             <strong>{periodStats.instructorAbsentSlotsCount}</strong> créneau{periodStats.instructorAbsentSlotsCount > 1 ? 'x' : ''} sur{' '}
-            <strong>{periodStats.totalPossibleSlots}</strong> possibles
+            <strong>{periodStats.totalPossibleSlots}</strong> {periodStats.excludedSlotsCount > 0 ? 'retenus' : 'possibles'}
             {periodStats.instructorAbsentReasonsBreakdown.length > 0 && (
               <div style={{ marginTop: '4px', fontSize: '0.69rem', color: '#1e293b', fontWeight: 700 }}>
                 Motif #1 : {periodStats.instructorAbsentReasonsBreakdown[0].reason} ({periodStats.instructorAbsentReasonsBreakdown[0].count})

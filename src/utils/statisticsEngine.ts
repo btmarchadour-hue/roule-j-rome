@@ -4,6 +4,7 @@ import {
   getObservationChars,
   getSlotMaxCapacity,
   getValidationItemChars,
+  isExcludedCycle1,
   isNoBookingsReason,
   isNotPublishedCycle1,
   normalizeClosureReason,
@@ -223,6 +224,8 @@ export interface PeriodStatsResult {
   endDateStr: string;
   totalDays: number;
   totalPossibleSlots: number;
+  theoreticalCalculatedSlots: number;
+  excludedSlotsCount: number;
   totalRealizedSlots: number;
   totalCancelledSlots: number;
   realizationRate: number; // en % (0 - 100)
@@ -305,6 +308,8 @@ export function computePeriodStats(
 
   let totalDays = 0;
   let totalPossibleSlots = 0;
+  let theoreticalCalculatedSlots = 0;
+  let excludedSlotsCount = 0;
   let totalRealizedSlots = 0;
   let totalCancelledSlots = 0;
   let totalParticipants = 0;
@@ -384,7 +389,8 @@ export function computePeriodStats(
     const customConfig = customSlotsMap[ds];
     const customCount = customConfig?.slots?.length || 0;
     const dayPossible = customConfig?.replaceDefault ? customCount : possibleFromCalc + customCount;
-    totalPossibleSlots += dayPossible;
+    theoreticalCalculatedSlots += dayPossible;
+    let dayExcluded = 0;
 
     // 2. Séances réellement validées ou confirmées
     const dayVal = validations[ds];
@@ -427,6 +433,14 @@ export function computePeriodStats(
 
         if (item.cycle2Status === 'shifted') cycle2ShiftedCount++;
         if (item.cycle2Status === 'merged') cycle2MergedCount++;
+
+        // Créneau écarté volontairement en Cycle 1 ("Hors offre / Non pertinent") :
+        // sorti du dénominateur et des annulations/absentéisme (sauf si finalement réalisé sur le sable)
+        if (isExcludedCycle1(item) && matchedObs?.status !== 'realized') {
+          excludedSlotsCount++;
+          dayExcluded++;
+          return;
+        }
 
         // Si créneau publié en Cycle 1 mais sans aucune inscription et non encore clôturé/réalisé
         const itemCharsInfo = getValidationItemChars(item);
@@ -521,6 +535,12 @@ export function computePeriodStats(
       handledSlotKeys.add(obs.slotKey);
 
       if (obs.status === 'cancelled') {
+        const obsNoteLow = (obs.cancellationNote || '').toLowerCase();
+        if (obsNoteLow.includes('hors offre') || obsNoteLow.includes('non pertinent')) {
+          excludedSlotsCount++;
+          dayExcluded++;
+          return;
+        }
         totalCancelledSlots++;
         const reason: CancellationReason = obs.cancellationReason || 'other';
         reasonsCount[reason]++;
@@ -560,6 +580,8 @@ export function computePeriodStats(
         totalRealizedCapacity += obs.secondaryInstructor ? MAX_CHARS_PER_INSTRUCTOR * 2 : MAX_CHARS_PER_INSTRUCTOR;
       }
     });
+
+    totalPossibleSlots += Math.max(0, dayPossible - dayExcluded);
 
     // Avancer au jour suivant
     curr.setDate(curr.getDate() + 1);
@@ -620,6 +642,8 @@ export function computePeriodStats(
     endDateStr,
     totalDays,
     totalPossibleSlots: effectivePossibleSlots,
+    theoreticalCalculatedSlots,
+    excludedSlotsCount,
     totalRealizedSlots,
     totalCancelledSlots,
     realizationRate: Math.round(realizationRate * 10) / 10,

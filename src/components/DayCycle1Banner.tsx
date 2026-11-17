@@ -146,6 +146,8 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               : isZeroPublishedOk
               ? valInfo.notPublishedCount > 0
                 ? '🚫'
+                : valInfo.excludedCount > 0 && valInfo.closedNoBookingsCount === 0
+                ? '➖'
                 : '⛔'
               : valInfo.st === 'ok'
               ? '📅'
@@ -229,6 +231,10 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               {isPast
                 ? valInfo.st === 'ok'
                   ? `Archive · ${valInfo.valCount} publié${valInfo.valCount > 1 ? 's' : ''}${
+                      valInfo.excludedCount
+                        ? ` · ➖ ${valInfo.excludedCount} hors offre`
+                        : ''
+                    }${
                       valInfo.notPublishedCount
                         ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}`
                         : ''
@@ -241,9 +247,15 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                 : isZeroPublishedOk
                 ? valInfo.notPublishedCount > 0
                   ? `Cycle 1 · Journée non publiée (${valInfo.notPublishedCount} créneau${valInfo.notPublishedCount > 1 ? 'x' : ''})`
+                  : valInfo.excludedCount > 0 && valInfo.closedNoBookingsCount === 0
+                  ? `Cycle 1 · Hors offre (${valInfo.excludedCount} créneau${valInfo.excludedCount > 1 ? 'x' : ''} exclu${valInfo.excludedCount > 1 ? 's' : ''} des stats)`
                   : `Cycle 1 · Annulé Vie 2 (${valInfo.closedNoBookingsCount} sans inscrit)`
                 : valInfo.st === 'ok'
                 ? `Cycle 1 · ${valInfo.valCount} à publier${
+                    valInfo.excludedCount
+                      ? ` · ➖ ${valInfo.excludedCount} hors offre`
+                      : ''
+                  }${
                     valInfo.notPublishedCount
                       ? ` · 🚫 ${valInfo.notPublishedCount} non publié${valInfo.notPublishedCount > 1 ? 's' : ''}`
                       : ''

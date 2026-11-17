@@ -283,7 +283,9 @@ export const buildDataAuditReport = ({
         }
 
         // 4. Motif de fermeture générique ("Fermé", "Ferme", etc.)
-        if (c1 === 'not_published' || isNotPublishedCycle1(valItem)) {
+        if (c1 === 'excluded') {
+          // Créneau volontairement écarté hors offre : aucun motif perso requis
+        } else if (c1 === 'not_published' || isNotPublishedCycle1(valItem)) {
           const rawReason =
             valItem.nonPublishReason ||
             valItem.rejectReason?.replace(/^Non publié\s*\(C1\)\s*:\s*/i, '') ||
@@ -312,21 +314,30 @@ export const buildDataAuditReport = ({
         // 5. Réservations actives sur un créneau fermé en Cycle 1 ou Vie 1
         if (
           bookingSummary.totalChars > 0 &&
-          (c1 === 'not_published' || c1 === 'closed_no_bookings')
+          (c1 === 'not_published' || c1 === 'excluded' || c1 === 'closed_no_bookings')
         ) {
           issues.push({
             code: 'bookings_on_closed_slot',
             level: 'conflict',
             label: 'Inscrits présents sur créneau fermé',
             detail: `${bookingSummary.totalChars} char(s) dans la fiche réservations alors que le créneau est marqué « ${
-              c1 === 'not_published' ? 'À ne pas publier (C1)' : 'Faute d’inscrits (Vie 1)'
+              c1 === 'excluded'
+                ? 'Hors offre (C1)'
+                : c1 === 'not_published'
+                ? 'À ne pas publier (C1)'
+                : 'Faute d’inscrits (Vie 1)'
             } ».`,
           });
         }
 
         // 6. Contradiction entre Validation (C1/C2) et Observation REX
         if (obs) {
-          const valIsCancelled = valItem.status === 'rejected' || c1 === 'not_published' || c1 === 'closed_no_bookings' || c2 === 'cancelled_weather';
+          const valIsCancelled =
+            valItem.status === 'rejected' ||
+            c1 === 'not_published' ||
+            c1 === 'excluded' ||
+            c1 === 'closed_no_bookings' ||
+            c2 === 'cancelled_weather';
           if (obs.status === 'cancelled' && !valIsCancelled && c2 !== 'merged') {
             issues.push({
               code: 'obs_cancelled_val_valid',
@@ -442,7 +453,9 @@ export const buildDataAuditReport = ({
       if (valItem) {
         const c1 = getEffectiveCycle1Status(valItem);
         const c2 = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
-        if (c1 === 'not_published') {
+        if (c1 === 'excluded') {
+          summaryStatusLabel = '➖ C1 Hors offre (exclu des stats)';
+        } else if (c1 === 'not_published') {
           summaryStatusLabel = `🚫 C1 Non publié (${valItem.nonPublishReason || valItem.rejectReason || 'motif à préciser'})`;
         } else if (c1 === 'closed_no_bookings' || isNoBookingsReason(valItem.rejectReason)) {
           summaryStatusLabel = '🌑 Vie 1 · Faute d’inscrits';
