@@ -35,10 +35,10 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
     <div
       className="card tide-header-card print-hide nop noprint"
       style={{
-        borderLeft: '5px solid var(--ac)',
+        borderLeft: '6px solid var(--ac)',
         background: 'var(--card)',
-        marginBottom: '10px',
-        padding: '9px 12px',
+        marginBottom: '12px',
+        padding: '14px 18px',
       }}
     >
       {/* Ligne 1 : Date + Prochaine marée */}
@@ -48,34 +48,36 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '6px',
-          marginBottom: '6px',
+          gap: '10px',
+          marginBottom: '10px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.95rem' }}>🌊</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '1.35rem', lineHeight: 1 }}>🌊</span>
           <span
             style={{
-              fontSize: '0.82rem',
+              fontSize: '1.18rem',
               fontWeight: 900,
               textTransform: 'capitalize',
+              lineHeight: 1.2,
             }}
           >
             {dateFormatted}
           </span>
-          <span style={{ fontSize: '0.70rem', color: 'var(--mu)', fontWeight: 600 }}>
+          <span style={{ fontSize: '0.92rem', color: 'var(--mu)', fontWeight: 700 }}>
             · Lestrevet
           </span>
           {isToday && (
             <span
               style={{
-                fontSize: '0.62rem',
-                fontWeight: 800,
+                fontSize: '0.76rem',
+                fontWeight: 900,
                 background: 'var(--ac)',
                 color: '#111',
-                padding: '2px 7px',
+                padding: '3px 10px',
                 borderRadius: '10px',
                 textTransform: 'uppercase',
+                letterSpacing: '0.02em',
               }}
             >
               Aujourd&apos;hui
@@ -84,13 +86,22 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
         </div>
 
         {isToday && nextTide && (
-          <div style={{ fontSize: '0.74rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span style={{ color: nextTide.type === 'BM' ? 'var(--cb)' : 'var(--cn)' }}>
+          <div
+            style={{
+              fontSize: '1.02rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span style={{ color: nextTide.type === 'BM' ? 'var(--cb)' : 'var(--cn)', fontWeight: 800 }}>
               Prochaine {nextTide.type} :
             </span>
-            <b>{nextTide.timeStr}</b>
-            <span style={{ color: 'var(--mu)' }}>({fr2(nextTide.height)} m)</span>
-            <span style={{ color: 'var(--mu)', fontSize: '0.70rem' }}>
+            <b style={{ fontSize: '1.12rem', fontWeight: 900 }}>{nextTide.timeStr}</b>
+            <span style={{ color: 'var(--mu)', fontSize: '0.96rem' }}>({fr2(nextTide.height)} m)</span>
+            <span style={{ color: 'var(--mu)', fontSize: '0.92rem', fontWeight: 700 }}>
               {nextTide.diffMin > 0
                 ? `dans ${Math.floor(nextTide.diffMin / 60)}h${String(nextTide.diffMin % 60).padStart(2, '0')}`
                 : 'en cours'}
@@ -99,31 +110,39 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
         )}
       </div>
 
-      {/* Ligne 2 : Coef · PM · BM · Marnage sur une bande compacte */}
+      {/* Ligne 2 : Coef · PM · BM · Marnage */}
       <div
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: '6px',
+          gap: '8px',
           alignItems: 'center',
-          fontSize: '0.74rem',
+          fontSize: '0.95rem',
         }}
       >
         <div
           style={{
             background: 'var(--cell)',
             border: '1px solid var(--bd)',
-            borderRadius: '6px',
-            padding: '4px 8px',
+            borderRadius: '8px',
+            padding: '7px 12px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '5px',
+            gap: '7px',
           }}
         >
-          <span style={{ color: 'var(--mu)', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              color: 'var(--mu)',
+              fontWeight: 800,
+              fontSize: '0.82rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+            }}
+          >
             Coef
           </span>
-          <strong style={{ fontSize: '0.82rem' }}>
+          <strong style={{ fontSize: '1.08rem', fontWeight: 900 }}>
             {pmCoefs && pmCoefs.length > 1
               ? pmCoefs.join(' / ')
               : coef != null
@@ -136,23 +155,31 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
           style={{
             background: 'var(--cell)',
             border: '1px solid var(--bd)',
-            borderRadius: '6px',
-            padding: '4px 8px',
+            borderRadius: '8px',
+            padding: '7px 12px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: '8px',
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ color: 'var(--cn)', fontWeight: 800, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              color: 'var(--cn)',
+              fontWeight: 900,
+              fontSize: '0.82rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+            }}
+          >
             PM
           </span>
           {pmList.length > 0 ? (
             pmList.map((p, idx) => (
-              <span key={`pm-${idx}`} style={{ fontWeight: 700 }}>
+              <span key={`pm-${idx}`} style={{ fontWeight: 800, fontSize: '0.98rem' }}>
                 {idx > 0 ? '· ' : ''}
                 {lc(p.t, y, m, d)}{' '}
-                <span style={{ color: 'var(--mu)', fontWeight: 600 }}>
+                <span style={{ color: 'var(--mu)', fontWeight: 600, fontSize: '0.92rem' }}>
                   ({fr2(p.hd != null ? p.hd : p.h)} m)
                 </span>
               </span>
@@ -166,23 +193,31 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
           style={{
             background: 'var(--cell)',
             border: '1px solid var(--bd)',
-            borderRadius: '6px',
-            padding: '4px 8px',
+            borderRadius: '8px',
+            padding: '7px 12px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: '8px',
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ color: 'var(--cb)', fontWeight: 800, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              color: 'var(--cb)',
+              fontWeight: 900,
+              fontSize: '0.82rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+            }}
+          >
             BM
           </span>
           {bmList.length > 0 ? (
             bmList.map((p, idx) => (
-              <span key={`bm-${idx}`} style={{ fontWeight: 700 }}>
+              <span key={`bm-${idx}`} style={{ fontWeight: 800, fontSize: '0.98rem' }}>
                 {idx > 0 ? '· ' : ''}
                 {lc(p.t, y, m, d)}{' '}
-                <span style={{ color: 'var(--mu)', fontWeight: 600 }}>
+                <span style={{ color: 'var(--mu)', fontWeight: 600, fontSize: '0.92rem' }}>
                   ({fr2(p.hd != null ? p.hd : p.h)} m)
                 </span>
               </span>
@@ -196,17 +231,27 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
           style={{
             background: 'var(--cell)',
             border: '1px solid var(--bd)',
-            borderRadius: '6px',
-            padding: '4px 8px',
+            borderRadius: '8px',
+            padding: '7px 12px',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '5px',
+            gap: '7px',
           }}
         >
-          <span style={{ color: 'var(--mu)', fontWeight: 700, fontSize: '0.68rem', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              color: 'var(--mu)',
+              fontWeight: 800,
+              fontSize: '0.82rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+            }}
+          >
             Marnage
           </span>
-          <strong>{marnage != null ? `${fr2(marnage)} m` : '—'}</strong>
+          <strong style={{ fontSize: '1.02rem', fontWeight: 900 }}>
+            {marnage != null ? `${fr2(marnage)} m` : '—'}
+          </strong>
         </div>
       </div>
     </div>

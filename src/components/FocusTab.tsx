@@ -48,7 +48,6 @@ import { CalendarGrid } from './CalendarGrid';
 import { CurveChart } from './CurveChart';
 import { MarnageChart } from './MarnageChart';
 import { TableView } from './TableView';
-import { WindPanel } from './WindPanel';
 import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
@@ -2009,16 +2008,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           W={tideW}
           first={first}
           last={last}
-        />
-
-        {/* Courbe / Timeline Vent & Rafales heure par heure (identique Cycle 1) */}
-        <WindPanel
-          dateStr={currentDs}
-          settings={settings}
-          W={tideW}
-          first={first}
-          last={last}
-          windList={windList}
         />
 
         {/* Plages praticables & coefficient */}

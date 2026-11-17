@@ -48,7 +48,6 @@ import { DayCycle1Banner } from './DayCycle1Banner';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
-import { WindPanel } from './WindPanel';
 
 interface DayDetailPanelProps {
   selectedDate: string;
@@ -580,15 +579,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         W={tideW}
         first={first}
         last={last}
-      />
-
-      <WindPanel
-        dateStr={selectedDate}
-        settings={settings}
-        W={tideW}
-        first={first}
-        last={last}
-        windList={windList}
       />
 
       {!P.length && (
