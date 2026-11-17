@@ -1,6 +1,7 @@
 import React, { useId, useMemo, useRef, useState } from 'react';
 import { AppSettings, TidePoint } from '../types';
 import { COEF, build, dayInfo, dayLight, hAt, lc, p2, plan, toU } from '../utils/tides';
+import { estimateDeltaBeachMeters } from '../utils/beachOrientation';
 
 interface CurveChartProps {
   dateStr: string;
@@ -186,6 +187,14 @@ export const CurveChart: React.FC<CurveChartProps> = ({
         peakAbsCm: 0,
         peakU: t0,
         peakSignedCm: 0,
+        maxGainM: 0,
+        maxGainU: t0,
+        minLossM: 0,
+        minLossU: t0,
+        avgBeachM: 0,
+        peakAbsM: 0,
+        peakSignedM: 0,
+        peakMU: t0,
       };
     }
     let maxPosCm = 0;
@@ -197,8 +206,19 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     let peakSignedCm = 0;
     let peakU = validDeltaPts[0].u;
 
+    let maxGainM = 0;
+    let maxGainU = validDeltaPts[0].u;
+    let minLossM = 0;
+    let minLossU = validDeltaPts[0].u;
+    let sumM = 0;
+    let peakAbsM = 0;
+    let peakSignedM = 0;
+    let peakMU = validDeltaPts[0].u;
+
     for (const p of validDeltaPts) {
       const dCm = (p.hReal - p.hTheo) * 100;
+      const dM = estimateDeltaBeachMeters(p.hTheo, p.hReal);
+
       sumCm += dCm;
       if (dCm > maxPosCm) {
         maxPosCm = dCm;
@@ -213,6 +233,21 @@ export const CurveChart: React.FC<CurveChartProps> = ({
         peakSignedCm = dCm;
         peakU = p.u;
       }
+
+      sumM += dM;
+      if (dM > maxGainM) {
+        maxGainM = dM;
+        maxGainU = p.u;
+      }
+      if (dM < minLossM) {
+        minLossM = dM;
+        minLossU = p.u;
+      }
+      if (Math.abs(dM) > peakAbsM) {
+        peakAbsM = Math.abs(dM);
+        peakSignedM = dM;
+        peakMU = p.u;
+      }
     }
     return {
       hasOffset: peakAbsCm >= 1.5,
@@ -224,6 +259,14 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       peakAbsCm: Math.round(peakAbsCm),
       peakSignedCm: Math.round(peakSignedCm),
       peakU,
+      maxGainM: Math.round(maxGainM),
+      maxGainU,
+      minLossM: Math.round(minLossM),
+      minLossU,
+      avgBeachM: Math.round(sumM / validDeltaPts.length),
+      peakAbsM: Math.round(peakAbsM),
+      peakSignedM: Math.round(peakSignedM),
+      peakMU,
     };
   }, [validDeltaPts, t0]);
 
@@ -247,7 +290,10 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   const stripActive = showDeltaLoupe && deltaStats.hasOffset;
   const barsTop = mt + ph + 18;
   const stripTop = barsTop + 26;
-  const stripH = 54;
+  const stripHeaderH = 12;
+  const plotStripTop = stripTop + stripHeaderH;
+  const plotStripH = 46;
+  const stripH = stripHeaderH + plotStripH;
   const H = stripActive ? stripTop + stripH + 10 : barsTop + 22;
 
   const ymin = Math.floor(Math.min(...allHeights) - 0.3);
@@ -311,7 +357,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           <line
             x1={x}
             x2={x}
-            y1={stripTop}
+            y1={plotStripTop}
             y2={stripTop + stripH}
             style={{ stroke: 'rgba(255, 255, 255, 0.12)' }}
           />
@@ -482,7 +528,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           <line
             x1={f1(X(nw))}
             x2={f1(X(nw))}
-            y1={stripTop}
+            y1={plotStripTop}
             y2={stripTop + stripH}
             style={{ stroke: '#ffc40d', strokeWidth: 1.2, strokeDasharray: '2 2', strokeOpacity: 0.75 }}
           />
@@ -499,26 +545,38 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     );
   }
 
-  // Synchronized Loupe Δ (cm) calculations
+  // Synchronized Loupe Plage (±m gagnés / perdus pour rouler) calculations
   const stripBounds = useMemo(() => {
-    const rawMin = Math.min(0, deltaStats.minNegCm);
-    const rawMax = Math.max(0, deltaStats.maxPosCm);
-    const step = Math.max(rawMax, Math.abs(rawMin)) > 25 ? 10 : 5;
-    let sMin = Math.floor((rawMin - 2) / step) * step;
-    let sMax = Math.ceil((rawMax + 2) / step) * step;
-    if (sMax === sMin) {
-      sMax = 10;
-      sMin = -10;
-    }
-    if (sMax > 0 && sMin === 0) sMin = -Math.min(5, step);
-    if (sMin < 0 && sMax === 0) sMax = Math.min(5, step);
-    return { sMin, sMax };
-  }, [deltaStats.minNegCm, deltaStats.maxPosCm]);
+    const rawMin = Math.min(0, deltaStats.minLossM);
+    const rawMax = Math.max(0, deltaStats.maxGainM);
+    const maxAbs = Math.max(rawMax, Math.abs(rawMin));
+    const step = maxAbs > 40 ? 20 : maxAbs > 20 ? 10 : 5;
 
-  const Yd = (cm: number) =>
-    stripTop +
-    stripH -
-    ((cm - stripBounds.sMin) / (stripBounds.sMax - stripBounds.sMin)) * stripH;
+    if (rawMin < 0 && rawMax === 0) {
+      return {
+        sMin: Math.floor((rawMin - 2) / step) * step,
+        sMax: 0,
+      };
+    }
+    if (rawMax > 0 && rawMin === 0) {
+      return {
+        sMin: 0,
+        sMax: Math.ceil((rawMax + 2) / step) * step,
+      };
+    }
+    if (rawMin < 0 && rawMax > 0) {
+      return {
+        sMin: Math.floor((rawMin - 2) / step) * step,
+        sMax: Math.ceil((rawMax + 2) / step) * step,
+      };
+    }
+    return { sMin: -5, sMax: 5 };
+  }, [deltaStats.minLossM, deltaStats.maxGainM]);
+
+  const Yd = (meters: number) =>
+    plotStripTop +
+    plotStripH -
+    ((meters - stripBounds.sMin) / (stripBounds.sMax - stripBounds.sMin)) * plotStripH;
   const zeroY = Yd(0);
 
   // Interactive crosshair state
@@ -529,6 +587,8 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     yReal: number;
     yTheo: number | null;
     deltaCm: number;
+    deltaBeachM: number;
+    deltaBeachExactM: number;
     timeLabel: string;
     hReal: number;
     hTheo: number | null;
@@ -539,6 +599,8 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     yReal: 0,
     yTheo: null,
     deltaCm: 0,
+    deltaBeachM: 0,
+    deltaBeachExactM: 0,
     timeLabel: '',
     hReal: 0,
     hTheo: null,
@@ -562,12 +624,16 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       return;
     }
     const deltaCm = ht != null ? Math.round((hr - ht) * 100) : 0;
+    const deltaBeachExactM = ht != null ? estimateDeltaBeachMeters(ht, hr) : 0;
+    const deltaBeachM = Math.round(deltaBeachExactM);
     setCrosshair({
       visible: true,
       x: X(u),
       yReal: Y(hr),
       yTheo: ht != null ? Y(ht) : null,
       deltaCm,
+      deltaBeachM,
+      deltaBeachExactM,
       timeLabel: lc(u, y, m, d),
       hReal: hr,
       hTheo: ht,
@@ -590,9 +656,13 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
   const anchorRight = crosshair.x > ml + pw * 0.54;
   const crosshairDeltaText =
-    crosshair.deltaCm !== 0
-      ? `Δ ${crosshair.deltaCm > 0 ? '+' : ''}${crosshair.deltaCm} cm`
-      : 'Δ 0 cm';
+    crosshair.deltaBeachM > 0
+      ? `+${crosshair.deltaBeachM} m gagnés`
+      : crosshair.deltaBeachM < 0
+        ? `${Math.abs(crosshair.deltaBeachM)} m perdus`
+        : crosshair.deltaCm !== 0
+          ? `0 m (${crosshair.deltaCm > 0 ? '+' : ''}${crosshair.deltaCm} cm)`
+          : '0 m';
   const crosshairText = `${crosshair.timeLabel} · Réel ${crosshair.hReal.toFixed(2).replace('.', ',')} m · Théo ${
     crosshair.hTheo != null ? crosshair.hTheo.toFixed(2).replace('.', ',') : '-'
   } m · ${crosshairDeltaText}${crosshair.underThr ? ' · praticable' : ''}`;
@@ -623,21 +693,27 @@ export const CurveChart: React.FC<CurveChartProps> = ({
             <span
               style={{
                 fontWeight: 700,
-                color: deltaStats.peakSignedCm >= 0 ? '#c2410c' : '#047857',
+                color:
+                  deltaStats.peakSignedM < 0 || (deltaStats.peakSignedM === 0 && deltaStats.peakSignedCm >= 0)
+                    ? '#c2410c'
+                    : '#047857',
                 background:
-                  deltaStats.peakSignedCm >= 0
+                  deltaStats.peakSignedM < 0 || (deltaStats.peakSignedM === 0 && deltaStats.peakSignedCm >= 0)
                     ? 'rgba(249, 115, 22, 0.14)'
                     : 'rgba(16, 185, 129, 0.14)',
                 border:
-                  deltaStats.peakSignedCm >= 0
+                  deltaStats.peakSignedM < 0 || (deltaStats.peakSignedM === 0 && deltaStats.peakSignedCm >= 0)
                     ? '1px solid rgba(249, 115, 22, 0.35)'
                     : '1px solid rgba(16, 185, 129, 0.35)',
                 padding: '1px 6px',
                 borderRadius: '5px',
               }}
             >
-              Pic {deltaStats.peakSignedCm > 0 ? '+' : ''}
-              {deltaStats.peakSignedCm} cm ({lc(deltaStats.peakU, y, m, d)})
+              {deltaStats.peakSignedM < 0
+                ? `Max ${Math.abs(deltaStats.peakSignedM)} m perdus pour rouler (${lc(deltaStats.peakMU, y, m, d)} · ${deltaStats.peakSignedCm > 0 ? '+' : ''}${deltaStats.peakSignedCm} cm)`
+                : deltaStats.peakSignedM > 0
+                  ? `Max +${deltaStats.peakSignedM} m gagnés pour rouler (${lc(deltaStats.peakMU, y, m, d)} · ${deltaStats.peakSignedCm > 0 ? '+' : ''}${deltaStats.peakSignedCm} cm)`
+                  : `Pic ${deltaStats.peakSignedCm > 0 ? '+' : ''}${deltaStats.peakSignedCm} cm (${lc(deltaStats.peakU, y, m, d)} · 0 m plage)`}
               {activeModeParts.length > 0 ? ` · ${activeModeParts.join(' + ')}` : ''}
             </span>
           ) : (
@@ -683,9 +759,9 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                 fontWeight: 700,
                 cursor: 'pointer',
               }}
-              title="Zoomer l'écart centimètre par centimètre sous la courbe principale"
+              title="Zoomer les mètres de plage gagnés ou perdus pour rouler (profil Litto3D)"
             >
-              {showDeltaLoupe ? '✓ ' : ''}Loupe Δ (cm)
+              {showDeltaLoupe ? '✓ ' : ''}Loupe ±m plage
             </button>
           </div>
         )}
@@ -842,7 +918,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
         {sessionBars}
         {extraBars}
 
-        {/* LOUPE ÉCART Δ (cm) synchronisée pixel par pixel sur 0h–24h */}
+        {/* LOUPE PLAGE (±m gagnés / perdus pour rouler) synchronisée pixel par pixel sur 0h–24h */}
         {stripActive && (
           <g>
             {/* Fond nuit / jour subtil */}
@@ -857,14 +933,21 @@ export const CurveChart: React.FC<CurveChartProps> = ({
             {dayStartX != null && dayEndX != null && (
               <rect
                 x={f1(dayStartX)}
-                y={stripTop}
+                y={plotStripTop}
                 width={f1(Math.max(0, dayEndX - dayStartX))}
-                height={stripH}
+                height={plotStripH}
                 style={{ fill: '#103b25', fillOpacity: 0.85 }}
               />
             )}
+            <rect
+              x={ml}
+              y={stripTop}
+              width={pw}
+              height={stripHeaderH}
+              style={{ fill: 'rgba(15, 23, 42, 0.85)' }}
+            />
 
-            {/* Lignes horizontales min / 0 / max */}
+            {/* Ligne de référence 0 m */}
             <line
               x1={ml}
               x2={W - mr}
@@ -876,47 +959,62 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                 strokeDasharray: '3 2',
               }}
             />
-            <text
-              x={ml - 4}
-              y={f1(stripTop + 7)}
-              textAnchor="end"
-              style={{ fill: '#fb923c', fontSize: '7.5px', fontWeight: 700 }}
-            >
-              {stripBounds.sMax > 0 ? `+${stripBounds.sMax}` : stripBounds.sMax}
-            </text>
-            <text
-              x={ml - 4}
-              y={f1(zeroY + 2.5)}
-              textAnchor="end"
-              style={{ fill: '#cbd5e1', fontSize: '7.5px', fontWeight: 700 }}
-            >
-              0
-            </text>
-            <text
-              x={ml - 4}
-              y={f1(stripTop + stripH - 1)}
-              textAnchor="end"
-              style={{ fill: '#34d399', fontSize: '7.5px', fontWeight: 700 }}
-            >
-              {stripBounds.sMin > 0 ? `+${stripBounds.sMin}` : stripBounds.sMin}
-            </text>
+            {stripBounds.sMax > 0 && (
+              <text
+                x={ml - 4}
+                y={f1(plotStripTop + 6)}
+                textAnchor="end"
+                style={{ fill: '#34d399', fontSize: '7.2px', fontWeight: 700 }}
+              >
+                +{stripBounds.sMax}m
+              </text>
+            )}
+            {(stripBounds.sMax === 0 ||
+              stripBounds.sMin === 0 ||
+              (zeroY - plotStripTop >= 8 && plotStripTop + plotStripH - zeroY >= 8)) && (
+              <text
+                x={ml - 4}
+                y={f1(
+                  stripBounds.sMax === 0
+                    ? plotStripTop + 6
+                    : stripBounds.sMin === 0
+                      ? plotStripTop + plotStripH - 1
+                      : zeroY + 2.5
+                )}
+                textAnchor="end"
+                style={{ fill: '#cbd5e1', fontSize: '7.2px', fontWeight: 700 }}
+              >
+                0m
+              </text>
+            )}
+            {stripBounds.sMin < 0 && (
+              <text
+                x={ml - 4}
+                y={f1(plotStripTop + plotStripH - 1)}
+                textAnchor="end"
+                style={{ fill: '#fb923c', fontSize: '7.2px', fontWeight: 700 }}
+              >
+                {stripBounds.sMin}m
+              </text>
+            )}
 
-            {/* Aires signées zoomées en cm + bordure colorée par signe */}
+            {/* Aires signées en mètres de plage gagnés (+ vert) / perdus (− orange) */}
             {signedSegments.map((seg, idx) => {
               const linePts = seg.points.map(
-                p => `${f1(X(p.u))},${f1(Yd((p.hReal - p.hTheo) * 100))}`
+                p => `${f1(X(p.u))},${f1(Yd(estimateDeltaBeachMeters(p.hTheo, p.hReal)))}`
               );
               const firstX = f1(X(seg.points[0].u));
               const lastX = f1(X(seg.points[seg.points.length - 1].u));
               const zy = f1(zeroY);
               const polyPts = `${firstX},${zy} ${linePts.join(' ')} ${lastX},${zy}`;
-              const color = seg.sign === 'pos' ? '#fb923c' : '#34d399';
+              const isLoss = seg.sign === 'pos';
+              const color = isLoss ? '#fb923c' : '#34d399';
               return (
                 <g key={`strip-seg-${idx}`}>
                   <polygon
                     points={polyPts}
                     style={{
-                      fill: seg.sign === 'pos' ? '#f97316' : '#10b981',
+                      fill: isLoss ? '#f97316' : '#10b981',
                       fillOpacity: 0.44,
                     }}
                   />
@@ -933,41 +1031,54 @@ export const CurveChart: React.FC<CurveChartProps> = ({
               );
             })}
 
-            {/* Titre interne discret + pic calé à droite */}
+            {/* Titre interne + pic mètres calé à droite */}
             <text
               x={ml + 4}
-              y={stripTop + 9}
+              y={stripTop + 8.5}
               style={{
-                fill: 'rgba(226, 232, 240, 0.85)',
-                fontSize: '7.5px',
+                fill: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '7.3px',
                 fontWeight: 700,
                 letterSpacing: '0.02em',
               }}
             >
-              LOUPE ÉCART Δ (cm) · Réel − SHOM
+              LOUPE PLAGE (±m) · gagnés / perdus pour rouler
             </text>
             <circle
-              cx={f1(X(deltaStats.peakU))}
-              cy={f1(Yd(deltaStats.peakSignedCm))}
+              cx={f1(X(deltaStats.peakMU))}
+              cy={f1(Yd(deltaStats.peakSignedM))}
               r={2.6}
               style={{
-                fill: deltaStats.peakSignedCm >= 0 ? '#fb923c' : '#34d399',
+                fill:
+                  deltaStats.peakSignedM < 0
+                    ? '#fb923c'
+                    : deltaStats.peakSignedM > 0
+                      ? '#34d399'
+                      : '#cbd5e1',
                 stroke: '#000',
                 strokeWidth: 0.9,
               }}
             />
             <text
               x={W - mr - 4}
-              y={stripTop + 9}
+              y={stripTop + 8.5}
               textAnchor="end"
               style={{
-                fill: deltaStats.peakSignedCm >= 0 ? '#fdba74' : '#6ee7b7',
-                fontSize: '7.5px',
+                fill:
+                  deltaStats.peakSignedM < 0
+                    ? '#fdba74'
+                    : deltaStats.peakSignedM > 0
+                      ? '#6ee7b7'
+                      : '#cbd5e1',
+                fontSize: '7.3px',
                 fontWeight: 800,
               }}
             >
-              pic {deltaStats.peakSignedCm > 0 ? '+' : ''}
-              {deltaStats.peakSignedCm} cm ({lc(deltaStats.peakU, y, m, d)})
+              {deltaStats.peakSignedM < 0
+                ? `pire ${deltaStats.peakSignedM} m (${lc(deltaStats.peakMU, y, m, d)})`
+                : deltaStats.peakSignedM > 0
+                  ? `max +${deltaStats.peakSignedM} m (${lc(deltaStats.peakMU, y, m, d)})`
+                  : `0 m (${lc(deltaStats.peakU, y, m, d)})`}
             </text>
 
             {/* Cadre net de la bande Loupe */}
@@ -1003,16 +1114,21 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                 <line
                   x1={crosshair.x}
                   x2={crosshair.x}
-                  y1={stripTop}
+                  y1={plotStripTop}
                   y2={stripTop + stripH}
                   style={{ stroke: 'rgba(255, 255, 255, 0.78)', strokeWidth: 1.1 }}
                 />
                 <circle
                   cx={crosshair.x}
-                  cy={Yd(crosshair.deltaCm)}
+                  cy={Yd(crosshair.deltaBeachExactM)}
                   r={3.2}
                   style={{
-                    fill: crosshair.deltaCm >= 0 ? '#fb923c' : '#34d399',
+                    fill:
+                      crosshair.deltaBeachExactM < -0.25
+                        ? '#fb923c'
+                        : crosshair.deltaBeachExactM > 0.25
+                          ? '#34d399'
+                          : '#cbd5e1',
                     stroke: '#000',
                     strokeWidth: 1,
                   }}
@@ -1097,7 +1213,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                   display: 'inline-block',
                 }}
               />
-              <strong style={{ color: '#c2410c' }}>Surcote (+cm, moins de plage)</strong>
+              <strong style={{ color: '#c2410c' }}>Surcote (+cm, plage perdue)</strong>
             </span>
           )}
           {deltaStats.hasOffset && deltaStats.minNegCm <= -2 && (
@@ -1113,7 +1229,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                   display: 'inline-block',
                 }}
               />
-              <strong style={{ color: '#047857' }}>Sous-cote (−cm, plus de plage)</strong>
+              <strong style={{ color: '#047857' }}>Sous-cote (−cm, plage gagnée)</strong>
             </span>
           )}
         </div>
@@ -1145,18 +1261,22 @@ export const CurveChart: React.FC<CurveChartProps> = ({
             ) : (
               <span>aucun impact sur la durée praticable du jour</span>
             )}
-            {' · '}écart moyen{' '}
+            {' · '}impact moyen{' '}
             <b>
-              {deltaStats.avgCm > 0 ? '+' : ''}
-              {deltaStats.avgCm} cm
-            </b>
-            .
+              {deltaStats.avgBeachM > 0
+                ? `+${deltaStats.avgBeachM} m gagnés`
+                : deltaStats.avgBeachM < 0
+                  ? `${Math.abs(deltaStats.avgBeachM)} m perdus`
+                  : '0 m'}
+            </b>{' '}
+            ({deltaStats.avgCm > 0 ? '+' : ''}
+            {deltaStats.avgCm} cm).
           </div>
         )}
 
         Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> ·{' '}
         <b>fond noir : nuit</b> · barre bleue : plage praticable · barres marine : séances.
-        Touche ou survole la courbe pour lire les deux hauteurs et le delta en cm.
+        Touche ou survole la courbe pour lire les deux hauteurs et les mètres gagnés ou perdus pour rouler (profil Litto3D).
         {mar != null && (
           <span>
             {' '}

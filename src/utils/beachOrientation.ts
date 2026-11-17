@@ -238,6 +238,34 @@ const LITTO3D_PROFILE = [
 ];
 
 /**
+ * Position horizontale exacte (en mètres depuis le pied de dune x = 0) de la ligne d'eau
+ * selon le profil Litto3D de Lestrevet / Pentrez, sans arrondi intermédiaire.
+ */
+export function estimateLitto3dWaterlineXExactM(waterHeightM: number): number {
+  if (waterHeightM >= 7.2) return 0;
+  if (waterHeightM <= 1.25) return 460;
+  for (let i = 0; i < LITTO3D_PROFILE.length - 1; i++) {
+    const p1 = LITTO3D_PROFILE[i];
+    const p2 = LITTO3D_PROFILE[i + 1];
+    if (waterHeightM <= p1.z && waterHeightM >= p2.z) {
+      const ratio = (p1.z - waterHeightM) / (p1.z - p2.z);
+      return p1.x + ratio * (p2.x - p1.x);
+    }
+  }
+  return 200;
+}
+
+/**
+ * Impact horizontal sur la plage roulable (en mètres gagnés ou perdus pour rouler)
+ * entre la courbe réelle et la courbe théorique SHOM selon le profil Litto3D :
+ * - Positif (+m) : sous-cote (eau plus basse -> mètres gagnés pour rouler)
+ * - Négatif (-m) : surcote (eau plus haute -> mètres perdus pour rouler)
+ */
+export function estimateDeltaBeachMeters(hTheoM: number, hRealM: number): number {
+  return estimateLitto3dWaterlineXExactM(hRealM) - estimateLitto3dWaterlineXExactM(hTheoM);
+}
+
+/**
  * Estime la largeur de bande exploitable (m) selon le modèle Litto3D à une hauteur d'eau donnée,
  * après déduction de la marge haute de sable sec/mou (50 m par défaut).
  */
@@ -245,21 +273,6 @@ export function estimateLitto3dUsableWidthM(
   waterHeightM: number,
   softSandMarginM: number = 50
 ): number {
-  let totalX = 200;
-  if (waterHeightM >= 7.2) {
-    totalX = 0;
-  } else if (waterHeightM <= 1.25) {
-    totalX = 460;
-  } else {
-    for (let i = 0; i < LITTO3D_PROFILE.length - 1; i++) {
-      const p1 = LITTO3D_PROFILE[i];
-      const p2 = LITTO3D_PROFILE[i + 1];
-      if (waterHeightM <= p1.z && waterHeightM >= p2.z) {
-        const ratio = (p1.z - waterHeightM) / (p1.z - p2.z);
-        totalX = Math.round(p1.x + ratio * (p2.x - p1.x));
-        break;
-      }
-    }
-  }
+  const totalX = Math.round(estimateLitto3dWaterlineXExactM(waterHeightM));
   return Math.max(0, totalX - softSandMarginM);
 }
