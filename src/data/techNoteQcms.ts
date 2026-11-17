@@ -41,27 +41,27 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
     accentColor: '#0284c7',
     contextTitle: '🧭 Notre cheminement complet en 6 étapes',
     contextBullets: [
-      'Étape 1 · Validation des créneaux (Onglet C1) : prépare l’offre publiable pour l’outil de réservation (règle 09h, coef ≤ 50) et distingue « À publier » vs « À ne pas publier » (Réunion, Impératif personnel, Vacances…). Le « bouclier 0 inscrit » reste en attente : il ne sera activé qu’une fois le lien avec le logiciel de réservation en place.',
-      'Étape 2 · Adaptation Météo (Onglet C2) : VERROU STRICT — on ne peut modifier en Étape 2 QUE les créneaux préalablement validés en Étape 1 (actions Maintenir / ⚙️ Ajuster accessibles même à 0 char saisi tant que la passerelle réservation n’est pas reliée). Outils terrain : Winds-Up + AROME + axe 335°/155°, double courbe Réel vs SHOM + Loupe Δ (cm), + Doubler 2e moniteur (Youenn CQP +8 → 20 chars, Katleen +12 → 24 chars), REX.',
+      'Étape 1 · Calendrier & Validation (Onglet 1) : prépare l’offre publiable pour l’outil de réservation (règle 09h, coef ≤ 50). Le « bouclier 0 inscrit » est prévu mais attend la connexion billetterie.',
+      'Étape 2 · Cycle 2 Météo (Onglet 2) : VERROU STRICT — seuls les créneaux validés en Étape 1 sont pilotables (Maintenir / ⚙️ Ajuster ouverts même à 0 char saisi tant que le lien billetterie n’est pas branché). + Doubler 2e moniteur (Youenn CQP +8 → 20 chars, Katleen +12 → 24 chars), Winds-Up + AROME + axe 335°/155°, Loupe Δ cm, REX.',
       'Étape 3 · Module Statistique : pilotage sans double saisie issu des Étapes 1 & 2, remplissage dynamique (12 / 20 / 24 chars), séparation Vie 1 / Vie 2 / Absentéisme, fusion « Ferme / Fermé » & bouton « ✏️ Préciser ».',
-      'Étape 4 · Modèle Empirique & Étalonnage GPS : passage du théorique SHOM au réel terrain (pression +1 cm/hPa, cadre Dune/Mairie, 300 relevés GPS 3 zones + bâches, schéma Litto3D pente 1,15 % avec double ligne d’eau Théorique SHOM vs Réelle surcote/sous-cote).',
+      'Étape 4 · Modèle Empirique & Étalonnage GPS : passage du théorique SHOM au réel terrain (pression +1 cm/hPa, cadre Dune/Mairie, 300 relevés GPS 3 zones + bâches, schéma Litto3D pente 1,15 %).',
       'Étape 5 · Hypothèses, Comptes & Liaison : droits séparés (Admin Jérôme/Benoît vs Moniteur Youenn/Katleen en REX vs Lecture seule), notes + QCM synchronisés Cloud et fil d’échange Ben ↔ Jérôme.',
       'Étape 6 · Base de Données Clients (CRM École) : alimentation continue depuis les réservations par créneau (mono/bi, formule, règlement), historique pilotes, export CSV et préparation du Pont 2 billetterie.',
     ],
     questions: [
       {
         id: 'q1',
-        title: 'Validation 1 · Étape 1 (Validation C1) : alimentation de la réservation & motifs de fermeture',
+        title: 'Validation 1 · Étape 1 (Calendrier & Validation C1) : préparation de l’offre & bouclier 0 inscrit',
         tag: 'Étape 1 · Cycle 1',
-        description: 'Le principe de valider ici les créneaux destinés à l’outil de réservation (jour/semaine/mois) et de distinguer « À ne pas publier » (Réunion, Impératif personnel, Vacances…) des aléas météo te convient-il ?',
+        description: 'La logique de préparation de l’offre (règle des 9h00, coef ≤ 50, seuils Lestrevet, distinction « À ne pas publier ») et le report du « bouclier 0 inscrit » en attente du lien billetterie te conviennent-ils ?',
         type: 'radio',
-        placeholder: 'Autres motifs souhaités, règles d’ouverture ou ergonomie Cycle 1…',
+        placeholder: 'Retours sur le calendrier C1, les seuils d’ouverture ou d’autres motifs souhaités…',
         options: [
           {
             id: 'opt_a',
             recommended: true,
-            label: 'Validé tel quel · Séparation offre commerciale / motifs personnels claire et prête pour la réservation',
-            detail: 'Règles de base (9h00, coef ≤ 50, seuils Lestrevet) ; le bouclier « 0 inscrit » reste désactivé jusqu’à la connexion avec le logiciel de réservation.',
+            label: 'Validé tel quel · Préparation claire de l’offre publiable avant branchement billetterie',
+            detail: 'Règles de base (9h00, coef ≤ 50, seuils Lestrevet) et mise en attente du bouclier 0 inscrit validées.',
           },
           {
             id: 'opt_b',
@@ -77,22 +77,22 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
       },
       {
         id: 'q2',
-        title: 'Validation 2 · Étape 2 (Adaptation Météo C2) : verrou strict sur les créneaux validés en Étape 1 & outils terrain',
+        title: 'Validation 2 · Étape 2 (Cycle 2 Météo) : verrou C1→C2, dédoublement & outil terrain',
         tag: 'Étape 2 · Cycle 2',
-        description: 'Valides-tu la règle stricte selon laquelle on ne peut modifier/piloter en Étape 2 QUE les créneaux validés en Étape 1, ainsi que les derniers ajouts (double courbe + Loupe Δ cm, dédoublement Youenn/Katleen) ?',
+        description: 'Valides-tu le verrou strict C1 → C2, le déblocage temporaire des boutons même à 0 char saisi, le dédoublement 2e moniteur (Youenn CQP 20 / Katleen 24) et les outils météo (Winds-Up + AROME + Loupe Δ cm) ?',
         type: 'radio',
-        placeholder: 'Retours sur le verrou C1→C2, la Loupe Δ cm, les créneaux doublés ou le pilotage météo…',
+        placeholder: 'Retours sur le verrou C1→C2, les outils météo, la Loupe Δ cm ou le dédoublement…',
         options: [
           {
             id: 'opt_a',
             recommended: true,
-            label: 'Validé tel quel · Le verrou Étape 1 → Étape 2 sécurise le planning et la double courbe + Loupe cm est très lisible',
-            detail: 'On reste garanti qu’aucun créneau fermé en C1 ne soit rouvert par erreur en C2.',
+            label: 'Validé tel quel · Verrou C1→C2 sûr, outils météo complets et dédoublement adapté à la haute saison',
+            detail: 'Lecture complète avec Winds-Up, AROME, Loupe Δ cm et gestion CQP / diplômé.',
           },
           {
             id: 'opt_b',
-            label: 'Validé avec ajustement · Verrou validé, un détail d’affichage ou d’action terrain à ajuster',
-            detail: 'Je précise ci-dessous le détail souhaité (bouton, seuil, affichage marée ou vent).',
+            label: 'Validé avec ajustement · Principe validé, un détail d’affichage ou de calcul à affiner',
+            detail: 'Je précise ci-dessous le détail souhaité (bouton, vent, loupe ou plafond chars).',
           },
           {
             id: 'opt_c',
@@ -112,7 +112,7 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
           {
             id: 'opt_a',
             recommended: true,
-            label: 'Validé tel quel · Indicateurs fidèles à mon activité et reclassement simple des anciens créneaux « Fermé »',
+            label: 'Validé tel quel · Stats fidèles, remplissage juste et reclassement simple des anciens « Fermé »',
             detail: 'Aucune double saisie, bilan lisible en temps réel.',
           },
           {
@@ -129,17 +129,17 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
       },
       {
         id: 'q4',
-        title: 'Validation 4 · Étape 4 (Modèle Empirique & Litto3D) : double ligne d’eau Théorique vs Réelle',
+        title: 'Validation 4 · Étape 4 (Modèle Empirique & Étalonnage GPS) : protocole & schéma Litto3D',
         tag: 'Étape 4 · Empirique',
-        description: 'La visualisation sur Litto3D (ligne théorique SHOM en pointillés vs ligne réelle avec surcote/sous-cote et bande hachurée sur le sable) et le protocole de relevés GPS te paraissent-ils parlants sur le terrain ?',
+        description: 'Le protocole d’étalonnage (cadre Dune/Mairie, objectif 300 relevés sur 3 zones + tag bâches, correction pression +1 cm/hPa et profil Litto3D pente 1,15 %) te paraît-il réaliste et clair sur la plage ?',
         type: 'radio',
         placeholder: 'Impressions après test sur la plage ou lors de dépressions/anticyclones…',
         options: [
           {
             id: 'opt_a',
             recommended: true,
-            label: 'Validé tel quel · Visualisation claire de l’impact surcote/sous-cote en mètres de plage utilisables',
-            detail: 'Le lien entre cm verticaux et mètres de sable (pente 1,15 %) aide directement la décision.',
+            label: 'Validé tel quel · Protocole clair et complémentaire pour passer du SHOM au réel terrain',
+            detail: 'Le croisement pression + GPS + bâches permet d’affiner concrètement les seuils.',
           },
           {
             id: 'opt_b',
@@ -149,17 +149,17 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
           {
             id: 'opt_c',
             label: 'À simplifier · Trop technique, je préfère un affichage plus synthétique',
-            detail: 'Alléger la lecture du schéma Litto3D.',
+            detail: 'Alléger la lecture du module d’étalonnage GPS.',
           },
         ],
       },
       {
         id: 'q5',
-        title: 'Validation 5 · Étape 5 (Hypothèses, Comptes Utilisateurs & Espace d’Échange)',
+        title: 'Validation 5 · Étape 5 (Hypothèses, Comptes Équipe & Espace d’Échange Ben ↔ Jérôme)',
         tag: 'Étape 5 · Équipe & Suivi',
-        description: 'La séparation des comptes (Admin Jérôme/Benoît vs Moniteur REX Youenn/Katleen) et le fonctionnement par Notes + QCM + messagerie 💬 Liaison conviennent-ils pour piloter l’évolution de l’app ?',
+        description: 'La séparation des comptes (Admin Jérôme/Benoît vs Moniteur REX Youenn/Katleen) et le fonctionnement par Notes + QCM + 💬 Liaison conviennent-ils pour piloter l’évolution de l’app ?',
         type: 'radio',
-        placeholder: 'Besoin d’un compte supplémentaire, droits moniteurs ou retour sur Liaison…',
+        placeholder: 'Besoin d’un compte supplémentaire, droits moniteurs ou retour sur la Liaison…',
         options: [
           {
             id: 'opt_a',

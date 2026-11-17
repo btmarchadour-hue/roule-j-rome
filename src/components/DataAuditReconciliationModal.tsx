@@ -20,8 +20,10 @@ import {
   DEFAULT_NON_PUBLISH_REASONS,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
+  getSlotMaxCapacity,
   getValidationItemChars,
   normalizeClosureReason,
+  SECONDARY_INSTRUCTOR_PRESETS,
 } from '../utils/cycleHelpers';
 import { dayFocus, kOf, lc, tdy, win } from '../utils/tides';
 import {
@@ -87,6 +89,8 @@ interface EditDraftState {
   lostChars: number;
   instructor: string;
   secondaryInstructor: string;
+  secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+  secondaryMaxChars?: number;
   realignSlotKey: boolean;
   syncObservation: boolean;
   auditNote: string;
@@ -99,6 +103,8 @@ interface DayBulkDraftState {
   weatherReason: string;
   instructor: string;
   secondaryInstructor: string;
+  secondaryQualification?: 'CQP' | 'DE_BPJEPS';
+  secondaryMaxChars?: number;
   realignSlotKeys: boolean;
   syncObservationsMode: 'existing_only' | 'all_slots' | 'none';
   auditNote: string;
@@ -107,11 +113,27 @@ interface DayBulkDraftState {
 const mapWeatherTextToCancellationReason = (text: string): CancellationReason => {
   const low = (text || '').toLowerCase();
   if (low.includes('fort') || low.includes('rafale') || low.includes('tempête')) return 'wind_high';
-  if (low.includes('faible') || low.includes('pétole') || low.includes('sans vent')) return 'wind_low';
+  if (low.includes('faible') || low.includes('pétole') || low.includes('sans vent') || low.includes('insuffisant')) return 'wind_low';
   if (low.includes('secteur') || low.includes('dévent') || low.includes('terre')) return 'wind_dir';
-  if (low.includes('plage') || low.includes('bâche') || low.includes('caillou')) return 'beach_state';
-  if (low.includes('orage') || low.includes('pluie') || low.includes('submersion')) return 'weather_extreme';
+  if (low.includes('plage') || low.includes('bâche') || low.includes('caillou') || low.includes('sable')) return 'beach_state';
+  if (low.includes('orage') || low.includes('pluie') || low.includes('submersion') || low.includes('houle')) return 'weather_extreme';
   return 'other';
+};
+
+const mapCancellationReasonToWeatherText = (reason?: CancellationReason): string => {
+  switch (reason) {
+    case 'wind_high':
+      return C2_WEATHER_REASONS[1];
+    case 'wind_dir':
+      return C2_WEATHER_REASONS[2];
+    case 'beach_state':
+      return C2_WEATHER_REASONS[3];
+    case 'weather_extreme':
+      return C2_WEATHER_REASONS[4];
+    case 'wind_low':
+    default:
+      return C2_WEATHER_REASONS[0];
+  }
 };
 
 export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModalProps> = ({
@@ -250,8 +272,35 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         const norm = normalizeClosureReason(rawNonPub);
         nonPublishReason = norm.isGenericClosed ? 'Impératif personnel' : norm.label;
       }
-      if (c2Status === 'cancelled_weather' && val.rejectReason) {
-        weatherReason = val.rejectReason;
+      if (c2Status === 'cancelled_weather') {
+        weatherReason =
+          val.rejectReason ||
+          obs?.cancellationNote ||
+          mapCancellationReasonToWeatherText(obs?.cancellationReason);
+      }
+
+      // Si val était encore en attente alors qu'un REX existe déjà, pré-remplir le verdict REX pour réconciliation rapide
+      if (c1Status === 'published' && c2Status === 'awaiting_booking' && obs) {
+        if (obs.status === 'realized') {
+          c2Status = 'realized';
+        } else if (obs.cancellationReason === 'no_clients') {
+          c1Status = 'closed_no_bookings';
+        } else if (
+          (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
+          (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
+        ) {
+          c1Status = 'excluded';
+        } else if (obs.cancellationReason === 'instructor') {
+          c1Status = 'not_published';
+          const norm = normalizeClosureReason(obs.cancellationNote);
+          nonPublishReason = norm.isGenericClosed
+            ? 'Impératif personnel'
+            : norm.label || 'Impératif personnel';
+        } else {
+          c2Status = 'cancelled_weather';
+          weatherReason =
+            obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
+        }
       }
     } else if (obs) {
       if (obs.status === 'realized') {
@@ -273,7 +322,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       } else {
         c1Status = 'published';
         c2Status = 'cancelled_weather';
-        weatherReason = obs.cancellationNote || C2_WEATHER_REASONS[0];
+        weatherReason =
+          obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
       }
     }
 
@@ -301,6 +351,18 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const pStart = val?.publishedStart || val?.s || obs?.slotStart || '10h00';
     const pEnd = val?.publishedEnd || val?.e || obs?.slotEnd || '11h00';
 
+    const secName = val?.secondaryInstructor || obs?.secondaryInstructor || '';
+    const inferredSecQual: 'CQP' | 'DE_BPJEPS' | undefined = val?.secondaryQualification
+      ? val.secondaryQualification
+      : secName.toLowerCase().includes('youenn')
+      ? 'CQP'
+      : secName.trim()
+      ? 'DE_BPJEPS'
+      : undefined;
+    const inferredSecMaxChars: number | undefined =
+      val?.secondaryMaxChars ??
+      (inferredSecQual === 'CQP' ? 8 : inferredSecQual === 'DE_BPJEPS' ? MAX_CHARS_PER_INSTRUCTOR : undefined);
+
     setDraft({
       c1Status,
       c2Status,
@@ -316,7 +378,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       rescheduledChars: val?.rescheduledChars ?? obs?.rescheduledCount ?? 0,
       lostChars: val?.lostChars ?? obs?.lostCount ?? 0,
       instructor: val?.instructor || val?.assignedPilot || obs?.author || 'Jérôme',
-      secondaryInstructor: val?.secondaryInstructor || obs?.secondaryInstructor || '',
+      secondaryInstructor: secName,
+      secondaryQualification: inferredSecQual,
+      secondaryMaxChars: inferredSecMaxChars,
       realignSlotKey: Boolean(entry.computedMatch && !entry.computedMatch.isExactKeyMatch),
       syncObservation: Boolean(obs),
       auditNote: entry.signOff?.note || '',
@@ -395,6 +459,18 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const norm = normalizeClosureReason(rawNonPub);
     const hasAnyObs = dayEntries.some(e => Boolean(e.obs));
 
+    const bulkSecName = firstWithVal?.secondaryInstructor || '';
+    const bulkSecQual: 'CQP' | 'DE_BPJEPS' | undefined = firstWithVal?.secondaryQualification
+      ? firstWithVal.secondaryQualification
+      : bulkSecName.toLowerCase().includes('youenn')
+      ? 'CQP'
+      : bulkSecName.trim()
+      ? 'DE_BPJEPS'
+      : undefined;
+    const bulkSecMax =
+      firstWithVal?.secondaryMaxChars ??
+      (bulkSecQual === 'CQP' ? 8 : bulkSecQual === 'DE_BPJEPS' ? MAX_CHARS_PER_INSTRUCTOR : undefined);
+
     setBulkDraft({
       c1Status,
       c2Status: 'awaiting_booking',
@@ -403,7 +479,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         : norm.label || 'Impératif personnel',
       weatherReason: C2_WEATHER_REASONS[0],
       instructor: firstWithVal?.instructor || firstWithVal?.assignedPilot || 'Jérôme',
-      secondaryInstructor: firstWithVal?.secondaryInstructor || '',
+      secondaryInstructor: bulkSecName,
+      secondaryQualification: bulkSecQual,
+      secondaryMaxChars: bulkSecMax,
       realignSlotKeys: dayEntries.some(e => e.computedMatch && !e.computedMatch.isExactKeyMatch),
       syncObservationsMode: hasAnyObs ? 'existing_only' : 'all_slots',
       auditNote: '',
@@ -463,10 +541,19 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           : bulkDraft.c1Status === 'not_published'
           ? `Non publié (C1) : ${cleanNonPubReason}`
           : bulkDraft.c1Status === 'closed_no_bookings'
-          ? "Faute d'inscrits (Vie 1)"
+          ? "Pas d'inscrits (Vie 2)"
           : bulkDraft.c2Status === 'cancelled_weather'
           ? bulkDraft.weatherReason.trim() || 'Annulé météo (Vie 2)'
           : undefined;
+
+      const cleanBulkSec = bulkDraft.secondaryInstructor.trim();
+      const bulkSecAddChars = cleanBulkSec
+        ? bulkDraft.secondaryMaxChars ??
+          (bulkDraft.secondaryQualification === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR)
+        : undefined;
+      const bulkSecQual: 'CQP' | 'DE_BPJEPS' | undefined = cleanBulkSec
+        ? bulkDraft.secondaryQualification || (bulkSecAddChars! <= 8 ? 'CQP' : 'DE_BPJEPS')
+        : undefined;
 
       const prevDayRecord = validations[ds];
       const nextItemsMap = new Map<string, ValidationItem>();
@@ -501,7 +588,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           cycle2Status: bulkDraft.c1Status === 'published' ? bulkDraft.c2Status : undefined,
           instructor: bulkDraft.instructor.trim() || 'Jérôme',
           assignedPilot: bulkDraft.instructor.trim() || 'Jérôme',
-          secondaryInstructor: bulkDraft.secondaryInstructor.trim() || undefined,
+          secondaryInstructor: cleanBulkSec || undefined,
+          secondaryQualification: bulkSecQual,
+          secondaryMaxChars: bulkSecAddChars,
           monoCount: isRejected ? 0 : existingVal?.monoCount ?? entry.bookingSummary.mono,
           biCount: isRejected ? 0 : existingVal?.biCount ?? entry.bookingSummary.bi,
           charsCount: isRejected
@@ -545,14 +634,14 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
               : bulkDraft.c1Status === 'not_published'
               ? cleanNonPubReason
               : bulkDraft.c1Status === 'closed_no_bookings'
-              ? "Faute d'inscrits (Vie 1)"
+              ? "Pas d'inscrits (Vie 2)"
               : bulkDraft.c2Status === 'cancelled_weather'
               ? bulkDraft.weatherReason.trim()
               : undefined;
 
           const updatedObs: SlotObservation = {
             ...(entry.obs || {
-              id: `obs_${ds}_${targetSlotKey}`,
+              id: `obs-${ds}-${targetSlotKey}`,
               ds,
               createdAt: now,
             }),
@@ -565,8 +654,12 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             status: obsStatus,
             cancellationReason: obsStatus === 'cancelled' ? obsCancelReason : undefined,
             cancellationNote: obsStatus === 'cancelled' ? obsCancelNote : undefined,
+            monoCount: obsStatus === 'realized' ? nextItem.monoCount : undefined,
+            biCount: obsStatus === 'realized' ? nextItem.biCount : undefined,
+            charsCount: obsStatus === 'realized' ? nextItem.charsCount : undefined,
+            participantsCount: obsStatus === 'realized' ? nextItem.pilotsCount : undefined,
             author: bulkDraft.instructor.trim() || entry.obs?.author || author,
-            secondaryInstructor: bulkDraft.secondaryInstructor.trim() || undefined,
+            secondaryInstructor: cleanBulkSec || undefined,
             updatedAt: now,
           };
           await saveObservationToFirestore(updatedObs);
@@ -763,10 +856,20 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           : draft.c1Status === 'not_published'
           ? `Non publié (C1) : ${cleanNonPubReason}`
           : draft.c1Status === 'closed_no_bookings'
-          ? "Faute d'inscrits (Vie 1)"
+          ? "Pas d'inscrits (Vie 2)"
           : draft.c2Status === 'cancelled_weather'
           ? draft.weatherReason.trim() || 'Annulé météo (Vie 2)'
           : undefined;
+
+      const cleanSec = draft.secondaryInstructor.trim();
+      const secAddChars = cleanSec
+        ? draft.secondaryMaxChars ??
+          (draft.secondaryQualification === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR)
+        : undefined;
+      const secQual: 'CQP' | 'DE_BPJEPS' | undefined = cleanSec
+        ? draft.secondaryQualification || (secAddChars! <= 8 ? 'CQP' : 'DE_BPJEPS')
+        : undefined;
+      const zeroOutCounts = draft.c1Status !== 'published';
 
       const existingVal = entry.valItem;
       const nextItem: ValidationItem = {
@@ -788,30 +891,32 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         actualStart:
           draft.c1Status === 'published' && draft.c2Status === 'shifted'
             ? draft.actualStart.trim()
-            : existingVal?.actualStart,
+            : undefined,
         actualEnd:
           draft.c1Status === 'published' && draft.c2Status === 'shifted'
             ? draft.actualEnd.trim()
-            : existingVal?.actualEnd,
+            : undefined,
         shiftMinutes:
           draft.c1Status === 'published' && draft.c2Status === 'shifted'
             ? existingVal?.shiftMinutes
             : undefined,
         instructor: draft.instructor.trim() || 'Jérôme',
         assignedPilot: draft.instructor.trim() || 'Jérôme',
-        secondaryInstructor: draft.secondaryInstructor.trim() || undefined,
-        monoCount: draft.monoCount,
-        biCount: draft.biCount,
-        charsCount: totalChars,
-        pilotsCount: people,
+        secondaryInstructor: cleanSec || undefined,
+        secondaryQualification: secQual,
+        secondaryMaxChars: secAddChars,
+        monoCount: zeroOutCounts ? 0 : draft.monoCount,
+        biCount: zeroOutCounts ? 0 : draft.biCount,
+        charsCount: zeroOutCounts ? 0 : totalChars,
+        pilotsCount: zeroOutCounts ? 0 : people,
         rescheduledChars:
           draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather'
             ? draft.rescheduledChars
-            : existingVal?.rescheduledChars,
+            : undefined,
         lostChars:
           draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather'
             ? draft.lostChars
-            : existingVal?.lostChars,
+            : undefined,
       };
 
       // 1. Mettre à jour validations[ds]
@@ -857,14 +962,14 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             : draft.c1Status === 'not_published'
             ? cleanNonPubReason
             : draft.c1Status === 'closed_no_bookings'
-            ? "Faute d'inscrits (Vie 1)"
+            ? "Pas d'inscrits (Vie 2)"
             : draft.c2Status === 'cancelled_weather'
             ? draft.weatherReason.trim()
             : undefined;
 
         const updatedObs: SlotObservation = {
           ...(entry.obs || {
-            id: `obs_${entry.ds}_${targetSlotKey}`,
+            id: `obs-${entry.ds}-${targetSlotKey}`,
             ds: entry.ds,
             createdAt: Date.now(),
           }),
@@ -877,24 +982,24 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           status: obsStatus,
           cancellationReason: obsStatus === 'cancelled' ? obsCancelReason : undefined,
           cancellationNote: obsStatus === 'cancelled' ? obsCancelNote : undefined,
-          monoCount: draft.monoCount,
-          biCount: draft.biCount,
-          charsCount: totalChars,
-          participantsCount: obsStatus === 'realized' ? people : entry.obs?.participantsCount ?? 0,
+          monoCount: obsStatus === 'realized' ? draft.monoCount : undefined,
+          biCount: obsStatus === 'realized' ? draft.biCount : undefined,
+          charsCount: obsStatus === 'realized' ? totalChars : undefined,
+          participantsCount: obsStatus === 'realized' ? people : undefined,
           bookedParticipantsCount:
             obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
               ? people || entry.obs?.bookedParticipantsCount
-              : entry.obs?.bookedParticipantsCount,
+              : undefined,
           rescheduledCount:
             obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
               ? draft.rescheduledChars
-              : entry.obs?.rescheduledCount,
+              : undefined,
           lostCount:
             obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
               ? draft.lostChars
-              : entry.obs?.lostCount,
+              : undefined,
           author: draft.instructor.trim() || entry.obs?.author || author,
-          secondaryInstructor: draft.secondaryInstructor.trim() || undefined,
+          secondaryInstructor: cleanSec || undefined,
           updatedAt: Date.now(),
         };
         await saveObservationToFirestore(updatedObs);
@@ -1575,8 +1680,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                             >
                               <option value="not_published">🚫 Journée fermée · À ne pas publier (motif perso/école)</option>
                               <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
-                              <option value="closed_no_bookings">🌑 Clôturée faute d’inscrits (Vie 1)</option>
-                              <option value="published">✅ Publiée (Cycle 1 ouvert)</option>
+                              <option value="closed_no_bookings">⛔ Annulée · Pas d’inscrits (Vie 2)</option>
+                              <option value="published">✅ À publier (Cycle 1 ouvert)</option>
                             </select>
                           </label>
 
@@ -1593,9 +1698,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                                 }
                                 style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                               >
-                                <option value="awaiting_booking">📅 Cycle 1 publié (prêt C2)</option>
-                                <option value="confirmed">⚡ Maintenu</option>
-                                <option value="realized">🏁 Réalisé</option>
+                                <option value="awaiting_booking">📅 Cycle 1 publié (en attente d’inscrits)</option>
+                                <option value="confirmed">⚡ Cycle 2 actif (inscrits confirmés)</option>
+                                <option value="realized">🏁 Séance effectuée (Réalisé)</option>
                                 <option value="cancelled_weather">⛔ Annulé Météo / Plage (Vie 2)</option>
                               </select>
                             </label>
@@ -1610,6 +1715,84 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
                             />
                           </label>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
+                            <span>2e moniteur (optionnel) :</span>
+                            <input
+                              type="text"
+                              value={bulkDraft.secondaryInstructor}
+                              onChange={e =>
+                                setBulkDraft({
+                                  ...bulkDraft,
+                                  secondaryInstructor: e.target.value,
+                                  secondaryQualification: e.target.value.trim()
+                                    ? bulkDraft.secondaryQualification || 'CQP'
+                                    : undefined,
+                                  secondaryMaxChars: e.target.value.trim()
+                                    ? bulkDraft.secondaryMaxChars ?? 8
+                                    : undefined,
+                                })
+                              }
+                              placeholder="Aucun (12 chars max)"
+                              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                            />
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                              {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
+                                const isSel = bulkDraft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
+                                return (
+                                  <button
+                                    key={p.name}
+                                    type="button"
+                                    onClick={() =>
+                                      setBulkDraft({
+                                        ...bulkDraft,
+                                        secondaryInstructor: p.name,
+                                        secondaryQualification: p.qualification,
+                                        secondaryMaxChars: p.addChars,
+                                      })
+                                    }
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
+                                      background: isSel ? '#f5f3ff' : '#fff',
+                                      color: isSel ? '#6d28d9' : '#475569',
+                                      fontSize: '0.66rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
+                                  </button>
+                                );
+                              })}
+                              {bulkDraft.secondaryInstructor.trim() && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setBulkDraft({
+                                      ...bulkDraft,
+                                      secondaryInstructor: '',
+                                      secondaryQualification: undefined,
+                                      secondaryMaxChars: undefined,
+                                    })
+                                  }
+                                  style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #fca5a5',
+                                    background: '#fff',
+                                    color: '#dc2626',
+                                    fontSize: '0.66rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  ✕ Retirer
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
                         {bulkDraft.c1Status === 'not_published' && (
@@ -1922,11 +2105,13 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               <strong>Statut :</strong> {entry.summaryStatusLabel}
                             </div>
                             <div>
-                              <strong>Matériel :</strong> {valChars.totalChars} char(s) ({valChars.mono} mono + {valChars.bi} bi · {entry.valItem.pilotsCount ?? valChars.people} pers.)
+                              <strong>Matériel :</strong> {valChars.totalChars} / {getSlotMaxCapacity(entry.valItem)} char(s) ({valChars.mono} mono + {valChars.bi} bi · {entry.valItem.pilotsCount ?? valChars.people} pers.)
                             </div>
                             <div>
                               <strong>Moniteur(s) :</strong> {entry.valItem.instructor || entry.valItem.assignedPilot || 'Jérôme'}
-                              {entry.valItem.secondaryInstructor ? ` + ${entry.valItem.secondaryInstructor}` : ''}
+                              {entry.valItem.secondaryInstructor
+                                ? ` + ${entry.valItem.secondaryInstructor}${entry.valItem.secondaryQualification === 'CQP' ? ' (CQP)' : ''}`
+                                : ''}
                             </div>
                             {entry.valItem.rejectReason && (
                               <div style={{ color: '#991b1b' }}>
@@ -2083,10 +2268,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               }
                               style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                             >
-                              <option value="published">✅ Publié (Cycle 1 ouvert)</option>
+                              <option value="published">✅ À publier (Cycle 1 ouvert)</option>
                               <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
                               <option value="not_published">🚫 À ne pas publier (motif perso/école)</option>
-                              <option value="closed_no_bookings">🌑 Clôturé faute d’inscrits (Vie 1)</option>
+                              <option value="closed_no_bookings">⛔ Annulé · Pas d’inscrits (Vie 2)</option>
                             </select>
                           </label>
 
@@ -2103,10 +2288,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                                 }
                                 style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                               >
-                                <option value="awaiting_booking">📅 Cycle 1 publié (prêt C2)</option>
-                                <option value="confirmed">⚡ Maintenu</option>
-                                <option value="shifted">🕒 Décalé</option>
-                                <option value="realized">🏁 Réalisé</option>
+                                <option value="awaiting_booking">📅 Cycle 1 publié (en attente d’inscrits)</option>
+                                <option value="confirmed">⚡ Cycle 2 actif (inscrits confirmés)</option>
+                                <option value="shifted">🕒 Décalé (horaire C2 ajusté)</option>
+                                <option value="realized">🏁 Séance effectuée (Réalisé)</option>
                                 <option value="cancelled_weather">⛔ Annulé Météo / Plage (Vie 2)</option>
                               </select>
                             </label>
@@ -2307,26 +2492,126 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
                             />
                           </label>
-                          <label style={{ fontWeight: 700 }}>
-                            2e moniteur :
-                            <input
-                              type="text"
-                              value={draft.secondaryInstructor}
-                              onChange={e => setDraft({ ...draft, secondaryInstructor: e.target.value })}
-                              placeholder="Optionnel (Youenn...)"
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
+                          <div style={{ fontWeight: 700 }}>
+                            <label style={{ display: 'block' }}>
+                              2e moniteur :
+                              <input
+                                type="text"
+                                value={draft.secondaryInstructor}
+                                onChange={e => {
+                                  const valName = e.target.value;
+                                  setDraft({
+                                    ...draft,
+                                    secondaryInstructor: valName,
+                                    secondaryQualification: valName.trim()
+                                      ? valName.toLowerCase().includes('youenn')
+                                        ? 'CQP'
+                                        : draft.secondaryQualification || 'DE_BPJEPS'
+                                      : undefined,
+                                    secondaryMaxChars: valName.trim()
+                                      ? valName.toLowerCase().includes('youenn')
+                                        ? 8
+                                        : draft.secondaryMaxChars ?? MAX_CHARS_PER_INSTRUCTOR
+                                      : undefined,
+                                  });
+                                }}
+                                placeholder="Optionnel (Youenn, Katleen...)"
+                                style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
+                              />
+                            </label>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                              {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
+                                const isSel = draft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
+                                return (
+                                  <button
+                                    key={p.name}
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        secondaryInstructor: p.name,
+                                        secondaryQualification: p.qualification,
+                                        secondaryMaxChars: p.addChars,
+                                      })
+                                    }
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
+                                      background: isSel ? '#f5f3ff' : '#fff',
+                                      color: isSel ? '#6d28d9' : '#475569',
+                                      fontSize: '0.65rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
+                                  </button>
+                                );
+                              })}
+                              {draft.secondaryInstructor.trim() && (
+                                <>
+                                  <select
+                                    value={draft.secondaryQualification === 'CQP' ? 'CQP' : 'DE_BPJEPS'}
+                                    onChange={e => {
+                                      const q = e.target.value as 'CQP' | 'DE_BPJEPS';
+                                      setDraft({
+                                        ...draft,
+                                        secondaryQualification: q,
+                                        secondaryMaxChars: q === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR,
+                                      });
+                                    }}
+                                    style={{ padding: '2px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.65rem', fontWeight: 700, background: '#fff' }}
+                                  >
+                                    <option value="CQP">CQP (+8 → 20 max)</option>
+                                    <option value="DE_BPJEPS">Diplômé (+12 → 24 max)</option>
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        secondaryInstructor: '',
+                                        secondaryQualification: undefined,
+                                        secondaryMaxChars: undefined,
+                                      })
+                                    }
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #fca5a5',
+                                      background: '#fff',
+                                      color: '#dc2626',
+                                      fontSize: '0.65rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
-                        {draft.monoCount + draft.biCount >
-                          (draft.secondaryInstructor.trim()
-                            ? MAX_CHARS_PER_INSTRUCTOR + 12
-                            : MAX_CHARS_PER_INSTRUCTOR) && (
-                          <div style={{ color: '#991b1b', fontWeight: 800, fontSize: '0.72rem' }}>
-                            ⚠️ Total {draft.monoCount + draft.biCount} chars : dépasse le plafond sans 2e moniteur renseigné.
-                          </div>
-                        )}
+                        {(() => {
+                          const draftMaxCap = getSlotMaxCapacity({
+                            secondaryInstructor: draft.secondaryInstructor.trim() || undefined,
+                            secondaryQualification: draft.secondaryQualification,
+                            secondaryMaxChars: draft.secondaryMaxChars,
+                          });
+                          const draftTotalChars = draft.monoCount + draft.biCount;
+                          if (draftTotalChars <= draftMaxCap) return null;
+                          return (
+                            <div style={{ color: '#991b1b', fontWeight: 800, fontSize: '0.72rem' }}>
+                              ⚠️ Total {draftTotalChars} chars : dépasse le plafond de {draftMaxCap} chars{' '}
+                              {draft.secondaryInstructor.trim()
+                                ? `(${draft.instructor || 'Jérôme'} + ${draft.secondaryInstructor})`
+                                : '(sans 2e moniteur renseigné)'}.
+                            </div>
+                          );
+                        })()}
 
                         {/* Options de réalignement & synchronisation REX */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>

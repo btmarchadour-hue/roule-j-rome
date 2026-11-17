@@ -1,6 +1,7 @@
 import {
   AppSettings,
   CustomSlotsMap,
+  MAX_CHARS_PER_INSTRUCTOR,
   SlotObservation,
   TidePoint,
   ValidationDayRecord,
@@ -13,12 +14,15 @@ import {
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
   getSlotBookingsSummary,
+  getSlotMaxCapacity,
   getValidationItemChars,
   isNoBookingsReason,
   isNotPublishedCycle1,
   normalizeClosureReason,
 } from './cycleHelpers';
 import { dayFocus, kOf, lc, tdy, win } from './tides';
+
+const normT = (v?: string): string => (v || '').trim().replace('h', ':');
 
 export type AuditSeverity = 'ok' | 'warning' | 'conflict';
 
@@ -166,15 +170,21 @@ export const buildDataAuditReport = ({
 
     dayValItems.forEach(it => pushKey(it.k));
     dayObsList.forEach(obs => {
-      // Rattacher à un valItem existant même si clé légèrement différente mais mêmes heures
+      // Rattacher à un valItem existant même si clé légèrement différente mais mêmes heures (10h00 / 10:00)
       const byKey = dayValItems.find(it => it.k === obs.slotKey);
       if (byKey) {
         pushKey(byKey.k);
       } else {
+        const obsStartN = normT(obs.slotStart);
+        const obsEndN = normT(obs.slotEnd);
         const byTime = dayValItems.find(
           it =>
-            (it.publishedStart || it.s) === obs.slotStart &&
-            (it.publishedEnd || it.e) === obs.slotEnd
+            (normT(it.publishedStart || it.s) === obsStartN &&
+              normT(it.publishedEnd || it.e) === obsEndN) ||
+            (Boolean(it.actualStart) &&
+              Boolean(it.actualEnd) &&
+              normT(it.actualStart) === obsStartN &&
+              normT(it.actualEnd) === obsEndN)
         );
         if (byTime) pushKey(byTime.k);
         else pushKey(obs.slotKey);
@@ -192,8 +202,12 @@ export const buildDataAuditReport = ({
         (valItem
           ? dayObsList.find(
               o =>
-                o.slotStart === (valItem.publishedStart || valItem.s) &&
-                o.slotEnd === (valItem.publishedEnd || valItem.e)
+                (normT(o.slotStart) === normT(valItem.publishedStart || valItem.s) &&
+                  normT(o.slotEnd) === normT(valItem.publishedEnd || valItem.e)) ||
+                (Boolean(valItem.actualStart) &&
+                  Boolean(valItem.actualEnd) &&
+                  normT(o.slotStart) === normT(valItem.actualStart) &&
+                  normT(o.slotEnd) === normT(valItem.actualEnd))
             )
           : undefined);
 
@@ -217,8 +231,8 @@ export const buildDataAuditReport = ({
       const timeComp = !exactComp
         ? computedSlots.find(
             c =>
-              c.startTime === (valItem?.publishedStart || valItem?.s || obs?.slotStart) &&
-              c.endTime === (valItem?.publishedEnd || valItem?.e || obs?.slotEnd)
+              normT(c.startTime) === normT(valItem?.publishedStart || valItem?.s || obs?.slotStart) &&
+              normT(c.endTime) === normT(valItem?.publishedEnd || valItem?.e || obs?.slotEnd)
           )
         : undefined;
       const computedMatch = exactComp
@@ -266,7 +280,7 @@ export const buildDataAuditReport = ({
           });
         }
 
-        // 3. Créneau passé resté en "En attente" (awaiting_booking) sans clôture Vie 1 ni statut Réalisé / Annulé
+        // 3. Créneau passé resté en "À publier (awaiting_booking)" sans statut final (Réalisé / Annulé Météo / Pas d'inscrits / Hors offre)
         if (
           ds < todayStr &&
           c1 === 'published' &&
@@ -278,7 +292,7 @@ export const buildDataAuditReport = ({
             level: 'warning',
             label: 'Créneau passé sans statut final',
             detail:
-              'Date passée restée en « Cycle 1 publié » sans indication Réalisé, Annulé Vie 2 ou Clôturé Vie 1.',
+              'Date passée restée en « À publier (C1) » sans indication Séance effectuée, Annulé Météo (Vie 2), Pas d’inscrits (Vie 2) ou Hors offre.',
           });
         }
 
@@ -306,12 +320,12 @@ export const buildDataAuditReport = ({
               code: 'ambiguous_rejection',
               level: 'conflict',
               label: 'Statut rejeté ambigu',
-              detail: `Rejeté avec motif « ${valItem.rejectReason || 'vide'} » sans savoir si c’est Cycle 1 (motif perso), Vie 1 (0 client) ou Vie 2 (météo).`,
+              detail: `Rejeté avec motif « ${valItem.rejectReason || 'vide'} » sans savoir si c’est Cycle 1 (motif perso / Hors offre) ou Vie 2 (pas d’inscrits / météo).`,
             });
           }
         }
 
-        // 5. Réservations actives sur un créneau fermé en Cycle 1 ou Vie 1
+        // 5. Réservations actives sur un créneau fermé en Cycle 1 ou annulé Pas d'inscrits (Vie 2)
         if (
           bookingSummary.totalChars > 0 &&
           (c1 === 'not_published' || c1 === 'excluded' || c1 === 'closed_no_bookings')
@@ -325,7 +339,7 @@ export const buildDataAuditReport = ({
                 ? 'Hors offre (C1)'
                 : c1 === 'not_published'
                 ? 'À ne pas publier (C1)'
-                : 'Faute d’inscrits (Vie 1)'
+                : "Pas d'inscrits (Vie 2)"
             } ».`,
           });
         }
@@ -344,15 +358,15 @@ export const buildDataAuditReport = ({
               level: 'conflict',
               label: 'Contradiction REX (Annulé) vs Validation (Valide)',
               detail:
-                'L’observation REX indique une séance annulée, mais la fiche Cycle 1/2 indique un créneau valide / maintenu.',
+                'L’observation REX indique une séance annulée, mais la fiche Cycle 1/2 indique un créneau actif / publié.',
             });
           } else if (obs.status === 'realized' && valIsCancelled) {
             issues.push({
               code: 'obs_realized_val_rejected',
               level: 'conflict',
-              label: 'Contradiction REX (Réalisé) vs Validation (Rejeté)',
+              label: 'Contradiction REX (Réalisé) vs Validation (Fermé / Annulé)',
               detail:
-                'L’observation REX indique une séance réalisée, mais la fiche Cycle 1/2 indique un créneau fermé ou annulé.',
+                'L’observation REX indique une séance réalisée, mais la fiche Cycle 1/2 indique un créneau fermé, hors offre ou annulé.',
             });
           }
 
@@ -373,16 +387,27 @@ export const buildDataAuditReport = ({
             }
           }
 
-          // Vérification cohérence cause d'annulation Vie 1 / Absentéisme / Vie 2
+          // Vérification cohérence cause d'annulation Pas d'inscrits (Vie 2) / Hors offre / C1 non publié / Vie 2 Météo
           if (obs.status === 'cancelled') {
             const obsIsNoClients = obs.cancellationReason === 'no_clients';
             const obsIsInstructor = obs.cancellationReason === 'instructor';
-            if (c1 === 'closed_no_bookings' && !obsIsNoClients) {
+            const obsIsHorsOffre =
+              obs.cancellationReason === 'other' &&
+              ((obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
+                (obs.cancellationNote || '').toLowerCase().includes('non pertinent'));
+            if (c1 === 'excluded' && !obsIsHorsOffre && obs.cancellationReason !== 'other') {
               issues.push({
-                code: 'reason_mismatch_vie1',
+                code: 'reason_mismatch_excluded',
                 level: 'conflict',
-                label: 'Cause REX différente de Vie 1',
-                detail: `Cycle 1 indique « Faute d’inscrits (Vie 1) » mais le REX indique « ${obs.cancellationReason} ».`,
+                label: 'REX non aligné avec « Hors offre (C1) »',
+                detail: `Cycle 1 indique « ➖ Hors offre / Non pertinent » mais le REX indique « ${obs.cancellationReason} ».`,
+              });
+            } else if (c1 === 'closed_no_bookings' && !obsIsNoClients) {
+              issues.push({
+                code: 'reason_mismatch_vie2_noclient',
+                level: 'conflict',
+                label: "Cause REX différente de « Pas d'inscrits (Vie 2) »",
+                detail: `La fiche indique « Pas d’inscrits (Vie 2) » mais le REX indique « ${obs.cancellationReason} ».`,
               });
             } else if (c1 === 'not_published' && !obsIsInstructor) {
               issues.push({
@@ -400,6 +425,15 @@ export const buildDataAuditReport = ({
               });
             }
           }
+
+          if (obs.secondaryInstructor && !valItem.secondaryInstructor) {
+            issues.push({
+              code: 'secondary_instructor_missing_in_val',
+              level: 'warning',
+              label: `2e moniteur REX (${obs.secondaryInstructor}) absent de C2`,
+              detail: `Le REX mentionne « ${obs.secondaryInstructor} » en 2e moniteur mais il n’est pas enregistré sur la fiche Cycle 2.`,
+            });
+          }
         }
 
         // 7. Séance marquée Réalisée avec 0 char et 0 participant
@@ -407,13 +441,29 @@ export const buildDataAuditReport = ({
           issues.push({
             code: 'realized_without_chars',
             level: 'warning',
-            label: 'Séance réalisée avec 0 char renseigné',
-            detail: 'Précisez le nombre de chars (mono / bi) ou confirmez si cette séance était vide.',
+            label: 'Séance effectuée avec 0 char renseigné',
+            detail: 'Précisez le nombre de chars (mono / bi) ou basculez en « Pas d’inscrits (Vie 2) » s’il n’y avait aucun pilote.',
           });
+        }
+
+        // 8. Contrôle capacité & 2e moniteur (12 / 20 CQP / 24 DE)
+        if (c1 === 'published' && c2 !== 'cancelled_weather' && c2 !== 'merged') {
+          const maxCap = getSlotMaxCapacity(valItem);
+          const activeChars = Math.max(valChars.totalChars, bookingSummary.totalChars);
+          if (activeChars > maxCap) {
+            issues.push({
+              code: 'chars_over_capacity',
+              level: 'warning',
+              label: `Capacité dépassée (${activeChars}/${maxCap} chars)`,
+              detail: valItem.secondaryInstructor
+                ? `Le créneau dépasse le plafond de ${maxCap} chars (${valItem.instructor || 'Jérôme'} + ${valItem.secondaryInstructor}).`
+                : `Plus de ${MAX_CHARS_PER_INSTRUCTOR} chars sans 2e moniteur renseigné (Youenn CQP +8 → 20 max, Katleen +12 → 24 max).`,
+            });
+          }
         }
       }
 
-      // 8. Observation REX annulée avec motif générique « Fermé »
+      // 9. Observation REX annulée avec motif générique « Fermé »
       if (obs && obs.status === 'cancelled' && obs.cancellationReason === 'instructor') {
         const normObs = normalizeClosureReason(obs.cancellationNote);
         if (!obs.cancellationNote?.trim() || normObs.isGenericClosed) {
@@ -426,7 +476,7 @@ export const buildDataAuditReport = ({
         }
       }
 
-      // 9. Clé de créneau non retrouvée dans le calcul du jour (dérive d'horaire ou de seuil)
+      // 10. Clé de créneau non retrouvée dans le calcul du jour (dérive d'horaire ou de seuil)
       if (computedSlots.length > 0 && !computedMatch?.isExactKeyMatch) {
         issues.push({
           code: 'slot_key_drift',
@@ -458,7 +508,7 @@ export const buildDataAuditReport = ({
         } else if (c1 === 'not_published') {
           summaryStatusLabel = `🚫 C1 Non publié (${valItem.nonPublishReason || valItem.rejectReason || 'motif à préciser'})`;
         } else if (c1 === 'closed_no_bookings' || isNoBookingsReason(valItem.rejectReason)) {
-          summaryStatusLabel = '🌑 Vie 1 · Faute d’inscrits';
+          summaryStatusLabel = "⛔ Vie 2 · Pas d'inscrits";
         } else if (c2 === 'cancelled_weather') {
           summaryStatusLabel = `⛔ Vie 2 · Annulé météo (${valItem.rejectReason || 'météo'})`;
         } else if (c2 === 'merged') {
@@ -466,15 +516,23 @@ export const buildDataAuditReport = ({
         } else if (c2 === 'shifted') {
           summaryStatusLabel = `🕒 C2 Décalé (${valItem.actualStart || startTime})`;
         } else if (c2 === 'realized') {
-          summaryStatusLabel = '🏁 C2 Réalisé';
+          summaryStatusLabel = '🏁 C2 Séance effectuée';
         } else if (c2 === 'confirmed') {
-          summaryStatusLabel = '⚡ C2 Maintenu';
+          summaryStatusLabel = '⚡ C2 Actif (inscrits confirmés)';
         } else {
-          summaryStatusLabel = '📅 C1 Publié (en attente suite)';
+          summaryStatusLabel = '📅 C1 À publier (en attente suite)';
         }
       } else if (obs) {
-        summaryStatusLabel =
-          obs.status === 'realized' ? '📝 REX Réalisé (sans C1/C2)' : '📝 REX Annulé (sans C1/C2)';
+        const noteLow = (obs.cancellationNote || '').toLowerCase();
+        if (obs.status === 'realized') {
+          summaryStatusLabel = '📝 REX Réalisé (sans C1/C2)';
+        } else if (noteLow.includes('hors offre') || noteLow.includes('non pertinent')) {
+          summaryStatusLabel = '➖ REX Hors offre (sans C1/C2)';
+        } else if (obs.cancellationReason === 'no_clients') {
+          summaryStatusLabel = "📝 REX Pas d'inscrits Vie 2 (sans C1/C2)";
+        } else {
+          summaryStatusLabel = '📝 REX Annulé (sans C1/C2)';
+        }
       }
 
       entries.push({

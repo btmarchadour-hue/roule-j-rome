@@ -278,11 +278,11 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         subtitle:
           'Passe en revue 100 % des créneaux, REX et réservations existants pour vérifier qu’aucune donnée n’a été perdue ou désalignée avec le nouveau modèle Cycle 1 / Cycle 2',
         summary:
-          'Suite au passage au modèle en 2 temps (Cycle 1 Offre + Cycle 2 Météo) et à l’affinage des motifs, cet outil scanne toutes les données déjà saisies dans « Ça roule ? ». Pour chaque entrée, Jérôme peut soit la valider telle quelle si elle est cohérente, soit la modifier directement sur place (statut C1/C2, motif réel, horaires, mono/bi, REX associé).',
+          'Suite au passage au modèle en 2 temps (Cycle 1 Offre + Cycle 2 Météo) et aux dernières évolutions (Hors offre, Pas d’inscrits Vie 2, REX direct & 2e moniteur Youenn/Katleen), cet outil scanne toutes les données déjà saisies dans « Ça roule ? ». Pour chaque entrée, Jérôme peut soit la valider telle quelle si elle est cohérente, soit la modifier directement sur place (statut À publier / À ne pas publier / ➖ Hors offre / Pas d’inscrits Vie 2 / Annulé Météo C2, motif réel, horaires, mono/bi, 2e moniteur CQP/DE et REX associé).',
         keyPoints: [
           'Inventaire complet : croise en temps réel Validations (Cycle 1/2), Observations REX terrain, Inscriptions clients et grille marée du jour.',
-          'Détection automatique : signale les anciens créneaux hérités sans statut Cycle 1/2, les motifs flous (« Fermé » / « Ferme »), les REX sans fiche Cycle 1/2 ou les clés décalées.',
-          'Action directe par ligne : bouton « ✅ Valider telle quelle » (visa synchronisé Cloud) ou « ✏️ Modifier / Mettre en cohérence » (mise à jour simultanée C1/C2 + REX).',
+          'Détection automatique : signale les anciens créneaux hérités sans statut Cycle 1/2, les motifs flous (« Fermé » / « Ferme »), les REX sans fiche Cycle 1/2, les dépassements sans 2e moniteur ou les clés décalées.',
+          'Action directe par ligne : bouton « ✅ Valider telle quelle » (visa synchronisé Cloud) ou « ✏️ Modifier / Mettre en cohérence » (classement « ➖ Hors offre / Non pertinent », « Pas d’inscrits (Vie 2) », pré-remplissage Youenn/Katleen).',
           'Sécurité totale : validation en lot pour les lignes déjà propres, et possibilité de supprimer un ancien résidu de test inutile.',
         ],
         docUrl: '',
@@ -303,13 +303,13 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         subtitle:
           'Explication détaillée du parcours complet (Cycle 1 → Cycle 2 verrouillé sur C1 → Statistiques → Modèle Empirique → Comptes & Échanges → Base Clients) avec QCM de validation',
         summary:
-          'Document de synthèse conçu pour Jérôme afin d’expliquer la logique bout-en-bout de « Ça roule ? » et de valider ensemble les dernières améliorations (verrou strict Étape 1 → Étape 2, double courbe Réel/SHOM + Loupe Δ cm, fusion Ferme/Fermé & reclassement des motifs, double ligne d’eau Litto3D Théorique vs Réelle, comptes Moniteurs/Admin et CRM Clients).',
+          'Document de synthèse complet pour Jérôme afin d’expliquer la logique bout-en-bout de « Ça roule ? » (verrou strict Étape 1 → Étape 2, séparation Vie 1 / Vie 2, fusion Ferme/Fermé, dédoublement Youenn/Katleen, étalonnage GPS Litto3D, comptes Admin/Moniteur, CRM) et recueillir sa validation étape par étape.',
         keyPoints: [
-          'Étape 1 (Validation C1) : préparation commerciale pour l’outil de réservation, règle 9h/coef ≤ 50, choix À publier / À ne pas publier (Réunion, Impératif personnel, Vacances…). Option « bouclier 0 inscrit » en attente du lien avec le logiciel de réservation.',
-          'Étape 2 (Adaptation Météo C2) : verrou strict — seuls les créneaux validés en Étape 1 sont modifiables (actions Maintenir / ⚙️ Ajuster ouvertes même sans char saisi tant que Pont 2 n’est pas relié) ; Winds-Up + AROME + 335°/155°, double courbe + Loupe Δ cm, dédoublement Youenn/Katleen.',
+          'Étape 1 (Calendrier & Validation C1) : prépare l’offre publiable (règle 09h, coef ≤ 50) et met en attente le bouclier 0 inscrit avant branchement billetterie.',
+          'Étape 2 (Cycle 2 Météo) : verrou strict sur C1, Winds-Up + AROME + Loupe Δ cm, dédoublement 2e moniteur (Youenn CQP 20 / Katleen 24) & REX terrain.',
           'Étape 3 (Module Statistique) : pilotage sans double saisie (12 / 20 / 24 chars), séparation Vie 1 / Vie 2 / Absentéisme, fusion Ferme/Fermé et bouton « ✏️ Préciser ».',
-          'Étape 4 (Modèle Empirique & Étalonnage) : pression +1 cm/hPa, 300 relevés GPS 3 zones + bâches, schéma Litto3D pente 1,15 % avec double ligne d’eau Théorique SHOM vs Réelle surcote/sous-cote.',
-          'Étape 5 & Étape 6 : comptes Admin vs Moniteur REX, espace d’échange Notes/QCM + Liaison Ben ↔ Jérôme, et construction continue de la Base Clients (CRM) depuis les réservations.',
+          'Étape 4 (Modèle Empirique & Étalonnage) : pression +1 cm/hPa, 300 relevés GPS 3 zones + bâches et conversion Litto3D pente 1,15 %.',
+          'Étape 5 & Étape 6 : comptes Admin vs Moniteur REX, Notes/QCM + Liaison Ben ↔ Jérôme, et Base Clients (CRM).',
         ],
         docUrl: '/note_validation_parcours_6_etapes.html',
         docBtnLabel: '🧭 Ouvrir la Note complète 6 Étapes + QCM (A4 / Word)',

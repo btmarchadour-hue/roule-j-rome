@@ -55,7 +55,6 @@ import { CustomSlotsManager } from './CustomSlotsManager';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
 import {
   classifyWindSector,
-  evaluateFrontalSwell,
   WindSectorInfo,
 } from '../utils/beachOrientation';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
@@ -222,7 +221,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     return [...seen.values()];
   })();
   const hasVentDeTerre = dayWindSectors.some(s => s.sector === 'terre');
-  const frontalSwellAdvisory = evaluateFrontalSwell(windList, dayStartU + 480, dayStartU + 1200);
 
   const formatWd = (ds: string) => {
     const [y, m, d] = ds.split('-').map(Number);
@@ -1961,32 +1959,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             <span>⚠️</span>
             <span>
               Vent de terre (secteur NE–ESE via Kervennec) : déventes et irrégularités possibles devant l&apos;école (verdict auto inchangé).
-            </span>
-          </div>
-        )}
-
-        {frontalSwellAdvisory && (
-          <div
-            style={{
-              padding: '7px 11px',
-              borderRadius: '8px',
-              background: '#eff6ff',
-              border: '1.5px solid #93c5fd',
-              color: '#1e40af',
-              fontSize: '0.74rem',
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '7px',
-              marginBottom: '10px',
-            }}
-          >
-            <span>🌊</span>
-            <span>
-              Houle frontale ({frontalSwellAdvisory.dirComp} {frontalSwellAdvisory.maxHeightM.toFixed(1).replace('.', ',')} m
-              {frontalSwellAdvisory.periodS != null ? ` · ${frontalSwellAdvisory.periodS}s` : ''}) ≥ 1,5 m : prévoir une marge indicative de{' '}
-              <b>+10 à +15 cm</b> sur le seuil L ({settings.L.toFixed(2).replace('.', ',')} m ➔{' '}
-              {(settings.L - frontalSwellAdvisory.recommendedMarginCm / 100).toFixed(2).replace('.', ',')} m effectifs).
             </span>
           </div>
         )}
