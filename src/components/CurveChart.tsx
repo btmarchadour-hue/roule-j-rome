@@ -1,7 +1,7 @@
-import React, { useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AppSettings, TidePoint } from '../types';
 import { COEF, build, dayInfo, dayLight, hAt, lc, p2, plan, toU } from '../utils/tides';
-import { estimateDeltaBeachMeters } from '../utils/beachOrientation';
+import { estimateLitto3dWaterlineXExactM } from '../utils/beachOrientation';
 
 interface CurveChartProps {
   dateStr: string;
@@ -56,7 +56,6 @@ function splitSignedSegments(samples: SamplePoint[]): SignedSegment[] {
     const sb: 'pos' | 'neg' | null = db > 0.0005 ? 'pos' : db < -0.0005 ? 'neg' : null;
 
     if (sa && sb && sa !== sb) {
-      // Zero crossing inside [a, b]
       const ratio = Math.abs(da) / (Math.abs(da) + Math.abs(db));
       const uCross = a.u + ratio * (b.u - a.u);
       const hCross = a.hTheo + ratio * (b.hTheo - a.hTheo);
@@ -150,6 +149,8 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
   const isRealMode = settings.calculationMode === 'reel';
   const empiricalOffsetM = (settings.empiricalOffsetCm ?? 15) / 100;
+  const thr = settings.L - (settings.mg || 0) / 100;
+  const jeromeRawLimitH = settings.L;
 
   // 1. Modèle théorique pur SHOM (sans surcote pression ni offset empirique)
   const rawEX = useMemo(() => build(settings.les, false, []), [settings.les]);
@@ -180,36 +181,23 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       return {
         hasOffset: false,
         maxPosCm: 0,
-        maxPosU: t0,
         minNegCm: 0,
-        minNegU: t0,
         avgCm: 0,
         peakAbsCm: 0,
         peakU: t0,
         peakSignedCm: 0,
-        maxGainM: 0,
-        maxGainU: t0,
-        minLossM: 0,
-        minLossU: t0,
         avgBeachM: 0,
-        peakAbsM: 0,
         peakSignedM: 0,
         peakMU: t0,
       };
     }
     let maxPosCm = 0;
-    let maxPosU = validDeltaPts[0].u;
     let minNegCm = 0;
-    let minNegU = validDeltaPts[0].u;
     let sumCm = 0;
     let peakAbsCm = 0;
     let peakSignedCm = 0;
     let peakU = validDeltaPts[0].u;
 
-    let maxGainM = 0;
-    let maxGainU = validDeltaPts[0].u;
-    let minLossM = 0;
-    let minLossU = validDeltaPts[0].u;
     let sumM = 0;
     let peakAbsM = 0;
     let peakSignedM = 0;
@@ -217,17 +205,13 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
     for (const p of validDeltaPts) {
       const dCm = (p.hReal - p.hTheo) * 100;
-      const dM = estimateDeltaBeachMeters(p.hTheo, p.hReal);
+      const dM =
+        estimateLitto3dWaterlineXExactM(p.hReal) -
+        estimateLitto3dWaterlineXExactM(p.hTheo);
 
       sumCm += dCm;
-      if (dCm > maxPosCm) {
-        maxPosCm = dCm;
-        maxPosU = p.u;
-      }
-      if (dCm < minNegCm) {
-        minNegCm = dCm;
-        minNegU = p.u;
-      }
+      if (dCm > maxPosCm) maxPosCm = dCm;
+      if (dCm < minNegCm) minNegCm = dCm;
       if (Math.abs(dCm) > peakAbsCm) {
         peakAbsCm = Math.abs(dCm);
         peakSignedCm = dCm;
@@ -235,14 +219,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       }
 
       sumM += dM;
-      if (dM > maxGainM) {
-        maxGainM = dM;
-        maxGainU = p.u;
-      }
-      if (dM < minLossM) {
-        minLossM = dM;
-        minLossU = p.u;
-      }
       if (Math.abs(dM) > peakAbsM) {
         peakAbsM = Math.abs(dM);
         peakSignedM = dM;
@@ -252,61 +228,33 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     return {
       hasOffset: peakAbsCm >= 1.5,
       maxPosCm: Math.round(maxPosCm),
-      maxPosU,
       minNegCm: Math.round(minNegCm),
-      minNegU,
       avgCm: Math.round(sumCm / validDeltaPts.length),
       peakAbsCm: Math.round(peakAbsCm),
       peakSignedCm: Math.round(peakSignedCm),
       peakU,
-      maxGainM: Math.round(maxGainM),
-      maxGainU,
-      minLossM: Math.round(minLossM),
-      minLossU,
       avgBeachM: Math.round(sumM / validDeltaPts.length),
-      peakAbsM: Math.round(peakAbsM),
       peakSignedM: Math.round(peakSignedM),
       peakMU,
     };
   }, [validDeltaPts, t0]);
 
   const [showFill, setShowFill] = useState(true);
-  const [showDeltaLoupe, setShowDeltaLoupe] = useState(true);
+  const [showPisteView, setShowPisteView] = useState(true);
 
-  const allHeights = pts
-    .flatMap(p => [p.hTheo, p.hReal])
-    .filter((v): v is number => v != null);
-  if (!allHeights.length) return null;
+  const l = useMemo(
+    () => dayLight(y, m, d, settings.lum, settings.lmg),
+    [y, m, d, settings.lum, settings.lmg]
+  );
 
-  const thr = settings.L - (settings.mg || 0) / 100;
-
-  const W = 360;
-  const ml = 28;
-  const mr = 8;
-  const mt = 14;
-  const ph = 156;
-  const pw = W - ml - mr;
-
-  const stripActive = showDeltaLoupe && deltaStats.hasOffset;
-  const barsTop = mt + ph + 18;
-  const stripTop = barsTop + 26;
-  const stripHeaderH = 12;
-  const plotStripTop = stripTop + stripHeaderH;
-  const plotStripH = 46;
-  const stripH = stripHeaderH + plotStripH;
-  const H = stripActive ? stripTop + stripH + 10 : barsTop + 22;
-
-  const ymin = Math.floor(Math.min(...allHeights) - 0.3);
-  const ymax = Math.ceil(Math.max(Math.max(...allHeights), thr) + 0.4);
-
-  const X = (u: number) => ml + ((u - t0) / (t1 - t0)) * pw;
-  const Y = (h: number) => mt + ph - ((h - ymin) / (ymax - ymin)) * ph;
-  const f1 = (v: number) => v.toFixed(1);
-
-  // Daylight window
-  const l = dayLight(y, m, d, settings.lum, settings.lmg);
-  const dayStartX = l ? X(Math.max(l[0], t0)) : null;
-  const dayEndX = l ? X(Math.min(l[1], t1)) : null;
+  const dayP = useMemo(
+    () => dayInfo(y, m, d, settings, tideW, first, last),
+    [y, m, d, settings, tideW, first, last]
+  );
+  const pl = useMemo(
+    () => plan(y, m, d, settings, tideW, first, last),
+    [y, m, d, settings, tideW, first, last]
+  );
 
   const practicableDiffMin = useMemo(() => {
     if (!deltaStats.hasOffset) return 0;
@@ -316,6 +264,85 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     const mReal = measurePracticableMinutes(pts, p => p.hReal, thr, winStart, winEnd);
     return Math.round(mReal - mTheo);
   }, [deltaStats.hasOffset, l, t0, t1, pts, thr]);
+
+  const signedSegments = useMemo(() => splitSignedSegments(pts), [pts]);
+
+  const computeDefaultTimeU = () => {
+    const nowMin = Date.now() / 6e4;
+    if (nowMin >= t0 && nowMin < t1) {
+      return Math.min(t1, Math.max(t0, Math.round(nowMin / 10) * 10));
+    }
+    const firstSlot = pl.full[0] || pl.extra[0];
+    if (firstSlot) {
+      return Math.min(t1, Math.max(t0, Math.round(((firstSlot[0] + firstSlot[1]) / 2) / 10) * 10));
+    }
+    if (dayP[0]) {
+      return Math.min(t1, Math.max(t0, Math.round(((dayP[0][0] + dayP[0][1]) / 2) / 10) * 10));
+    }
+    return toU(y, m, d, 14 * 60);
+  };
+
+  const [pinnedU, setPinnedU] = useState<number>(() => computeDefaultTimeU());
+  const [hoverU, setHoverU] = useState<number | null>(null);
+
+  useEffect(() => {
+    setPinnedU(computeDefaultTimeU());
+    setHoverU(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateStr]);
+
+  const activeU = Math.min(t1, Math.max(t0, hoverU ?? pinnedU));
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [crosshair, setCrosshair] = useState<{
+    visible: boolean;
+    x: number;
+    yReal: number;
+    yTheo: number | null;
+    deltaCm: number;
+    deltaBeachM: number;
+    timeLabel: string;
+    hReal: number;
+    hTheo: number | null;
+    underThr: boolean;
+  }>({
+    visible: false,
+    x: 0,
+    yReal: 0,
+    yTheo: null,
+    deltaCm: 0,
+    deltaBeachM: 0,
+    timeLabel: '',
+    hReal: 0,
+    hTheo: null,
+    underThr: false,
+  });
+
+  const allHeights = pts
+    .flatMap(p => [p.hTheo, p.hReal])
+    .filter((v): v is number => v != null);
+  if (!allHeights.length) return null;
+
+  const W = 360;
+  const ml = 28;
+  const mr = 8;
+  const mt = 14;
+  const ph = 156;
+  const pw = W - ml - mr;
+
+  const barsTop = mt + ph + 18;
+  const H = barsTop + 22;
+
+  const ymin = Math.floor(Math.min(...allHeights) - 0.3);
+  const ymax = Math.ceil(Math.max(Math.max(...allHeights), thr, jeromeRawLimitH) + 0.4);
+
+  const X = (u: number) => ml + ((u - t0) / (t1 - t0)) * pw;
+  const Y = (h: number) => mt + ph - ((h - ymin) / (ymax - ymin)) * ph;
+  const f1 = (v: number) => v.toFixed(1);
+
+  // Daylight window
+  const dayStartX = l ? X(Math.max(l[0], t0)) : null;
+  const dayEndX = l ? X(Math.min(l[1], t1)) : null;
 
   // Grid lines
   const horizGrid = [];
@@ -353,15 +380,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           y2={mt + ph}
           style={{ stroke: 'rgba(255, 255, 255, 0.18)' }}
         />
-        {stripActive && (
-          <line
-            x1={x}
-            x2={x}
-            y1={plotStripTop}
-            y2={stripTop + stripH}
-            style={{ stroke: 'rgba(255, 255, 255, 0.12)' }}
-          />
-        )}
         <text
           x={x}
           y={mt + ph + 11}
@@ -380,8 +398,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     .map(p => `${f1(X(p.u))},${f1(Y(p.hTheo!))}`)
     .join(' ');
 
-  // Polygones signés haute visibilité entre Réel et Théorique
-  const signedSegments = useMemo(() => splitSignedSegments(pts), [pts]);
   const surcotePatternId = `hatch-surcote-${uid}`;
   const souscotePatternId = `hatch-souscote-${uid}`;
 
@@ -427,7 +443,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   }
   flush(polyIdx++);
 
-  // PM / BM markers positioned directly on the real curve
+  // PM / BM markers
   const ex = EX.filter(p => p.t >= t0 && p.t < t1);
   const pmBmMarks = ex.map((p, idx) => {
     const x = X(p.t);
@@ -471,10 +487,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     );
   });
 
-  // Windows & Sessions lanes
-  const dayP = dayInfo(y, m, d, settings, tideW, first, last);
-  const pl = plan(y, m, d, settings, tideW, first, last);
-
   const windowBars = dayP.map((p, idx) => (
     <rect
       key={`wbar-${idx}`}
@@ -513,8 +525,9 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
   // Ligne "maintenant"
   const nw = Date.now() / 6e4;
+  const isToday = nw >= t0 && nw < t1;
   let nowLine = null;
-  if (nw >= t0 && nw < t1) {
+  if (isToday) {
     nowLine = (
       <g>
         <line
@@ -524,15 +537,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           y2={mt + ph}
           style={{ stroke: '#ffc40d', strokeWidth: 1.5, strokeDasharray: '2 2' }}
         />
-        {stripActive && (
-          <line
-            x1={f1(X(nw))}
-            x2={f1(X(nw))}
-            y1={plotStripTop}
-            y2={stripTop + stripH}
-            style={{ stroke: '#ffc40d', strokeWidth: 1.2, strokeDasharray: '2 2', strokeOpacity: 0.75 }}
-          />
-        )}
         <text
           x={f1(X(nw))}
           y={mt - 3}
@@ -545,87 +549,33 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     );
   }
 
-  // Synchronized Loupe Plage (±m gagnés / perdus pour rouler) calculations
-  const stripBounds = useMemo(() => {
-    const rawMin = Math.min(0, deltaStats.minLossM);
-    const rawMax = Math.max(0, deltaStats.maxGainM);
-    const maxAbs = Math.max(rawMax, Math.abs(rawMin));
-    const step = maxAbs > 40 ? 20 : maxAbs > 20 ? 10 : 5;
-
-    if (rawMin < 0 && rawMax === 0) {
-      return {
-        sMin: Math.floor((rawMin - 2) / step) * step,
-        sMax: 0,
-      };
-    }
-    if (rawMax > 0 && rawMin === 0) {
-      return {
-        sMin: 0,
-        sMax: Math.ceil((rawMax + 2) / step) * step,
-      };
-    }
-    if (rawMin < 0 && rawMax > 0) {
-      return {
-        sMin: Math.floor((rawMin - 2) / step) * step,
-        sMax: Math.ceil((rawMax + 2) / step) * step,
-      };
-    }
-    return { sMin: -5, sMax: 5 };
-  }, [deltaStats.minLossM, deltaStats.maxGainM]);
-
-  const Yd = (meters: number) =>
-    plotStripTop +
-    plotStripH -
-    ((meters - stripBounds.sMin) / (stripBounds.sMax - stripBounds.sMin)) * plotStripH;
-  const zeroY = Yd(0);
-
-  // Interactive crosshair state
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [crosshair, setCrosshair] = useState<{
-    visible: boolean;
-    x: number;
-    yReal: number;
-    yTheo: number | null;
-    deltaCm: number;
-    deltaBeachM: number;
-    deltaBeachExactM: number;
-    timeLabel: string;
-    hReal: number;
-    hTheo: number | null;
-    underThr: boolean;
-  }>({
-    visible: false,
-    x: 0,
-    yReal: 0,
-    yTheo: null,
-    deltaCm: 0,
-    deltaBeachM: 0,
-    deltaBeachExactM: 0,
-    timeLabel: '',
-    hReal: 0,
-    hTheo: null,
-    underThr: false,
-  });
-
-  const handlePointer = (ev: React.PointerEvent<SVGSVGElement>) => {
+  const handlePointer = (ev: React.PointerEvent<SVGSVGElement>, pinOnTap = false) => {
     if (!svgRef.current) return;
     const r = svgRef.current.getBoundingClientRect();
     const fx = ((ev.clientX - r.left) / r.width) * W;
     if (fx < ml || fx > W - mr) {
       setCrosshair(prev => ({ ...prev, visible: false }));
+      setHoverU(null);
       return;
     }
-    const u = t0 + ((fx - ml) / pw) * (t1 - t0);
+    const u = Math.min(t1, Math.max(t0, t0 + ((fx - ml) / pw) * (t1 - t0)));
     const ht = hAt(u, rawEX);
     const hrRaw = hAt(u, EX);
     const hr = hrRaw != null ? (isRealMode ? hrRaw + empiricalOffsetM : hrRaw) : null;
     if (hr == null) {
       setCrosshair(prev => ({ ...prev, visible: false }));
+      setHoverU(null);
       return;
     }
     const deltaCm = ht != null ? Math.round((hr - ht) * 100) : 0;
-    const deltaBeachExactM = ht != null ? estimateDeltaBeachMeters(ht, hr) : 0;
-    const deltaBeachM = Math.round(deltaBeachExactM);
+    const deltaBeachM =
+      ht != null
+        ? Math.round(estimateLitto3dWaterlineXExactM(hr) - estimateLitto3dWaterlineXExactM(ht))
+        : 0;
+    setHoverU(u);
+    if (pinOnTap) {
+      setPinnedU(Math.round(u / 10) * 10);
+    }
     setCrosshair({
       visible: true,
       x: X(u),
@@ -633,7 +583,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
       yTheo: ht != null ? Y(ht) : null,
       deltaCm,
       deltaBeachM,
-      deltaBeachExactM,
       timeLabel: lc(u, y, m, d),
       hReal: hr,
       hTheo: ht,
@@ -643,6 +592,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
   const handlePointerLeave = () => {
     setCrosshair(prev => ({ ...prev, visible: false }));
+    setHoverU(null);
   };
 
   const pmx = ex.filter(p => p.pm).map(p => (p.hd != null ? p.hd : p.h));
@@ -666,6 +616,58 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   const crosshairText = `${crosshair.timeLabel} · Réel ${crosshair.hReal.toFixed(2).replace('.', ',')} m · Théo ${
     crosshair.hTheo != null ? crosshair.hTheo.toFixed(2).replace('.', ',') : '-'
   } m · ${crosshairDeltaText}${crosshair.underThr ? ' · praticable' : ''}`;
+
+  // Calculs temps réel synchronisés à `activeU` pour la Vue Piste Interactive
+  const softSandMarginM = 50;
+  const activeHt = hAt(activeU, rawEX);
+  const activeHrRaw = hAt(activeU, EX);
+  const activeHr =
+    activeHrRaw != null ? (isRealMode ? activeHrRaw + empiricalOffsetM : activeHrRaw) : activeHt;
+
+  const theoWaterHeightM = Number((activeHt ?? activeHr ?? jeromeRawLimitH).toFixed(2));
+  const realWaterHeightM = Number((activeHr ?? activeHt ?? jeromeRawLimitH).toFixed(2));
+  const activeDeltaCm = Math.round((realWaterHeightM - theoWaterHeightM) * 100);
+
+  const theoExactX = estimateLitto3dWaterlineXExactM(theoWaterHeightM);
+  const realExactX = estimateLitto3dWaterlineXExactM(realWaterHeightM);
+  const theoDiscoveredX = Math.round(theoExactX);
+  const realDiscoveredX = Math.round(realExactX);
+  const theoRollableWidthM = Math.max(0, theoDiscoveredX - softSandMarginM);
+  const realRollableWidthM = Math.max(0, realDiscoveredX - softSandMarginM);
+  const activeDeltaBeachM = realDiscoveredX - theoDiscoveredX; // négatif = perte (surcote), positif = gain (sous-cote)
+
+  // Limite brute fixée par Jérôme (settings.L, ex: 4,50 m)
+  const jeromeLimitExactX = estimateLitto3dWaterlineXExactM(jeromeRawLimitH);
+  const jeromeLimitDiscoveredX = Math.round(jeromeLimitExactX);
+  const jeromeLimitRollableM = Math.max(0, jeromeLimitDiscoveredX - softSandMarginM);
+  const isWithinJeromeLimit = realWaterHeightM <= jeromeRawLimitH;
+
+  // Mapping SVG pour la Vue Piste (viewBox 700 x 205)
+  const pSvgW = 700;
+  const pSvgH = 205;
+  const duneW = 28;
+  const mapBeachX = (xMeters: number) => duneW + (xMeters / 460) * (pSvgW - duneW);
+
+  const softSandEndXPos = mapBeachX(softSandMarginM);
+  const theoXPos = mapBeachX(theoExactX);
+  const realXPos = mapBeachX(realExactX);
+  const jeromeLimitXPos = mapBeachX(jeromeLimitExactX);
+
+  const isSurcoteAtU = activeDeltaCm > 0;
+  const isSouscoteAtU = activeDeltaCm < 0;
+  const hasWaterDiffAtU = Math.abs(realXPos - theoXPos) >= 1.2 || Math.abs(activeDeltaCm) >= 2;
+
+  const drySandPatternId = `curve-dry-${uid}`;
+  const tracksPatternId = `curve-tracks-${uid}`;
+  const oceanGradId = `curve-ocean-${uid}`;
+  const pisteSurcoteId = `curve-piste-surcote-${uid}`;
+  const pisteSouscoteId = `curve-piste-souscote-${uid}`;
+
+  // Marqueur synchronisé sur la courbe de marée lorsque l'utilisateur n'est pas en survol actif
+  const pinnedMarkerX = X(activeU);
+  const pinnedMarkerY = activeHr != null ? Y(activeHr) : null;
+  const firstBm = ex.find(p => !p.pm);
+  const firstSlot = pl.full[0] || pl.extra[0];
 
   return (
     <div className="crv">
@@ -723,8 +725,8 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           )}
         </div>
 
-        {deltaStats.hasOffset && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          {deltaStats.hasOffset && (
             <button
               type="button"
               onClick={() => setShowFill(v => !v)}
@@ -744,29 +746,30 @@ export const CurveChart: React.FC<CurveChartProps> = ({
             >
               {showFill ? '✓ ' : ''}Remplissage Δ
             </button>
-            <button
-              type="button"
-              onClick={() => setShowDeltaLoupe(v => !v)}
-              style={{
-                border: showDeltaLoupe
-                  ? '1px solid #0284c7'
-                  : '1px solid rgba(100, 116, 139, 0.35)',
-                background: showDeltaLoupe ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                color: showDeltaLoupe ? '#0369a1' : '#475569',
-                borderRadius: '6px',
-                padding: '2px 7px',
-                fontSize: '0.69rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-              title="Zoomer les mètres de plage gagnés ou perdus pour rouler (profil Litto3D)"
-            >
-              {showDeltaLoupe ? '✓ ' : ''}Loupe ±m plage
-            </button>
-          </div>
-        )}
+          )}
+          <button
+            type="button"
+            onClick={() => setShowPisteView(v => !v)}
+            style={{
+              border: showPisteView
+                ? '1px solid #0284c7'
+                : '1px solid rgba(100, 116, 139, 0.35)',
+              background: showPisteView ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+              color: showPisteView ? '#0369a1' : '#475569',
+              borderRadius: '6px',
+              padding: '2px 7px',
+              fontSize: '0.69rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+            title="Afficher ou masquer la vue aérienne interactive de la piste selon l'heure"
+          >
+            {showPisteView ? '✓ ' : ''}Vue Piste
+          </button>
+        </div>
       </div>
 
+      {/* Courbe de marée 24h */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -778,12 +781,11 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           borderRadius: '8px',
           overflow: 'hidden',
         }}
-        onPointerMove={handlePointer}
-        onPointerDown={handlePointer}
+        onPointerMove={ev => handlePointer(ev, false)}
+        onPointerDown={ev => handlePointer(ev, true)}
         onPointerLeave={handlePointerLeave}
       >
         <defs>
-          {/* Hachures corail-orange vives : Surcote (hReal > hTheo, eau plus haute) */}
           <pattern
             id={surcotePatternId}
             width="6"
@@ -802,7 +804,6 @@ export const CurveChart: React.FC<CurveChartProps> = ({
             />
           </pattern>
 
-          {/* Hachures menthe-émeraude vives : Sous-cote (hReal < hTheo, eau plus basse) */}
           <pattern
             id={souscotePatternId}
             width="6"
@@ -837,6 +838,33 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
         {horizGrid}
         {vertGrid}
+
+        {/* Limite brute Jérôme (settings.L) si distincte du seuil effectif */}
+        {Math.abs(jeromeRawLimitH - thr) >= 0.02 && (
+          <g>
+            <line
+              x1={ml}
+              x2={W - mr}
+              y1={f1(Y(jeromeRawLimitH))}
+              y2={f1(Y(jeromeRawLimitH))}
+              style={{ stroke: 'rgba(248, 113, 113, 0.85)', strokeWidth: 1.1, strokeDasharray: '3 3' }}
+            />
+            <text
+              x={ml + 3}
+              y={f1(Y(jeromeRawLimitH) - 2.5)}
+              style={{
+                fill: '#fca5a5',
+                fontSize: '7.8px',
+                fontWeight: 800,
+                paintOrder: 'stroke',
+                stroke: '#0a0d0b',
+                strokeWidth: '2px',
+              }}
+            >
+              limite Jérôme {jeromeRawLimitH.toFixed(2).replace('.', ',')} m
+            </text>
+          </g>
+        )}
 
         {/* Threshold dashed line */}
         <line
@@ -917,187 +945,30 @@ export const CurveChart: React.FC<CurveChartProps> = ({
         {windowBars}
         {sessionBars}
         {extraBars}
+        {nowLine}
 
-        {/* LOUPE PLAGE (±m gagnés / perdus pour rouler) synchronisée pixel par pixel sur 0h–24h */}
-        {stripActive && (
+        {/* Repère de l'heure affichée sur la Vue Piste (quand on ne survole pas la courbe) */}
+        {showPisteView && !crosshair.visible && pinnedMarkerY != null && (
           <g>
-            {/* Fond nuit / jour subtil */}
-            <rect
-              x={ml}
-              y={stripTop}
-              width={pw}
-              height={stripH}
-              rx={3}
-              style={{ fill: '#0b1117' }}
-            />
-            {dayStartX != null && dayEndX != null && (
-              <rect
-                x={f1(dayStartX)}
-                y={plotStripTop}
-                width={f1(Math.max(0, dayEndX - dayStartX))}
-                height={plotStripH}
-                style={{ fill: '#103b25', fillOpacity: 0.85 }}
-              />
-            )}
-            <rect
-              x={ml}
-              y={stripTop}
-              width={pw}
-              height={stripHeaderH}
-              style={{ fill: 'rgba(15, 23, 42, 0.85)' }}
-            />
-
-            {/* Ligne de référence 0 m */}
             <line
-              x1={ml}
-              x2={W - mr}
-              y1={f1(zeroY)}
-              y2={f1(zeroY)}
-              style={{
-                stroke: 'rgba(248, 250, 252, 0.55)',
-                strokeWidth: 1,
-                strokeDasharray: '3 2',
-              }}
+              x1={f1(pinnedMarkerX)}
+              x2={f1(pinnedMarkerX)}
+              y1={mt}
+              y2={mt + ph}
+              style={{ stroke: 'rgba(248, 250, 252, 0.65)', strokeWidth: 1.2, strokeDasharray: '4 2' }}
             />
-            {stripBounds.sMax > 0 && (
-              <text
-                x={ml - 4}
-                y={f1(plotStripTop + 6)}
-                textAnchor="end"
-                style={{ fill: '#34d399', fontSize: '7.2px', fontWeight: 700 }}
-              >
-                +{stripBounds.sMax}m
-              </text>
-            )}
-            {(stripBounds.sMax === 0 ||
-              stripBounds.sMin === 0 ||
-              (zeroY - plotStripTop >= 8 && plotStripTop + plotStripH - zeroY >= 8)) && (
-              <text
-                x={ml - 4}
-                y={f1(
-                  stripBounds.sMax === 0
-                    ? plotStripTop + 6
-                    : stripBounds.sMin === 0
-                      ? plotStripTop + plotStripH - 1
-                      : zeroY + 2.5
-                )}
-                textAnchor="end"
-                style={{ fill: '#cbd5e1', fontSize: '7.2px', fontWeight: 700 }}
-              >
-                0m
-              </text>
-            )}
-            {stripBounds.sMin < 0 && (
-              <text
-                x={ml - 4}
-                y={f1(plotStripTop + plotStripH - 1)}
-                textAnchor="end"
-                style={{ fill: '#fb923c', fontSize: '7.2px', fontWeight: 700 }}
-              >
-                {stripBounds.sMin}m
-              </text>
-            )}
-
-            {/* Aires signées en mètres de plage gagnés (+ vert) / perdus (− orange) */}
-            {signedSegments.map((seg, idx) => {
-              const linePts = seg.points.map(
-                p => `${f1(X(p.u))},${f1(Yd(estimateDeltaBeachMeters(p.hTheo, p.hReal)))}`
-              );
-              const firstX = f1(X(seg.points[0].u));
-              const lastX = f1(X(seg.points[seg.points.length - 1].u));
-              const zy = f1(zeroY);
-              const polyPts = `${firstX},${zy} ${linePts.join(' ')} ${lastX},${zy}`;
-              const isLoss = seg.sign === 'pos';
-              const color = isLoss ? '#fb923c' : '#34d399';
-              return (
-                <g key={`strip-seg-${idx}`}>
-                  <polygon
-                    points={polyPts}
-                    style={{
-                      fill: isLoss ? '#f97316' : '#10b981',
-                      fillOpacity: 0.44,
-                    }}
-                  />
-                  <polyline
-                    points={linePts.join(' ')}
-                    style={{
-                      fill: 'none',
-                      stroke: color,
-                      strokeWidth: 1.8,
-                      strokeLinejoin: 'round',
-                    }}
-                  />
-                </g>
-              );
-            })}
-
-            {/* Titre interne + pic mètres calé à droite */}
-            <text
-              x={ml + 4}
-              y={stripTop + 8.5}
-              style={{
-                fill: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '7.3px',
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-              }}
-            >
-              LOUPE PLAGE (±m) · gagnés / perdus pour rouler
-            </text>
             <circle
-              cx={f1(X(deltaStats.peakMU))}
-              cy={f1(Yd(deltaStats.peakSignedM))}
-              r={2.6}
+              cx={f1(pinnedMarkerX)}
+              cy={f1(pinnedMarkerY)}
+              r={3.5}
               style={{
-                fill:
-                  deltaStats.peakSignedM < 0
-                    ? '#fb923c'
-                    : deltaStats.peakSignedM > 0
-                      ? '#34d399'
-                      : '#cbd5e1',
-                stroke: '#000',
-                strokeWidth: 0.9,
-              }}
-            />
-            <text
-              x={W - mr - 4}
-              y={stripTop + 8.5}
-              textAnchor="end"
-              style={{
-                fill:
-                  deltaStats.peakSignedM < 0
-                    ? '#fdba74'
-                    : deltaStats.peakSignedM > 0
-                      ? '#6ee7b7'
-                      : '#cbd5e1',
-                fontSize: '7.3px',
-                fontWeight: 800,
-              }}
-            >
-              {deltaStats.peakSignedM < 0
-                ? `pire ${deltaStats.peakSignedM} m (${lc(deltaStats.peakMU, y, m, d)})`
-                : deltaStats.peakSignedM > 0
-                  ? `max +${deltaStats.peakSignedM} m (${lc(deltaStats.peakMU, y, m, d)})`
-                  : `0 m (${lc(deltaStats.peakU, y, m, d)})`}
-            </text>
-
-            {/* Cadre net de la bande Loupe */}
-            <rect
-              x={ml}
-              y={stripTop}
-              width={pw}
-              height={stripH}
-              rx={3}
-              style={{
-                fill: 'none',
-                stroke: 'rgba(148, 163, 184, 0.35)',
-                strokeWidth: 0.8,
+                fill: isWithinJeromeLimit ? '#38bdf8' : '#f97316',
+                stroke: '#ffffff',
+                strokeWidth: 1.3,
               }}
             />
           </g>
         )}
-
-        {nowLine}
 
         {/* Double curseur interactif + pont vertical Δ */}
         {crosshair.visible && (
@@ -1107,34 +978,8 @@ export const CurveChart: React.FC<CurveChartProps> = ({
               x2={crosshair.x}
               y1={mt}
               y2={mt + ph}
-              style={{ stroke: 'rgba(255, 255, 255, 0.82)', strokeWidth: 1.1 }}
+              style={{ stroke: 'rgba(255, 255, 255, 0.85)', strokeWidth: 1.2 }}
             />
-            {stripActive && (
-              <>
-                <line
-                  x1={crosshair.x}
-                  x2={crosshair.x}
-                  y1={plotStripTop}
-                  y2={stripTop + stripH}
-                  style={{ stroke: 'rgba(255, 255, 255, 0.78)', strokeWidth: 1.1 }}
-                />
-                <circle
-                  cx={crosshair.x}
-                  cy={Yd(crosshair.deltaBeachExactM)}
-                  r={3.2}
-                  style={{
-                    fill:
-                      crosshair.deltaBeachExactM < -0.25
-                        ? '#fb923c'
-                        : crosshair.deltaBeachExactM > 0.25
-                          ? '#34d399'
-                          : '#cbd5e1',
-                    stroke: '#000',
-                    strokeWidth: 1,
-                  }}
-                />
-              </>
-            )}
 
             {/* Pont vertical entre Théorique et Réel */}
             {crosshair.yTheo != null && Math.abs(crosshair.yReal - crosshair.yTheo) >= 1 && (
@@ -1151,7 +996,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
               />
             )}
 
-            {/* Point Théorique (anneau blanc) */}
+            {/* Point Théorique */}
             {crosshair.yTheo != null && (
               <circle
                 cx={crosshair.x}
@@ -1161,7 +1006,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
               />
             )}
 
-            {/* Point Réel (jaune plein) */}
+            {/* Point Réel */}
             <circle
               cx={crosshair.x}
               cy={crosshair.yReal}
@@ -1169,7 +1014,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
               style={{ fill: '#ffc40d', stroke: '#000', strokeWidth: 1.2 }}
             />
 
-            {/* Étiquette de lecture auto-alignée (ne déborde pas à droite) */}
+            {/* Étiquette de lecture auto-alignée */}
             <text
               x={anchorRight ? crosshair.x - 6 : crosshair.x + 6}
               y={mt + 10}
@@ -1188,6 +1033,573 @@ export const CurveChart: React.FC<CurveChartProps> = ({
           </g>
         )}
       </svg>
+
+      {/* VUE AÉRIENNE INTERACTIVE DE LA PISTE DE ROULAGE (remplace la Loupe) */}
+      {showPisteView && (
+        <div
+          style={{
+            marginTop: '8px',
+            padding: '10px 11px',
+            borderRadius: '10px',
+            background: '#f8fafc',
+            border: isWithinJeromeLimit
+              ? '1.5px solid #bae6fd'
+              : '1.5px solid #fdba74',
+          }}
+        >
+          {/* En-tête heure active + statut vs Limite Jérôme */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '6px',
+              marginBottom: '6px',
+              fontSize: '0.73rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  padding: '2px 7px',
+                  borderRadius: '5px',
+                  fontWeight: 900,
+                  fontSize: '0.72rem',
+                }}
+              >
+                🕒 {lc(activeU, y, m, d)}
+              </span>
+              <span style={{ fontWeight: 800, color: '#0369a1' }}>
+                Vue Piste Litto3D
+              </span>
+              <span style={{ color: '#64748b', fontSize: '0.67rem' }}>
+                {hoverU != null
+                  ? '(survol courbe)'
+                  : isToday && Math.abs(activeU - nw) <= 12
+                    ? '(maintenant)'
+                    : '(heure sélectionnée)'}
+              </span>
+            </div>
+
+            <span
+              style={{
+                padding: '2px 8px',
+                borderRadius: '5px',
+                fontWeight: 800,
+                fontSize: '0.70rem',
+                background: isWithinJeromeLimit ? '#dcfce7' : '#fee2e2',
+                color: isWithinJeromeLimit ? '#166534' : '#991b1b',
+                border: isWithinJeromeLimit
+                  ? '1px solid #86efac'
+                  : '1px solid #fca5a5',
+              }}
+            >
+              {isWithinJeromeLimit
+                ? `✓ Roulage OK · ${realRollableWidthM} m utiles (limite Jérôme ≥ ${jeromeLimitRollableM} m)`
+                : `✕ Sous limite Jérôme · ${realRollableWidthM} m (< ${jeromeLimitRollableM} m à ${jeromeRawLimitH.toFixed(2).replace('.', ',')} m)`}
+            </span>
+          </div>
+
+          {/* Bandeau comparatif SHOM vs Réel à l'heure active */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '7px',
+              padding: '5px 8px',
+              borderRadius: '7px',
+              background: isSurcoteAtU ? '#fff7ed' : isSouscoteAtU ? '#ecfdf5' : '#e0f2fe',
+              border: isSurcoteAtU
+                ? '1px solid #fdba74'
+                : isSouscoteAtU
+                  ? '1px solid #6ee7b7'
+                  : '1px solid #bae6fd',
+              fontSize: '0.70rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', color: '#334155' }}>
+              <span>
+                Théo SHOM : <b>{theoWaterHeightM.toFixed(2).replace('.', ',')} m</b> ({theoRollableWidthM} m utiles)
+              </span>
+              <span>
+                Réel ({activeDeltaCm >= 0 ? `+${activeDeltaCm}` : activeDeltaCm} cm) :{' '}
+                <b style={{ color: '#0f172a' }}>{realWaterHeightM.toFixed(2).replace('.', ',')} m</b> ({realRollableWidthM} m utiles)
+              </span>
+            </div>
+            <span
+              style={{
+                fontWeight: 800,
+                color: isSurcoteAtU ? '#c2410c' : isSouscoteAtU ? '#047857' : '#0369a1',
+              }}
+            >
+              {activeDeltaBeachM < 0
+                ? `${Math.abs(activeDeltaBeachM)} m perdus vs SHOM`
+                : activeDeltaBeachM > 0
+                  ? `+${activeDeltaBeachM} m gagnés vs SHOM`
+                  : '0 m d’écart plage vs SHOM'}
+            </span>
+          </div>
+
+          {/* SVG Aérien (Dune -> Sable mou 50m -> Piste -> Limite Jérôme -> Mer) */}
+          <svg
+            viewBox={`0 0 ${pSvgW} ${pSvgH}`}
+            style={{
+              width: '100%',
+              height: 'auto',
+              display: 'block',
+              borderRadius: '8px',
+              boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.06)',
+            }}
+          >
+            <defs>
+              <pattern id={drySandPatternId} width="20" height="20" patternUnits="userSpaceOnUse">
+                <rect width="20" height="20" fill="#fef08a" />
+                <circle cx="5" cy="5" r="1" fill="#facc15" />
+                <circle cx="15" cy="15" r="1.2" fill="#eab308" />
+              </pattern>
+              <pattern id={tracksPatternId} width="40" height="30" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="8" x2="40" y2="8" stroke="#ca8a04" strokeWidth="1" strokeDasharray="6 4" opacity="0.45" />
+                <line x1="0" y1="22" x2="40" y2="22" stroke="#ca8a04" strokeWidth="1" strokeDasharray="6 4" opacity="0.45" />
+              </pattern>
+              <linearGradient id={oceanGradId} x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#38bdf8" />
+                <stop offset="30%" stopColor="#0284c7" />
+                <stop offset="100%" stopColor="#0369a1" />
+              </linearGradient>
+              <pattern id={pisteSurcoteId} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="8" height="8" fill="rgba(249, 115, 22, 0.42)" />
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255, 237, 213, 0.85)" strokeWidth="2.2" />
+              </pattern>
+              <pattern id={pisteSouscoteId} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+                <rect width="8" height="8" fill="rgba(16, 185, 129, 0.34)" />
+                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(209, 250, 229, 0.9)" strokeWidth="2.2" />
+              </pattern>
+            </defs>
+
+            {/* 1. Dune & Oyats */}
+            <rect x="0" y="0" width={duneW} height={pSvgH} fill="#a3e635" />
+            <line x1={duneW} y1="0" x2={duneW} y2={pSvgH} stroke="#4d7c0f" strokeWidth="2" strokeDasharray="3 3" />
+            <text
+              x={duneW / 2}
+              y={pSvgH / 2}
+              fill="#365314"
+              fontSize="10"
+              fontWeight="900"
+              transform={`rotate(-90 ${duneW / 2},${pSvgH / 2})`}
+              textAnchor="middle"
+            >
+              DUNE / HERBE
+            </text>
+
+            {/* 2. Sable sec / mou (50 m) */}
+            <rect
+              x={duneW}
+              y="0"
+              width={Math.max(0, softSandEndXPos - duneW)}
+              height={pSvgH}
+              fill="#fef9c3"
+            />
+            <rect
+              x={duneW}
+              y="0"
+              width={Math.max(0, softSandEndXPos - duneW)}
+              height={pSvgH}
+              fill={`url(#${drySandPatternId})`}
+              opacity="0.35"
+            />
+            <line
+              x1={softSandEndXPos}
+              y1="0"
+              x2={softSandEndXPos}
+              y2={pSvgH}
+              stroke="#d97706"
+              strokeWidth="2"
+              strokeDasharray="4 2"
+            />
+            <text
+              x={(duneW + softSandEndXPos) / 2}
+              y={pSvgH / 2}
+              fill="#b45309"
+              fontSize="9"
+              fontWeight="800"
+              transform={`rotate(-90 ${(duneW + softSandEndXPos) / 2},${pSvgH / 2})`}
+              textAnchor="middle"
+            >
+              SABLE SEC ({softSandMarginM} m)
+            </text>
+
+            {/* 3. Piste de roulage en sable dur */}
+            {realXPos > softSandEndXPos && (
+              <g>
+                <rect
+                  x={softSandEndXPos}
+                  y="0"
+                  width={Math.max(0, realXPos - softSandEndXPos)}
+                  height={pSvgH}
+                  fill="#fde68a"
+                />
+                <rect
+                  x={softSandEndXPos}
+                  y="0"
+                  width={Math.max(0, realXPos - softSandEndXPos)}
+                  height={pSvgH}
+                  fill={`url(#${tracksPatternId})`}
+                />
+
+                {realRollableWidthM >= 35 ? (
+                  <g opacity="0.9">
+                    <rect
+                      x={softSandEndXPos + 10}
+                      y="46"
+                      width={Math.max(16, realXPos - softSandEndXPos - 20)}
+                      height="112"
+                      rx="22"
+                      fill="none"
+                      stroke={isWithinJeromeLimit ? '#ea580c' : '#dc2626'}
+                      strokeWidth="2"
+                      strokeDasharray="7 5"
+                    />
+                    <circle cx={softSandEndXPos + 18} cy="72" r="4.5" fill="#dc2626" stroke="#fff" strokeWidth="1.4" />
+                    <circle cx={softSandEndXPos + 18} cy="134" r="4.5" fill="#dc2626" stroke="#fff" strokeWidth="1.4" />
+                    {realXPos - softSandEndXPos >= 50 && (
+                      <>
+                        <circle cx={realXPos - 18} cy="72" r="4.5" fill="#eab308" stroke="#000" strokeWidth="1.4" />
+                        <circle cx={realXPos - 18} cy="134" r="4.5" fill="#eab308" stroke="#000" strokeWidth="1.4" />
+                      </>
+                    )}
+
+                    {/* Mini char à voile centré sur la piste */}
+                    <g transform={`translate(${(softSandEndXPos + realXPos) / 2}, 96)`}>
+                      <line x1="0" y1="-10" x2="0" y2="10" stroke="#1e293b" strokeWidth="2.2" />
+                      <line x1="-9" y1="8" x2="9" y2="8" stroke="#1e293b" strokeWidth="2.2" />
+                      <rect x="-2" y="-12" width="4" height="5" rx="1" fill="#0f172a" />
+                      <rect x="-11" y="6" width="4" height="5" rx="1" fill="#0f172a" />
+                      <rect x="7" y="6" width="4" height="5" rx="1" fill="#0f172a" />
+                      <path d="M 0,0 Q 7,-4 12,-2" fill="none" stroke="#2563eb" strokeWidth="2.6" />
+                      <circle cx="0" cy="0" r="2.6" fill="#ef4444" />
+                    </g>
+
+                    <text
+                      x={(softSandEndXPos + realXPos) / 2}
+                      y="124"
+                      fill={isWithinJeromeLimit ? '#9a3412' : '#991b1b'}
+                      fontSize="10"
+                      fontWeight="900"
+                      textAnchor="middle"
+                    >
+                      Piste {realRollableWidthM} m
+                    </text>
+                  </g>
+                ) : (
+                  <text
+                    x={(softSandEndXPos + realXPos) / 2}
+                    y="105"
+                    fill="#991b1b"
+                    fontSize="9"
+                    fontWeight="900"
+                    textAnchor="middle"
+                  >
+                    {realRollableWidthM} m
+                  </text>
+                )}
+              </g>
+            )}
+
+            {/* 4. Océan réel */}
+            <rect
+              x={realXPos}
+              y="0"
+              width={Math.max(0, pSvgW - realXPos)}
+              height={pSvgH}
+              fill={`url(#${oceanGradId})`}
+            />
+
+            {/* 4b. Zone d'écart Surcote / Sous-cote */}
+            {hasWaterDiffAtU && Math.abs(theoXPos - realXPos) >= 1 && (
+              <g>
+                <rect
+                  x={Math.min(realXPos, theoXPos)}
+                  y="0"
+                  width={Math.abs(theoXPos - realXPos)}
+                  height={pSvgH}
+                  fill={`url(#${isSurcoteAtU ? pisteSurcoteId : pisteSouscoteId})`}
+                />
+                {Math.abs(theoXPos - realXPos) >= 14 && (
+                  <text
+                    x={(realXPos + theoXPos) / 2}
+                    y={pSvgH / 2}
+                    fill={isSurcoteAtU ? '#fff7ed' : '#065f46'}
+                    fontSize="8.8"
+                    fontWeight="900"
+                    transform={`rotate(-90 ${(realXPos + theoXPos) / 2},${pSvgH / 2})`}
+                    textAnchor="middle"
+                    style={{
+                      paintOrder: 'stroke',
+                      stroke: isSurcoteAtU ? '#9a3412' : '#ecfdf5',
+                      strokeWidth: '2px',
+                    }}
+                  >
+                    {isSurcoteAtU ? `SURCOTE ${activeDeltaBeachM} m` : `SOUS-COTE +${activeDeltaBeachM} m`}
+                  </text>
+                )}
+              </g>
+            )}
+
+            {/* Trait d'eau réel ondulé + label Mer Réelle */}
+            <path
+              d={`M ${realXPos},0 Q ${realXPos + 4},25 ${realXPos},50 T ${realXPos},100 T ${realXPos},150 T ${realXPos},${pSvgH}`}
+              fill="none"
+              stroke={isSurcoteAtU ? '#ffedd5' : isSouscoteAtU ? '#d1fae5' : '#ffffff'}
+              strokeWidth="3.2"
+              opacity="0.95"
+            />
+            {pSvgW - Math.max(realXPos, theoXPos) >= 28 && (
+              <text
+                x={Math.min(pSvgW - 16, Math.max(realXPos, theoXPos) + 22)}
+                y={pSvgH / 2}
+                fill="#ffffff"
+                fontSize="10"
+                fontWeight="900"
+                transform={`rotate(90 ${Math.min(pSvgW - 16, Math.max(realXPos, theoXPos) + 22)},${pSvgH / 2})`}
+                textAnchor="middle"
+              >
+                MER RÉELLE ({realWaterHeightM.toFixed(2).replace('.', ',')} m)
+              </text>
+            )}
+
+            {/* 5. Limite brute de roulage fixée par Jérôme (settings.L) */}
+            <line
+              x1={jeromeLimitXPos}
+              y1="0"
+              x2={jeromeLimitXPos}
+              y2={pSvgH}
+              stroke="#ffffff"
+              strokeWidth="4"
+              strokeDasharray="6 3"
+              opacity="0.8"
+            />
+            <line
+              x1={jeromeLimitXPos}
+              y1="0"
+              x2={jeromeLimitXPos}
+              y2={pSvgH}
+              stroke="#dc2626"
+              strokeWidth="2.2"
+              strokeDasharray="6 3"
+            />
+            <rect
+              x={Math.min(pSvgW - 188, Math.max(duneW + 4, jeromeLimitXPos - 92))}
+              y={pSvgH - 24}
+              width="184"
+              height="18"
+              rx="4"
+              fill={isWithinJeromeLimit ? 'rgba(255, 255, 255, 0.94)' : '#991b1b'}
+              stroke="#dc2626"
+              strokeWidth="1.2"
+            />
+            <text
+              x={Math.min(pSvgW - 96, Math.max(duneW + 96, jeromeLimitXPos))}
+              y={pSvgH - 12}
+              fill={isWithinJeromeLimit ? '#991b1b' : '#ffffff'}
+              fontSize="8.8"
+              fontWeight="900"
+              textAnchor="middle"
+            >
+              Limite Jérôme {jeromeRawLimitH.toFixed(2).replace('.', ',')} m ({jeromeLimitRollableM} m utiles)
+            </text>
+
+            {/* 6. Ligne d'eau Théorique SHOM (pointillés jaune) */}
+            <line
+              x1={theoXPos}
+              y1="0"
+              x2={theoXPos}
+              y2={pSvgH}
+              stroke="#0f172a"
+              strokeWidth="3"
+              strokeDasharray="6 4"
+              opacity="0.45"
+            />
+            <line
+              x1={theoXPos}
+              y1="0"
+              x2={theoXPos}
+              y2={pSvgH}
+              stroke="#fde047"
+              strokeWidth="2.1"
+              strokeDasharray="6 4"
+            />
+            <rect
+              x={Math.min(pSvgW - 114, Math.max(duneW + 4, theoXPos - 55))}
+              y="5"
+              width="110"
+              height="16"
+              rx="4"
+              fill="rgba(15, 23, 42, 0.88)"
+              stroke="#fde047"
+              strokeWidth="1"
+            />
+            <text
+              x={Math.min(pSvgW - 59, Math.max(duneW + 59, theoXPos))}
+              y="16"
+              fill="#fef08a"
+              fontSize="8.2"
+              fontWeight="900"
+              textAnchor="middle"
+            >
+              Théo SHOM {theoWaterHeightM.toFixed(2).replace('.', ',')} m
+            </text>
+
+            {/* 7. Étiquette Réelle si distincte du SHOM */}
+            {hasWaterDiffAtU && (
+              <g>
+                <rect
+                  x={Math.min(pSvgW - 122, Math.max(duneW + 4, realXPos - 59))}
+                  y="24"
+                  width="118"
+                  height="16"
+                  rx="4"
+                  fill={isSurcoteAtU ? '#9a3412' : '#065f46'}
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+                <text
+                  x={Math.min(pSvgW - 63, Math.max(duneW + 63, realXPos))}
+                  y="35"
+                  fill="#ffffff"
+                  fontSize="8.2"
+                  fontWeight="900"
+                  textAnchor="middle"
+                >
+                  Réel {realWaterHeightM.toFixed(2).replace('.', ',')} m ({activeDeltaCm > 0 ? `+${activeDeltaCm}` : activeDeltaCm} cm)
+                </text>
+              </g>
+            )}
+          </svg>
+
+          {/* Curseur horaire interactif 0h-24h + accès rapides */}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#475569', whiteSpace: 'nowrap' }}>
+                Heure :
+              </span>
+              <input
+                type="range"
+                min={t0}
+                max={t1}
+                step={10}
+                value={Math.round(activeU)}
+                onChange={e => {
+                  setHoverU(null);
+                  setPinnedU(Number(e.target.value));
+                }}
+                aria-label="Choisir l'heure pour visualiser la piste de roulage"
+                style={{ flex: 1, cursor: 'pointer', accentColor: '#0284c7' }}
+              />
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 900,
+                  color: '#0f172a',
+                  minWidth: '42px',
+                  textAlign: 'right',
+                }}
+              >
+                {lc(activeU, y, m, d)}
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '6px',
+                marginTop: '4px',
+                fontSize: '0.66rem',
+                color: '#64748b',
+              }}
+            >
+              <span>
+                Plage découverte : <b>{realDiscoveredX} m</b> (SHOM {theoDiscoveredX} m) · Marge sable mou {softSandMarginM} m
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                {isToday && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHoverU(null);
+                      setPinnedU(Math.min(t1, Math.max(t0, Math.round(nw / 10) * 10)));
+                    }}
+                    style={{
+                      padding: '1px 6px',
+                      fontSize: '0.64rem',
+                      fontWeight: 800,
+                      borderRadius: '4px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Maintenant
+                  </button>
+                )}
+                {firstSlot && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHoverU(null);
+                      setPinnedU(
+                        Math.min(t1, Math.max(t0, Math.round(((firstSlot[0] + firstSlot[1]) / 2) / 10) * 10))
+                      );
+                    }}
+                    style={{
+                      padding: '1px 6px',
+                      fontSize: '0.64rem',
+                      fontWeight: 800,
+                      borderRadius: '4px',
+                      border: '1px solid #93c5fd',
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Séance {lc(firstSlot[0], y, m, d)}
+                  </button>
+                )}
+                {firstBm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHoverU(null);
+                      setPinnedU(Math.min(t1, Math.max(t0, Math.round(firstBm.t / 10) * 10)));
+                    }}
+                    style={{
+                      padding: '1px 6px',
+                      fontSize: '0.64rem',
+                      fontWeight: 800,
+                      borderRadius: '4px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#0369a1',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    BM {lc(firstBm.t, y, m, d)}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Légende enrichie & impact concret sur la plage praticable */}
       <div className="m" style={{ marginTop: '6px', fontSize: '0.72rem', lineHeight: '1.45' }}>
@@ -1276,7 +1688,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
 
         Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> ·{' '}
         <b>fond noir : nuit</b> · barre bleue : plage praticable · barres marine : séances.
-        Touche ou survole la courbe pour lire les deux hauteurs et les mètres gagnés ou perdus pour rouler (profil Litto3D).
+        Survole/touche la courbe ou glisse le curseur pour animer la largeur de piste en direct.
         {mar != null && (
           <span>
             {' '}

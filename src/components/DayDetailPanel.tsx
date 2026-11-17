@@ -25,6 +25,7 @@ import {
   sw,
   toU,
   tdy,
+  vstat,
 } from '../utils/tides';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
@@ -44,7 +45,6 @@ import {
 } from '../utils/cycleHelpers';
 import { CurveChart } from './CurveChart';
 import { CustomSlotsManager } from './CustomSlotsManager';
-import { DayCycle1Banner } from './DayCycle1Banner';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
@@ -124,7 +124,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   bookingsMap = {},
   onSaveSlotBookings: rawOnSaveSlotBookings,
   onValidateDay: rawOnValidateDay,
-  onClearValidation: rawOnClearValidation,
   onSetSlotCycle1Action: rawOnSetSlotCycle1Action,
   onExcludeRemainingCycle1Slots: rawOnExcludeRemainingCycle1Slots,
   onAddCustomNonPublishReason,
@@ -137,7 +136,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   isReadOnly = false,
 }) => {
   const onValidateDay = isReadOnly ? undefined : rawOnValidateDay;
-  const onClearValidation = isReadOnly ? undefined : rawOnClearValidation;
   const onSetSlotCycle1Action = isReadOnly ? undefined : rawOnSetSlotCycle1Action;
   const onExcludeRemainingCycle1Slots = isReadOnly ? undefined : rawOnExcludeRemainingCycle1Slots;
   const onSaveSlotBookings = isReadOnly ? undefined : rawOnSaveSlotBookings;
@@ -607,28 +605,12 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         </div>
       )}
 
-      {onValidateDay && onClearValidation && (
-        <DayCycle1Banner
-          selectedDate={selectedDate}
-          settings={settings}
-          W={tideW}
-          first={first}
-          last={last}
-          windList={windList}
-          customSlotsMap={customSlotsMap}
-          validations={validations}
-          onValidateDay={onValidateDay}
-          onClearValidation={onClearValidation}
-          onAddCustomNonPublishReason={reason => onAddCustomNonPublishReason?.(reason)}
-          onOpenCycle2={onOpenCycle2}
-          embedded={true}
-          isReadOnly={isReadOnly}
-        />
-      )}
-
       {/* Sessions list */}
       {(() => {
         const valRecForHeader = validations[selectedDate];
+        const valInfo = vstat(focusData, validations);
+        const allPublished =
+          valInfo.st === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0;
         const remainingUndecidedCount = !isReadOnly && !isPastLocked && onExcludeRemainingCycle1Slots
           ? focusData.list.filter(s => {
               const sk = Math.round(s.a) + (s.opt ? 'o' : '') + (s.isCustom ? 'c' : '');
@@ -664,26 +646,52 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               {` · jauge max ${MAX_CHARS_PER_INSTRUCTOR} chars / moniteur (Mono + Bi)`}
             </span>
 
-            {remainingUndecidedCount > 0 && decidedCount > 0 && onExcludeRemainingCycle1Slots && (
-              <button
-                type="button"
-                className="fbtn"
-                onClick={() => onExcludeRemainingCycle1Slots(focusData)}
-                style={{
-                  margin: 0,
-                  padding: '4px 10px',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  background: '#f8fafc',
-                  color: '#475569',
-                  border: '1px dashed #94a3b8',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                }}
-                title="Marquer d'un clic les créneaux encore en attente comme « Hors offre / Non pertinent » (exclus des stats d'absentéisme et du taux de concrétisation)"
-              >
-                ➖ Écarter les {remainingUndecidedCount} non retenu{remainingUndecidedCount > 1 ? 's' : ''} (hors offre)
-              </button>
+            {!isReadOnly && !isPastLocked && focusData.list.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {onValidateDay && (
+                  <button
+                    type="button"
+                    className="fbtn"
+                    onClick={() => onValidateDay(selectedDate, focusData, 'all')}
+                    style={{
+                      margin: 0,
+                      padding: '4px 10px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      background: allPublished ? '#16a34a' : 'var(--ac, #ffc40d)',
+                      color: allPublished ? '#ffffff' : '#111111',
+                      border: allPublished ? '1px solid #15803d' : '1px solid #eab308',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
+                    title="Valider tous les créneaux de la journée « À publier » en un clic (Cycle 1)"
+                  >
+                    {allPublished ? '✓ Tous publiés (C1)' : '✅ Tout valider (C1)'}
+                  </button>
+                )}
+
+                {remainingUndecidedCount > 0 && decidedCount > 0 && onExcludeRemainingCycle1Slots && (
+                  <button
+                    type="button"
+                    className="fbtn"
+                    onClick={() => onExcludeRemainingCycle1Slots(focusData)}
+                    style={{
+                      margin: 0,
+                      padding: '4px 10px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      background: '#f8fafc',
+                      color: '#475569',
+                      border: '1px dashed #94a3b8',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
+                    title="Marquer d'un clic les créneaux encore en attente comme « Hors offre / Non pertinent » (exclus des stats d'absentéisme et du taux de concrétisation)"
+                  >
+                    ➖ Écarter les {remainingUndecidedCount} non retenu{remainingUndecidedCount > 1 ? 's' : ''} (hors offre)
+                  </button>
+                )}
+              </div>
             )}
           </div>
         );

@@ -52,7 +52,6 @@ import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CustomSlotsManager } from './CustomSlotsManager';
-import { DayCycle1Banner } from './DayCycle1Banner';
 import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
 import {
   classifyWindSector,
@@ -141,9 +140,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   customSlotsMap = {},
   onUpdateCustomSlots,
   onCreateAndPublishCustomSlot,
-  onValidateDay,
-  onClearValidation,
-  onAddCustomNonPublishReason,
   onOpenObservationModal,
   isReadOnly = false,
   focusDate: propFocusDate,
@@ -196,16 +192,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const targetDs = propFocusDate || internalFocusDate;
   const currentFocus = dayFocus(targetDs, settings, tideW, first, last, windList, customSlotsMap);
   const currentDs = currentFocus.ds;
-
-  const shiftFocusDate = (deltaDays: number) => {
-    const [sy, sm0, sd] = currentDs.split('-').map(Number);
-    const next = new Date(Date.UTC(sy, sm0 - 1, sd + deltaDays));
-    const nextDs = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(
-      next.getUTCDate()
-    ).padStart(2, '0')}`;
-    if (nextDs < minDs || nextDs > maxDs) return;
-    handleSelectCustomDate(nextDs);
-  };
 
   const [cy, cm0, cd] = currentDs.split('-').map(Number);
   const cm = cm0 - 1;
@@ -1651,28 +1637,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
   return (
     <div id="tab2">
-      {onValidateDay && onClearValidation && (
-        <DayCycle1Banner
-          selectedDate={currentDs}
-          settings={settings}
-          W={tideW}
-          first={first}
-          last={last}
-          windList={windList}
-          customSlotsMap={customSlotsMap}
-          validations={validations}
-          onValidateDay={onValidateDay}
-          onClearValidation={onClearValidation}
-          onAddCustomNonPublishReason={reason => onAddCustomNonPublishReason?.(reason)}
-          onNavigateDay={shiftFocusDate}
-          canPrevDay={currentDs > minDs}
-          canNextDay={currentDs < maxDs}
-          hideOpenCycle2Button={true}
-          onOpenCycle1Detail={onSelectDayInCalendar}
-          isReadOnly={isReadOnly}
-        />
-      )}
-
       {/* Calendrier en haut du Cycle 2 (exigence Jérôme) */}
       <CalendarGrid
         year={year}
