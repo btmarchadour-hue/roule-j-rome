@@ -106,6 +106,7 @@ interface DayDetailPanelProps {
     defaultBookedParticipantsCount?: number;
     forceIntent?: boolean;
   }) => void;
+  onOpenExpressRex?: (dateStr: string) => void;
   observations?: SlotObservation[];
   isReadOnly?: boolean;
 }
@@ -132,6 +133,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   canNextDay = false,
   onOpenCycle2,
   onOpenObservationModal,
+  onOpenExpressRex,
   observations = [],
   isReadOnly = false,
 }) => {
@@ -416,6 +418,32 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
         {/* 2 boutons d'action principaux : + NOTER UN RELEVÉ & ✏️ MODIFIER LES CRÉNEAUX */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {onOpenExpressRex && (
+            <button
+              type="button"
+              onClick={() => onOpenExpressRex(selectedDate)}
+              style={{
+                background: '#0f766e',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                fontWeight: 800,
+                fontSize: '0.78rem',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(15, 118, 110, 0.3)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                whiteSpace: 'nowrap',
+              }}
+              title="Valider tous les créneaux de la journée en une seule vue avec météo pré-remplie"
+            >
+              <span>⚡</span>
+              <span>BILAN EXPRESS</span>
+            </button>
+          )}
+
           {onOpenObservationModal && (
             <button
               type="button"
@@ -1065,7 +1093,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         fontWeight: 800,
                       }}
                     >
-                      <span>🚗 0 / {MAX_CHARS_PER_INSTRUCTOR} chars · En attente 1ère résa</span>
+                      <span>🚗 0 / {slotMaxChars} chars · En attente 1ère résa</span>
                     </span>
                   </>
                 ) : c1Status === 'excluded' ? (

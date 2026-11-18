@@ -26,6 +26,7 @@ export interface AppSettings {
   vmax: number;
   gmax: number;
   fmin: number;
+  fminCustomized?: boolean;
   calculationMode?: 'theorique' | 'reel';
   empiricalOffsetCm?: number;
   customNonPublishReasons?: string[];
@@ -377,10 +378,30 @@ export interface GpsWaterlineLog {
   isInsideZone?: boolean;            // True si compris entre limite Gauche et limite Droite
   cadreProfileUsed?: BeachCadreProfileKey;
 
+  // Couche Réelle consolidée (Winds-Up Spot 66, METAR LFRL/LFRQ/LFRB, Marégraphe SHOM Brest, Bouée CANDHIS)
+  realWeatherSnapshot?: {
+    windSpeedKts?: number;
+    windGustKts?: number;
+    windDirectionDeg?: number;
+    windDirectionComp?: string;
+    windSource?: 'windsup_spot66' | 'metar';
+    windTime?: string;
+    pressureHpa?: number;
+    pressureStation?: string;
+    shomBrestHeightM?: number;
+    waveHeightM?: number;
+    wavePeriodS?: number;
+    waveSource?: string;
+    consolidatedAt?: number;
+  };
+  consolidationStatus?: 'pending_offline' | 'pending_real' | 'consolidated';
+  offlineQueued?: boolean;
+
   // Notes de terrain
   beachState?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
   note?: string;
   createdAt: number;
+  updatedAt?: number;
 }
 
 export type BeachCadreProfileKey = 'jerome' | 'mairie';

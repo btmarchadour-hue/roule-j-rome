@@ -264,6 +264,20 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           />
         </label>
 
+        <label title="Nombre minimal de créneaux à vent favorable pour classer la journée en OUVRIR (vert). Défaut : 1.">
+          Séances minimum / jour (défaut : 1)
+          <input
+            type="text"
+            inputMode="decimal"
+            disabled={isLocked}
+            value={settings.fmin}
+            onChange={e => {
+              const val = parseNum(e.target.value, 1);
+              onUpdateSettings({ fmin: val < 1 ? 1 : val, fminCustomized: true });
+            }}
+          />
+        </label>
+
         <label title="Nombre maximal de chars monoplaces du club pouvant rouler simultanément sur un créneau multi-moniteurs">
           Parc Matériel : Max Monoplaces simultanés
           <input
@@ -539,7 +553,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
                 ⚙️ Réinitialisation
               </b>
               <p style={{ margin: '3px 0 0 0', fontSize: '0.74rem', color: '#64748b' }}>
-                Remet les 24 réglages (séances, seuils, marées, météo) aux valeurs d'origine de l'école.
+                Remet l&apos;ensemble des réglages (séances, seuils, marées, météo) aux valeurs d&apos;origine de l&apos;école.
               </p>
             </div>
 
@@ -673,7 +687,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
                   Réinitialiser tous les paramètres ?
                 </h3>
                 <p style={{ margin: '8px 0 0 0', fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>
-                  Cette action va remettre <strong>l'ensemble des 24 réglages</strong> (durée des séances à 60 min, pauses à 15 min, seuil d'eau à 4m50, vent, horaires) à leurs valeurs d'origine de l'école.
+                  Cette action va remettre <strong>l&apos;ensemble des réglages</strong> (durée des séances à 60 min, pauses à 15 min, seuil d&apos;eau à 4m50, séances mini à 1, vent, horaires) à leurs valeurs d&apos;origine de l&apos;école.
                 </p>
                 <div
                   style={{

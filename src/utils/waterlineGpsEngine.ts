@@ -4,6 +4,7 @@ import { classifyBayZone, estimateLitto3dUsableWidthM } from './beachOrientation
 import { build, comp, hAt, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
+const OFFLINE_QUEUE_KEY = 'cv_waterline_offline_queue_v1';
 
 export function getStoredWaterlineLogs(): GpsWaterlineLog[] {
   try {
@@ -22,6 +23,216 @@ export function saveStoredWaterlineLogs(logs: GpsWaterlineLog[]): void {
   } catch (err) {
     console.error('Erreur sauvegarde locale logs GPS:', err);
   }
+}
+
+export function getOfflineGpsQueue(): GpsWaterlineLog[] {
+  try {
+    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveOfflineGpsQueue(queue: GpsWaterlineLog[]): void {
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  } catch (err) {
+    console.error('Erreur sauvegarde file hors-ligne GPS:', err);
+  }
+}
+
+export function enqueueOfflineGpsLog(
+  snapshot: Omit<GpsWaterlineLog, 'id'>,
+  existingOfflineId?: string
+): GpsWaterlineLog {
+  const queue = getOfflineGpsQueue();
+  const id =
+    existingOfflineId ||
+    `offline_${snapshot.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const entry: GpsWaterlineLog = {
+    ...snapshot,
+    id,
+    offlineQueued: true,
+    consolidationStatus: 'pending_offline',
+  };
+  const next = [entry, ...queue.filter(q => q.id !== id)];
+  next.sort((a, b) => b.timestamp - a.timestamp);
+  saveOfflineGpsQueue(next);
+  return entry;
+}
+
+export function removeOfflineGpsLog(offlineId: string): GpsWaterlineLog[] {
+  const next = getOfflineGpsQueue().filter(q => q.id !== offlineId);
+  saveOfflineGpsQueue(next);
+  return next;
+}
+
+export function mergeOfflineQueueWithLogs(
+  remoteLogs: GpsWaterlineLog[],
+  queue: GpsWaterlineLog[]
+): GpsWaterlineLog[] {
+  if (queue.length === 0) return remoteLogs;
+  const existingKeys = new Set(
+    remoteLogs.map(l => `${l.timestamp}_${l.author}_${l.latitude.toFixed(5)}`)
+  );
+  const pending = queue
+    .filter(q => !existingKeys.has(`${q.timestamp}_${q.author}_${q.latitude.toFixed(5)}`))
+    .map(q => ({ ...q, offlineQueued: true }));
+  return [...pending, ...remoteLogs].sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export interface RealConditionsApiResponse {
+  requestedTs: number;
+  requestedDate: string;
+  windsUp: {
+    status: 'ok' | 'delayed_locked' | 'offline' | 'unavailable';
+    windKts?: number;
+    minKts?: number;
+    maxKts?: number;
+    dir?: string;
+    deg?: number;
+    time?: string;
+    deltaMin?: number;
+  };
+  metar: {
+    station: string;
+    pressureHpa?: number;
+    windKts?: number;
+    gustKts?: number;
+    windDirDeg?: number;
+    obsTimeIso?: string;
+    deltaMin?: number;
+  } | null;
+  shomBrest: {
+    station: string;
+    waterHeightM?: number;
+    obsTimeIso?: string;
+    deltaMin?: number;
+  } | null;
+  candhis: {
+    buoy: string;
+    waveHeightM?: number;
+    wavePeriodS?: number;
+    waveDirDeg?: number;
+    obsTimeIso?: string;
+    deltaMin?: number;
+  } | null;
+  fetchedAt: string;
+}
+
+export async function fetchRealConditionsAt(
+  timestampMs: number,
+  forceRefresh = false
+): Promise<RealConditionsApiResponse | null> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return null;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const url = `./api/real-conditions?ts=${encodeURIComponent(String(timestampMs))}${
+      forceRefresh ? '&refresh=1' : ''
+    }`;
+    const res = await fetch(url, {
+      credentials: 'same-origin',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.includes('application/json')) return null;
+    return (await res.json()) as RealConditionsApiResponse;
+  } catch {
+    return null;
+  }
+}
+
+export function applyRealConditionsToLog(
+  log: GpsWaterlineLog,
+  realData: RealConditionsApiResponse | null
+): { updatedLog: GpsWaterlineLog; changed: boolean } {
+  if (!realData) return { updatedLog: log, changed: false };
+
+  const prev = log.realWeatherSnapshot || {};
+  const nextReal: NonNullable<GpsWaterlineLog['realWeatherSnapshot']> = { ...prev };
+
+  if (realData.windsUp?.status === 'ok' && realData.windsUp.windKts != null) {
+    nextReal.windSpeedKts = realData.windsUp.windKts;
+    nextReal.windGustKts = realData.windsUp.maxKts ?? realData.windsUp.windKts;
+    if (realData.windsUp.dir) nextReal.windDirectionComp = realData.windsUp.dir;
+    if (realData.windsUp.deg != null) nextReal.windDirectionDeg = realData.windsUp.deg;
+    nextReal.windSource = 'windsup_spot66';
+    if (realData.windsUp.time) nextReal.windTime = realData.windsUp.time;
+  } else if (nextReal.windSpeedKts == null && realData.metar?.windKts != null) {
+    nextReal.windSpeedKts = realData.metar.windKts;
+    if (realData.metar.gustKts != null) nextReal.windGustKts = realData.metar.gustKts;
+    if (realData.metar.windDirDeg != null) {
+      nextReal.windDirectionDeg = realData.metar.windDirDeg;
+      nextReal.windDirectionComp = comp(realData.metar.windDirDeg);
+    }
+    nextReal.windSource = 'metar';
+  }
+
+  if (realData.metar?.pressureHpa != null) {
+    nextReal.pressureHpa = realData.metar.pressureHpa;
+    nextReal.pressureStation = realData.metar.station;
+  }
+
+  if (realData.shomBrest?.waterHeightM != null) {
+    nextReal.shomBrestHeightM = realData.shomBrest.waterHeightM;
+  }
+
+  if (realData.candhis?.waveHeightM != null) {
+    nextReal.waveHeightM = realData.candhis.waveHeightM;
+    if (realData.candhis.wavePeriodS != null) nextReal.wavePeriodS = realData.candhis.wavePeriodS;
+    nextReal.waveSource = realData.candhis.buoy;
+  }
+
+  const hasWindsUp = nextReal.windSource === 'windsup_spot66' && nextReal.windSpeedKts != null;
+  const ageHours = (Date.now() - log.timestamp) / (3600 * 1000);
+  const hasAnyReal =
+    nextReal.windSpeedKts != null ||
+    nextReal.pressureHpa != null ||
+    nextReal.shomBrestHeightM != null ||
+    nextReal.waveHeightM != null;
+
+  // Consolidé si Winds-Up Spot 66 est présent, ou si > 3h et qu'on a déjà le meilleur relevé réel disponible
+  const isConsolidated =
+    hasWindsUp ||
+    (ageHours >= 3 && realData.windsUp?.status !== 'delayed_locked' && hasAnyReal);
+
+  if (hasAnyReal) {
+    nextReal.consolidatedAt = Date.now();
+  }
+
+  const nextStatus: GpsWaterlineLog['consolidationStatus'] = isConsolidated
+    ? 'consolidated'
+    : 'pending_real';
+
+  const prevSerialized = JSON.stringify(log.realWeatherSnapshot || {});
+  const nextSerialized = JSON.stringify(nextReal);
+  const changed =
+    prevSerialized !== nextSerialized || log.consolidationStatus !== nextStatus;
+
+  return {
+    updatedLog: {
+      ...log,
+      realWeatherSnapshot: hasAnyReal ? nextReal : log.realWeatherSnapshot,
+      consolidationStatus: nextStatus,
+      updatedAt: Date.now(),
+    },
+    changed,
+  };
+}
+
+export async function consolidateGpsLogWithRealData(
+  log: GpsWaterlineLog,
+  forceRefresh = false
+): Promise<{ updatedLog: GpsWaterlineLog; changed: boolean }> {
+  const realData = await fetchRealConditionsAt(log.timestamp, forceRefresh);
+  return applyRealConditionsToLog(log, realData);
 }
 
 export interface GpsCaptureResult {
@@ -329,6 +540,16 @@ export function exportWaterlineLogsAsCsv(
     'Pression_hPa',
     'Houle_Hauteur_m',
     'Houle_Periode_s',
+    'Vent_Reel_nds',
+    'Rafales_Reelles_nds',
+    'Direction_Reelle',
+    'Source_Vent_Reel',
+    'Pression_Reelle_hPa',
+    'Station_Pression',
+    'Maregraphe_SHOM_Brest_m',
+    'Houle_Reelle_m',
+    'Periode_Houle_Reelle_s',
+    'Statut_Consolidation',
     'Hauteur_Theorique_SHOM_m',
     'Hauteur_Corrigee_Ecole_m',
     'Seuil_Roulage_Ecole_m',
@@ -357,6 +578,7 @@ export function exportWaterlineLogsAsCsv(
         ? (l.isInsideZone ? 'Oui' : 'Hors cadre')
         : '';
     const cadreRef = dynEval?.widthFromDuneM != null ? dynEval.profileKey : (l.cadreProfileUsed || '');
+    const rw = l.realWeatherSnapshot;
 
     return [
       l.id,
@@ -382,6 +604,16 @@ export function exportWaterlineLogsAsCsv(
       l.weatherSnapshot.pressureHpa,
       l.weatherSnapshot.waveHeightM != null ? l.weatherSnapshot.waveHeightM : '',
       l.weatherSnapshot.wavePeriodS != null ? l.weatherSnapshot.wavePeriodS : '',
+      rw?.windSpeedKts != null ? rw.windSpeedKts : '',
+      rw?.windGustKts != null ? rw.windGustKts : '',
+      rw?.windDirectionComp || '',
+      rw?.windSource || '',
+      rw?.pressureHpa != null ? rw.pressureHpa : '',
+      rw?.pressureStation || '',
+      rw?.shomBrestHeightM != null ? rw.shomBrestHeightM : '',
+      rw?.waveHeightM != null ? rw.waveHeightM : '',
+      rw?.wavePeriodS != null ? rw.wavePeriodS : '',
+      l.consolidationStatus || '',
       l.theoreticalWaterHeightM,
       l.correctedWaterHeightM,
       l.schoolThresholdM,

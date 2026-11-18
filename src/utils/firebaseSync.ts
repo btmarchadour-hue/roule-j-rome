@@ -699,7 +699,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   vmin: 8,        // Vent min (nœuds)
   vmax: 25,       // Vent max (nœuds)
   gmax: 35,       // Rafales max (nœuds)
-  fmin: 3,        // Force min Beaufort
+  fmin: 1,        // Séances minimum par jour par défaut (1 séance suffit)
+  fminCustomized: false,
 };
 
 export const subscribeToSessionSettings = (
@@ -913,13 +914,19 @@ export const subscribeToWaterlineGpsLogs = (
           rawSurcoteCm: Number(d.rawSurcoteCm) || 0,
           correctedSurcoteCm: Number(d.correctedSurcoteCm) || 0,
           measuredWidthFromDuneM: d.measuredWidthFromDuneM != null ? Number(d.measuredWidthFromDuneM) : undefined,
+          usableWidthM: d.usableWidthM != null ? Number(d.usableWidthM) : undefined,
+          beachZone: d.beachZone,
           lateralPosFromLeftM: d.lateralPosFromLeftM != null ? Number(d.lateralPosFromLeftM) : undefined,
           lateralPosPct: d.lateralPosPct != null ? Number(d.lateralPosPct) : undefined,
           isInsideZone: d.isInsideZone != null ? Boolean(d.isInsideZone) : undefined,
           cadreProfileUsed: d.cadreProfileUsed === 'mairie' || d.cadreProfileUsed === 'jerome' ? d.cadreProfileUsed : undefined,
+          realWeatherSnapshot: d.realWeatherSnapshot || undefined,
+          consolidationStatus: d.consolidationStatus || undefined,
+          offlineQueued: d.offlineQueued != null ? Boolean(d.offlineQueued) : undefined,
           beachState: d.beachState,
           note: d.note,
           createdAt: d.createdAt || Date.now(),
+          updatedAt: d.updatedAt != null ? Number(d.updatedAt) : undefined,
         });
       });
       // Trier par date/heure décroissante (plus récent d'abord)

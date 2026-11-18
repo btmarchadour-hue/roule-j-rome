@@ -152,7 +152,10 @@
         "lateralPosFromLeftM": { "type": "number" },
         "lateralPosPct": { "type": "number" },
         "isInsideZone": { "type": "boolean" },
-        "cadreProfileUsed": { "type": "string", "enum": ["jerome", "mairie"] }
+        "cadreProfileUsed": { "type": "string", "enum": ["jerome", "mairie"] },
+        "realWeatherSnapshot": { "type": "object" },
+        "consolidationStatus": { "type": "string", "enum": ["pending_offline", "pending_real", "consolidated"] },
+        "offlineQueued": { "type": "boolean" }
       },
       "required": ["timestamp", "dateStr", "author", "latitude", "longitude"]
     }

@@ -13,6 +13,7 @@ import { AgendaBookingItem, DataAuditSignOffMap, DataAuditEntrySignOff } from '.
 import {
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
+  getObservationChars,
   getSlotBookingsSummary,
   getSlotMaxCapacity,
   getValidationItemChars,
@@ -23,6 +24,13 @@ import {
 import { dayFocus, kOf, lc, tdy, win } from './tides';
 
 const normT = (v?: string): string => (v || '').trim().replace('h', ':');
+const parseMinutes = (v?: string): number | null => {
+  const clean = normT(v);
+  if (!clean.includes(':')) return null;
+  const [h, m] = clean.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
+};
 
 export type AuditSeverity = 'ok' | 'warning' | 'conflict';
 
@@ -80,6 +88,29 @@ export interface DataAuditReport {
   unverifiedCount: number;
   daysAnalyzed: number;
 }
+
+export const formatObsReasonFr = (reason?: string): string => {
+  switch (reason) {
+    case 'wind_low':
+      return 'Vent insuffisant';
+    case 'wind_high':
+      return 'Vent trop fort / rafales';
+    case 'wind_dir':
+      return 'Mauvais secteur / déventé';
+    case 'no_clients':
+      return 'Manque d’inscrits (Vie 2)';
+    case 'beach_state':
+      return 'État de la plage / bâches';
+    case 'weather_extreme':
+      return 'Orage / météo extrême';
+    case 'instructor':
+      return 'Fermeture école / moniteur';
+    case 'other':
+      return 'Autre / Hors offre';
+    default:
+      return reason || 'non précisé';
+  }
+};
 
 export const buildDataAuditReport = ({
   validations,
@@ -191,6 +222,7 @@ export const buildDataAuditReport = ({
       }
     });
     dayBookingsList.forEach(b => pushKey(b.slotKey));
+    const dayEntries: AuditSlotEntry[] = [];
 
     for (const slotKey of slotKeysOrder) {
       const valItem = dayValItems.find(it => it.k === slotKey);
@@ -249,17 +281,17 @@ export const buildDataAuditReport = ({
           issues.push({
             code: 'missing_validation_for_obs',
             level: 'conflict',
-            label: 'REX sans fiche Cycle 1 / Cycle 2',
+            label: 'Bilan REX présent sans fiche planning Cycle 1 / Cycle 2',
             detail:
-              'Un relevé terrain / REX existe pour ce créneau mais aucune ligne Cycle 1 / Cycle 2 n’est enregistrée dans validations.',
+              'Un bilan terrain (REX) a été saisi pour ce créneau, mais aucune décision Cycle 1/2 n’est enregistrée en face. Clique « ✏️ Corriger » pour l’aligner (ex. Effectuée, Pas d’inscrits ou Hors offre).',
           });
         }
         if (bookingSummary.totalChars > 0) {
           issues.push({
             code: 'missing_validation_for_bookings',
             level: 'conflict',
-            label: 'Réservations sur créneau non validé',
-            detail: `${bookingSummary.totalChars} char(s) inscrit(s) alors que le créneau est absent du registre Cycle 1/2.`,
+            label: 'Pilotes inscrits sans fiche Cycle 1 / Cycle 2',
+            detail: `${bookingSummary.totalChars} char(s) inscrit(s) alors que le créneau n’apparaît pas encore dans les décisions Cycle 1/2. À confirmer pour que la séance compte dans le bilan.`,
           });
         }
       }
@@ -274,25 +306,28 @@ export const buildDataAuditReport = ({
           issues.push({
             code: 'legacy_missing_c1_status',
             level: 'warning',
-            label: 'Format hérité (sans cycle1Status)',
+            label: 'Ancien enregistrement (avant la règle Cycle 1 / Cycle 2)',
             detail:
-              'Enregistrement antérieur à la séparation Cycle 1 / Cycle 2 : statut Cycle 1 déduit automatiquement mais non écrit explicitement.',
+              'Créneau saisi avant la séparation Offre commerciale (C1) / Terrain (C2). L’outil devine son statut, mais clique « ✅ Valider » si c’est juste ou « ✏️ Corriger » pour le classer proprement.',
           });
         }
 
-        // 3. Créneau passé resté en "À publier (awaiting_booking)" sans statut final (Réalisé / Annulé Météo / Pas d'inscrits / Hors offre)
+        // 3. Créneau passé resté en attente ou confirmé sans bilan final
         if (
           ds < todayStr &&
           c1 === 'published' &&
-          c2 === 'awaiting_booking' &&
+          (c2 === 'awaiting_booking' || c2 === 'confirmed' || c2 === 'shifted') &&
           !obs
         ) {
           issues.push({
             code: 'past_slot_unfinished',
             level: 'warning',
-            label: 'Créneau passé sans statut final',
+            label:
+              c2 === 'awaiting_booking'
+                ? 'Séance passée restée « En attente » sans bilan final'
+                : 'Séance passée restée active sans bilan final',
             detail:
-              'Date passée restée en « À publier (C1) » sans indication Séance effectuée, Annulé Météo (Vie 2), Pas d’inscrits (Vie 2) ou Hors offre.',
+              'Cette date est déjà passée mais la séance n’a pas encore été clôturée en « Effectuée », « Annulée météo », « Pas d’inscrits » ou « Hors offre » (ou rattrape-la via le Bilan Express ◀ Jour préc.).',
           });
         }
 
@@ -309,8 +344,8 @@ export const buildDataAuditReport = ({
             issues.push({
               code: 'generic_closure_reason',
               level: 'warning',
-              label: 'Motif de fermeture générique (« Fermé »)',
-              detail: `Motif actuel : « ${rawReason || 'Non précisé'} ». À préciser en Réunion, Impératif personnel, Vacances…`,
+              label: 'Ancien motif « Fermé » trop vague (à préciser)',
+              detail: `Motif actuel : « ${rawReason || 'Non précisé'} ». Précise s’il s’agit de Vacances, Réunion, Impératif personnel, ou « Hors offre » afin de ne pas fausser les stats.`,
             });
           }
         } else if (valItem.status === 'rejected' && c1 !== 'closed_no_bookings' && c2 !== 'cancelled_weather' && c2 !== 'merged') {
@@ -319,8 +354,8 @@ export const buildDataAuditReport = ({
             issues.push({
               code: 'ambiguous_rejection',
               level: 'conflict',
-              label: 'Statut rejeté ambigu',
-              detail: `Rejeté avec motif « ${valItem.rejectReason || 'vide'} » sans savoir si c’est Cycle 1 (motif perso / Hors offre) ou Vie 2 (pas d’inscrits / météo).`,
+              label: 'Fermeture ambiguë : offre école, clients ou météo ?',
+              detail: `Marqué fermé (« ${valItem.rejectReason || 'vide'} ») sans savoir s’il n’a jamais été mis en vente (Cycle 1), s’il n’y a eu aucun inscrit (Vie 2) ou s’il a été annulé pour météo.`,
             });
           }
         }
@@ -333,14 +368,14 @@ export const buildDataAuditReport = ({
           issues.push({
             code: 'bookings_on_closed_slot',
             level: 'conflict',
-            label: 'Inscrits présents sur créneau fermé',
-            detail: `${bookingSummary.totalChars} char(s) dans la fiche réservations alors que le créneau est marqué « ${
+            label: 'Inscrits présents sur un créneau pourtant marqué fermé',
+            detail: `${bookingSummary.totalChars} char(s) inscrit(s) sur la fiche alors que le créneau indique « ${
               c1 === 'excluded'
                 ? 'Hors offre (C1)'
                 : c1 === 'not_published'
                 ? 'À ne pas publier (C1)'
                 : "Pas d'inscrits (Vie 2)"
-            } ».`,
+            } ». Vérifie s’il a bien roulé ou s’il faut corriger ce statut.`,
           });
         }
 
@@ -356,33 +391,29 @@ export const buildDataAuditReport = ({
             issues.push({
               code: 'obs_cancelled_val_valid',
               level: 'conflict',
-              label: 'Contradiction REX (Annulé) vs Validation (Valide)',
+              label: 'Contradiction : REX « Annulé » mais Planning « Actif »',
               detail:
-                'L’observation REX indique une séance annulée, mais la fiche Cycle 1/2 indique un créneau actif / publié.',
+                'Le bilan final (REX) dit que la séance a été annulée, mais la fiche planning est restée ouverte/active. Clique « ✏️ Corriger » pour trancher la vérité sur les deux écrans.',
             });
           } else if (obs.status === 'realized' && valIsCancelled) {
             issues.push({
               code: 'obs_realized_val_rejected',
               level: 'conflict',
-              label: 'Contradiction REX (Réalisé) vs Validation (Fermé / Annulé)',
+              label: 'Contradiction : REX « Effectué » mais Planning « Fermé / Annulé »',
               detail:
-                'L’observation REX indique une séance réalisée, mais la fiche Cycle 1/2 indique un créneau fermé, hors offre ou annulé.',
+                'Le bilan final (REX) indique que la séance a bien roulé, mais la fiche planning est restée fermée, hors offre ou annulée. Clique « ✏️ Corriger » pour la passer en effectuée.',
             });
           }
 
           // Écart de chars entre Validation et REX sur séance réalisée
           if (obs.status === 'realized' && !valIsCancelled) {
-            const obsChars =
-              obs.charsCount ??
-              ((obs.monoCount ?? 0) + (obs.biCount ?? 0) > 0
-                ? (obs.monoCount ?? 0) + (obs.biCount ?? 0)
-                : 0);
+            const obsChars = getObservationChars(obs);
             if (obsChars > 0 && valChars.totalChars > 0 && obsChars !== valChars.totalChars) {
               issues.push({
                 code: 'chars_mismatch_val_obs',
                 level: 'warning',
-                label: `Écart de chars (C2 : ${valChars.totalChars} vs REX : ${obsChars})`,
-                detail: 'Le nombre de chars diffère entre Cycle 2 et le REX terrain.',
+                label: `Nombre de chars différent (Planning : ${valChars.totalChars} vs REX : ${obsChars})`,
+                detail: 'Le nombre de chars saisi en séance et au bilan final ne correspond pas. Uniformise le bon chiffre pour que le taux de remplissage soit exact.',
               });
             }
           }
@@ -395,33 +426,35 @@ export const buildDataAuditReport = ({
               obs.cancellationReason === 'other' &&
               ((obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
                 (obs.cancellationNote || '').toLowerCase().includes('non pertinent'));
+            const obsReasonLabel = formatObsReasonFr(obs.cancellationReason);
+
             if (c1 === 'excluded' && !obsIsHorsOffre && obs.cancellationReason !== 'other') {
               issues.push({
                 code: 'reason_mismatch_excluded',
                 level: 'conflict',
-                label: 'REX non aligné avec « Hors offre (C1) »',
-                detail: `Cycle 1 indique « ➖ Hors offre / Non pertinent » mais le REX indique « ${obs.cancellationReason} ».`,
+                label: 'Motif REX différent du planning « Hors offre (C1) »',
+                detail: `Le planning indique « ➖ Hors offre / Non pertinent », mais le REX indique « ${obsReasonLabel} ». Aligne les deux en cliquant « ✏️ Corriger ».`,
               });
             } else if (c1 === 'closed_no_bookings' && !obsIsNoClients) {
               issues.push({
                 code: 'reason_mismatch_vie2_noclient',
                 level: 'conflict',
-                label: "Cause REX différente de « Pas d'inscrits (Vie 2) »",
-                detail: `La fiche indique « Pas d’inscrits (Vie 2) » mais le REX indique « ${obs.cancellationReason} ».`,
+                label: "Motif REX différent de « Pas d'inscrits (Vie 2) »",
+                detail: `Le planning indique « Pas d’inscrits (Vie 2) », mais le REX indique « ${obsReasonLabel} ». Aligne la vraie cause.`,
               });
             } else if (c1 === 'not_published' && !obsIsInstructor) {
               issues.push({
                 code: 'reason_mismatch_c1',
                 level: 'conflict',
-                label: 'Cause REX différente de Cycle 1 non publié',
-                detail: `Cycle 1 indique « À ne pas publier » (motif perso/école) mais le REX indique « ${obs.cancellationReason} ».`,
+                label: 'Motif REX différent d’une fermeture école (Cycle 1)',
+                detail: `Le planning indique « À ne pas publier » (motif perso/école), mais le REX indique « ${obsReasonLabel} ». Aligne la vraie cause.`,
               });
-            } else if (c2 === 'cancelled_weather' && (obsIsNoClients || obsIsInstructor)) {
+            } else if (c2 === 'cancelled_weather' && (obsIsNoClients || obsIsInstructor || obsIsHorsOffre)) {
               issues.push({
                 code: 'reason_mismatch_vie2',
                 level: 'conflict',
-                label: 'Cause REX incohérente avec Annulation Météo (Vie 2)',
-                detail: `Cycle 2 indique « Annulé météo (Vie 2) » mais le REX indique « ${obs.cancellationReason} ».`,
+                label: 'Motif REX incohérent avec Annulation Météo',
+                detail: `Le planning indique « Annulé météo », mais le REX indique « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Choisis la vraie cause entre météo, manque d’inscrits, fermeture école ou hors offre.`,
               });
             }
           }
@@ -430,19 +463,35 @@ export const buildDataAuditReport = ({
             issues.push({
               code: 'secondary_instructor_missing_in_val',
               level: 'warning',
-              label: `2e moniteur REX (${obs.secondaryInstructor}) absent de C2`,
-              detail: `Le REX mentionne « ${obs.secondaryInstructor} » en 2e moniteur mais il n’est pas enregistré sur la fiche Cycle 2.`,
+              label: `2e moniteur REX (${obs.secondaryInstructor}) oublié sur le planning`,
+              detail: `Le REX mentionne « ${obs.secondaryInstructor} » en renfort, mais pas la fiche du jour. Ajoute-le pour compter la bonne capacité (20 ou 24 chars).`,
             });
           }
         }
 
         // 7. Séance marquée Réalisée avec 0 char et 0 participant
-        if (c2 === 'realized' && valChars.totalChars === 0 && (valItem.pilotsCount ?? 0) === 0 && !obs?.charsCount && !obs?.participantsCount) {
+        const obsTotalChars = getObservationChars(obs);
+        if (c2 === 'realized' && valChars.totalChars === 0 && (valItem.pilotsCount ?? 0) === 0 && obsTotalChars === 0 && !obs?.participantsCount) {
           issues.push({
             code: 'realized_without_chars',
             level: 'warning',
-            label: 'Séance effectuée avec 0 char renseigné',
-            detail: 'Précisez le nombre de chars (mono / bi) ou basculez en « Pas d’inscrits (Vie 2) » s’il n’y avait aucun pilote.',
+            label: 'Séance notée « Effectuée » avec 0 char saisi',
+            detail: 'Précise combien de chars ont roulé (mono / bi) ou bascule le créneau en « Annulée · Pas d’inscrits » s’il n’y avait aucun pilote.',
+          });
+        }
+
+        // 7b. Écart entre dossiers d'inscriptions clients et compteur chars saisi sur séance active/réalisée
+        if (
+          c1 === 'published' &&
+          bookingSummary.totalChars > 0 &&
+          (c2 === 'realized' || c2 === 'confirmed' || c2 === 'shifted') &&
+          valChars.totalChars !== bookingSummary.totalChars
+        ) {
+          issues.push({
+            code: 'bookings_count_mismatch',
+            level: 'warning',
+            label: `Écart inscrits (${bookingSummary.totalChars} char(s) inscrits vs ${valChars.totalChars} sur la fiche)`,
+            detail: `Les inscriptions clients comptent ${bookingSummary.totalChars} char(s), alors que la fiche planning affiche ${valChars.totalChars}. Aligne le nombre réel de chars qui ont roulé ou sont inscrits.`,
           });
         }
 
@@ -463,30 +512,71 @@ export const buildDataAuditReport = ({
         }
       }
 
-      // 9. Observation REX annulée avec motif générique « Fermé »
-      if (obs && obs.status === 'cancelled' && obs.cancellationReason === 'instructor') {
+      // 9. Observation REX annulée avec motif générique « Fermé » ou « Autre » vide
+      if (obs && obs.status === 'cancelled' && (obs.cancellationReason === 'instructor' || obs.cancellationReason === 'other')) {
+        const noteLow = (obs.cancellationNote || '').toLowerCase();
+        const isHorsOffreNote = noteLow.includes('hors offre') || noteLow.includes('non pertinent');
         const normObs = normalizeClosureReason(obs.cancellationNote);
-        if (!obs.cancellationNote?.trim() || normObs.isGenericClosed) {
+        if (!isHorsOffreNote && (!obs.cancellationNote?.trim() || normObs.isGenericClosed)) {
           issues.push({
             code: 'obs_generic_closure',
             level: 'warning',
-            label: 'REX fermé sans motif détaillé',
-            detail: `Note REX : « ${obs.cancellationNote || 'vide'} ». À préciser (Réunion, Impératif personnel, Vacances…).`,
+            label: 'Bilan REX fermé sans motif détaillé',
+            detail: `Note REX : « ${obs.cancellationNote || 'vide'} ». Précise la raison (Réunion, Impératif personnel, Vacances, ou Hors offre).`,
           });
         }
       }
 
-      // 10. Clé de créneau non retrouvée dans le calcul du jour (dérive d'horaire ou de seuil)
-      if (computedSlots.length > 0 && !computedMatch?.isExactKeyMatch) {
+      // 10. Clé de créneau non retrouvée dans le calcul du jour (modification manuelle d'horaire ou dérive marée)
+      const isAlreadyExcluded =
+        (valItem ? getEffectiveCycle1Status(valItem) === 'excluded' : false) ||
+        Boolean(obs && obs.status === 'cancelled' && (obs.cancellationNote || '').toLowerCase().includes('hors offre'));
+      const normStart = normT(startTime);
+      const [startH, startM] = normStart.split(':').map(Number);
+      const startMinutes = !Number.isNaN(startH) && !Number.isNaN(startM) ? startH * 60 + startM : null;
+      const isBefore09h = startMinutes !== null && startMinutes < 9 * 60;
+
+      const dayCustomCfg = customSlotsMap[ds];
+      const hasDayCustomOverride = Boolean(dayCustomCfg && dayCustomCfg.slots.length > 0);
+      const isManualAdjustedEntry =
+        hasDayCustomOverride ||
+        slotKey.endsWith('c') ||
+        Boolean(valItem?.customTitle) ||
+        Boolean(obs?.isCustom) ||
+        valItem?.cycle2Status === 'shifted' ||
+        Boolean(valItem?.actualStart);
+
+      const nearbyComp =
+        !computedMatch && startMinutes !== null
+          ? computedSlots.find(c => {
+              const [ch, cm] = normT(c.startTime).split(':').map(Number);
+              if (Number.isNaN(ch) || Number.isNaN(cm)) return false;
+              return Math.abs(ch * 60 + cm - startMinutes) <= 120;
+            })
+          : undefined;
+
+      if (computedSlots.length > 0 && !computedMatch?.isExactKeyMatch && !isAlreadyExcluded) {
         issues.push({
           code: 'slot_key_drift',
-          level: computedMatch ? 'warning' : 'conflict',
+          level: 'warning',
           label: computedMatch
-            ? `Clé créneau décalée (même horaire ${computedMatch.startTime}–${computedMatch.endTime} trouvé)`
-            : 'Clé créneau introuvable dans la grille actuelle du jour',
+            ? `Même horaire (${computedMatch.startTime}–${computedMatch.endTime}) sous une ancienne référence`
+            : isManualAdjustedEntry
+            ? 'Début de séance modifié manuellement par le moniteur'
+            : isBefore09h
+            ? 'Créneau d’avant 09h00 (ancienne règle de l’école)'
+            : 'Horaire différent de la grille automatique actuelle',
           detail: computedMatch
-            ? `Ancienne clé « ${slotKey} » → correspond au créneau actuel « ${computedMatch.slotKey} ». Réalignable en 1 clic.`
-            : `La clé « ${slotKey} » ne correspond à aucun créneau calculé ce jour-là (seuil marée ou réglages différents à l’époque).`,
+            ? `Ce créneau existe toujours aux mêmes heures (${computedMatch.startTime}–${computedMatch.endTime}), seule sa référence interne a changé. Clique « ✏️ Corriger / Aligner » puis enregistre (la case de réalignement est déjà cochée).`
+            : isManualAdjustedEntry
+            ? `Le début ou l’horaire de cette séance a été modifié manuellement (boutons -15/+15 min, « Ajuster », décalage ou créneau sur mesure${
+                nearbyComp ? ` · horaire actuel du jour : ${nearbyComp.startTime}–${nearbyComp.endTime}` : ''
+              }). • Si c’est bien l’horaire voulu par Jérôme : clique simplement « ✅ Valider ». • Si c’est l’ancien horaire resté en double après la modification : passe-le en « Hors offre » ou supprime l’ancien.`
+            : isBefore09h
+            ? `Ce créneau démarrait avant 09h00 (ancien calcul automatique, ou horaire avancé manuellement à l’époque). Si la séance a vraiment existé, garde-la en cliquant « ✅ Valider ». Sinon, clique « ✏️ Corriger / Aligner » → « Hors offre » (ou supprime-la si c’était un essai).`
+            : `Deux explications possibles : soit Jérôme a modifié manuellement l’heure de début ce jour-là (décalage / sur-mesure), soit tes réglages de marée actuels (seuil, mode Réel/Théorique ou tolérance) ne donnent plus exactement cet horaire${
+                nearbyComp ? ` (aujourd’hui l’appli propose ${nearbyComp.startTime}–${nearbyComp.endTime})` : ''
+              }. • Si la séance a bien existé à cet horaire : garde-la et clique simplement « ✅ Valider ». • Si c’était un ancien horaire en double ou jamais vendu sur anny : clique « ✏️ Corriger / Aligner » → « Hors offre » (ou supprime l’ancien).`,
         });
       }
 
@@ -496,7 +586,7 @@ export const buildDataAuditReport = ({
 
       const entryKey = `${ds}__${slotKey}`;
       const signOff = auditMap[entryKey];
-      const isVerified = Boolean(signOff?.verified);
+      const isVerified = !hasConflict && Boolean(signOff?.verified);
 
       // Libellé lisible du statut actuel
       let summaryStatusLabel = 'Non défini';
@@ -504,38 +594,38 @@ export const buildDataAuditReport = ({
         const c1 = getEffectiveCycle1Status(valItem);
         const c2 = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
         if (c1 === 'excluded') {
-          summaryStatusLabel = '➖ C1 Hors offre (exclu des stats)';
+          summaryStatusLabel = '➖ Hors offre (exclu des stats)';
         } else if (c1 === 'not_published') {
-          summaryStatusLabel = `🚫 C1 Non publié (${valItem.nonPublishReason || valItem.rejectReason || 'motif à préciser'})`;
+          summaryStatusLabel = `🚫 École fermée · Non publié (${valItem.nonPublishReason || valItem.rejectReason || 'motif à préciser'})`;
         } else if (c1 === 'closed_no_bookings' || isNoBookingsReason(valItem.rejectReason)) {
-          summaryStatusLabel = "⛔ Vie 2 · Pas d'inscrits";
+          summaryStatusLabel = "👥 Annulée · Pas d'inscrits";
         } else if (c2 === 'cancelled_weather') {
-          summaryStatusLabel = `⛔ Vie 2 · Annulé météo (${valItem.rejectReason || 'météo'})`;
+          summaryStatusLabel = `⛔ Annulée · Météo / Plage (${valItem.rejectReason || 'météo'})`;
         } else if (c2 === 'merged') {
           summaryStatusLabel = `🔗 Regroupé → ${valItem.mergedLabel || valItem.mergedIntoKey || ''}`;
         } else if (c2 === 'shifted') {
-          summaryStatusLabel = `🕒 C2 Décalé (${valItem.actualStart || startTime})`;
+          summaryStatusLabel = `🕒 Séance décalée (${valItem.actualStart || startTime})`;
         } else if (c2 === 'realized') {
-          summaryStatusLabel = '🏁 C2 Séance effectuée';
+          summaryStatusLabel = '🏁 Séance effectuée';
         } else if (c2 === 'confirmed') {
-          summaryStatusLabel = '⚡ C2 Actif (inscrits confirmés)';
+          summaryStatusLabel = '⚡ Séance active (inscrits confirmés)';
         } else {
-          summaryStatusLabel = '📅 C1 À publier (en attente suite)';
+          summaryStatusLabel = '📅 Ouvert (en attente de suite)';
         }
       } else if (obs) {
         const noteLow = (obs.cancellationNote || '').toLowerCase();
         if (obs.status === 'realized') {
-          summaryStatusLabel = '📝 REX Réalisé (sans C1/C2)';
+          summaryStatusLabel = '📝 Bilan REX : Effectuée (sans fiche planning)';
         } else if (noteLow.includes('hors offre') || noteLow.includes('non pertinent')) {
-          summaryStatusLabel = '➖ REX Hors offre (sans C1/C2)';
+          summaryStatusLabel = '➖ Bilan REX : Hors offre (sans fiche planning)';
         } else if (obs.cancellationReason === 'no_clients') {
-          summaryStatusLabel = "📝 REX Pas d'inscrits Vie 2 (sans C1/C2)";
+          summaryStatusLabel = "📝 Bilan REX : Pas d'inscrits (sans fiche planning)";
         } else {
-          summaryStatusLabel = '📝 REX Annulé (sans C1/C2)';
+          summaryStatusLabel = '📝 Bilan REX : Annulée (sans fiche planning)';
         }
       }
 
-      entries.push({
+      dayEntries.push({
         entryKey,
         ds,
         slotKey,
@@ -555,6 +645,55 @@ export const buildDataAuditReport = ({
         summaryStatusLabel,
       });
     }
+
+    // Détection des créneaux actifs qui se chevauchent sur la même journée (souvent un ancien horaire resté en doublon après décalage)
+    const activeTimeEntries = dayEntries.filter(e => {
+      const c1 = e.valItem ? getEffectiveCycle1Status(e.valItem) : undefined;
+      const c2 = e.valItem ? getEffectiveCycle2Status(e.valItem, e.bookingSummary.totalChars) : undefined;
+      const isExcludedObs =
+        !e.valItem &&
+        Boolean(e.obs && e.obs.status === 'cancelled' && (e.obs.cancellationNote || '').toLowerCase().includes('hors offre'));
+      return c1 !== 'excluded' && c2 !== 'merged' && !isExcludedObs;
+    });
+
+    for (let i = 0; i < activeTimeEntries.length; i++) {
+      const a = activeTimeEntries[i];
+      const aStart = parseMinutes(a.startTime);
+      const aEnd = parseMinutes(a.endTime);
+      if (aStart === null || aEnd === null || aEnd <= aStart) continue;
+
+      for (let j = i + 1; j < activeTimeEntries.length; j++) {
+        const b = activeTimeEntries[j];
+        const bStart = parseMinutes(b.startTime);
+        const bEnd = parseMinutes(b.endTime);
+        if (bStart === null || bEnd === null || bEnd <= bStart) continue;
+
+        if (aStart < bEnd && bStart < aEnd) {
+          const isExactSameTime = aStart === bStart && aEnd === bEnd;
+          const addOverlapIssue = (target: AuditSlotEntry, other: AuditSlotEntry) => {
+            if (target.issues.some(iss => iss.code === 'overlapping_slots')) return;
+            target.issues.push({
+              code: 'overlapping_slots',
+              level: isExactSameTime ? 'conflict' : 'warning',
+              label: isExactSameTime
+                ? `Doublon exact avec un autre créneau (${other.displayTime})`
+                : `Chevauchement horaire avec ${other.displayTime}`,
+              detail: isExactSameTime
+                ? `Deux fiches différentes existent sur la même journée aux mêmes heures (${other.displayTime}). Clique « ✏️ Corriger / Aligner » sur celle en trop pour la supprimer ou la passer en « Hors offre ».`
+                : `Ce créneau chevauche le créneau ${other.displayTime} le même jour. C’est souvent le signe qu’un horaire a été décalé par le moniteur et que l’ancien créneau est resté en doublon : passe celui en trop en « Hors offre » (ou supprime-le), ou clique « ✅ Valider » si deux séances chevauchantes étaient volontaires.`,
+            });
+            const hasC = target.issues.some(iss => iss.level === 'conflict');
+            const hasW = target.issues.some(iss => iss.level === 'warning');
+            target.severity = hasC ? 'conflict' : hasW ? 'warning' : 'ok';
+            if (hasC) target.isVerified = false;
+          };
+          addOverlapIssue(a, b);
+          addOverlapIssue(b, a);
+        }
+      }
+    }
+
+    entries.push(...dayEntries);
   }
 
   return {

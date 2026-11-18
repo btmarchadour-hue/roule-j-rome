@@ -456,6 +456,296 @@ async function fetchWindsUpSpot66(dateParam: string | undefined, forceRefresh: b
   return parsed;
 }
 
+function getParisDateFromTs(ts: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(ts));
+  const y = parts.find(p => p.type === 'year')?.value || '2026';
+  const m = parts.find(p => p.type === 'month')?.value || '01';
+  const d = parts.find(p => p.type === 'day')?.value || '01';
+  return `${y}-${m}-${d}`;
+}
+
+function parisDateTimeToMs(dateStr: string, hhmm: string): number | null {
+  const dm = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const tm = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!dm || !tm) return null;
+  const year = Number(dm[1]);
+  const month = Number(dm[2]);
+  const day = Number(dm[3]);
+  const hour = Number(tm[1]);
+  const minute = Number(tm[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(hour)) return null;
+
+  // Approximate in UTC then adjust by exact Europe/Paris wall-clock delta
+  const approxUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(approxUtc));
+
+  const pY = Number(parts.find(p => p.type === 'year')?.value);
+  const pM = Number(parts.find(p => p.type === 'month')?.value);
+  const pD = Number(parts.find(p => p.type === 'day')?.value);
+  const pH = Number(parts.find(p => p.type === 'hour')?.value) % 24;
+  const pMin = Number(parts.find(p => p.type === 'minute')?.value);
+  const parisAsUtc = Date.UTC(pY, pM - 1, pD, pH, pMin, 0);
+  const offsetMs = parisAsUtc - approxUtc;
+  return approxUtc - offsetMs;
+}
+
+async function fetchJsonWithTimeout<T>(url: string, headers: Record<string, string>, timeoutMs = 3500): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface MetarObsRaw {
+  icaoId?: string;
+  obsTime?: number;
+  reportTime?: string;
+  altim?: number;
+  slp?: number;
+  wdir?: number | string;
+  wspd?: number;
+  wgst?: number;
+}
+
+interface RealMetarResult {
+  station: string;
+  pressureHpa?: number;
+  windKts?: number;
+  gustKts?: number;
+  windDirDeg?: number;
+  obsTimeIso: string;
+  deltaMin: number;
+}
+
+const metarCache: { data: MetarObsRaw[]; expiresAt: number } = { data: [], expiresAt: 0 };
+
+async function fetchMetarNearest(ts: number): Promise<RealMetarResult | null> {
+  // NOAA AviationWeather METAR returns up to last 48h; for older timestamps skip network wait
+  if (Date.now() - ts > 50 * 3600 * 1000) return null;
+
+  let list = metarCache.data;
+  if (Date.now() >= metarCache.expiresAt || list.length === 0) {
+    const raw = await fetchJsonWithTimeout<MetarObsRaw[]>(
+      'https://aviationweather.gov/api/data/metar?ids=LFRL,LFRQ,LFRB&format=json&hours=48',
+      { 'User-Agent': 'CharVoilePentrezApp/1.0' },
+      3500
+    );
+    if (Array.isArray(raw)) {
+      list = raw;
+      metarCache.data = raw;
+      metarCache.expiresAt = Date.now() + 10 * 60 * 1000;
+    }
+  }
+
+  const stationPriority: Record<string, number> = { LFRL: 0, LFRQ: 1, LFRB: 2 };
+  const maxDeltaMs = 3 * 3600 * 1000;
+
+  let best: { item: MetarObsRaw; obsMs: number; deltaMs: number; prio: number } | null = null;
+  for (const item of list) {
+    const icao = (item.icaoId || '').toUpperCase();
+    if (!(icao in stationPriority)) continue;
+    const obsMs =
+      typeof item.obsTime === 'number'
+        ? item.obsTime * 1000
+        : item.reportTime
+        ? Date.parse(item.reportTime)
+        : NaN;
+    if (!Number.isFinite(obsMs)) continue;
+    const deltaMs = Math.abs(obsMs - ts);
+    if (deltaMs > maxDeltaMs) continue;
+
+    const prio = stationPriority[icao];
+    // Prefer closest within 45 min, breaking ties by LFRL > LFRQ > LFRB
+    const score = deltaMs + prio * 12 * 60 * 1000;
+    const bestScore = best ? best.deltaMs + best.prio * 12 * 60 * 1000 : Infinity;
+    if (score < bestScore) {
+      best = { item, obsMs, deltaMs, prio };
+    }
+  }
+
+  if (!best) return null;
+  const rawAltim = typeof best.item.altim === 'number' ? best.item.altim : best.item.slp;
+  let pressureHpa: number | undefined;
+  if (typeof rawAltim === 'number' && Number.isFinite(rawAltim) && rawAltim > 0) {
+    pressureHpa = rawAltim < 100 ? Math.round(rawAltim * 33.8639) : Math.round(rawAltim);
+  }
+
+  const wdirNum = typeof best.item.wdir === 'number' ? best.item.wdir : undefined;
+
+  return {
+    station: (best.item.icaoId || 'LFRL').toUpperCase(),
+    pressureHpa,
+    windKts: typeof best.item.wspd === 'number' ? Math.round(best.item.wspd) : undefined,
+    gustKts: typeof best.item.wgst === 'number' ? Math.round(best.item.wgst) : undefined,
+    windDirDeg: wdirNum,
+    obsTimeIso: new Date(best.obsMs).toISOString(),
+    deltaMin: Math.round((best.obsMs - ts) / 60000),
+  };
+}
+
+interface RealShomResult {
+  station: string;
+  waterHeightM: number;
+  obsTimeIso: string;
+  deltaMin: number;
+}
+
+const shomCache = new Map<string, { points: Array<{ ms: number; h: number }>; expiresAt: number }>();
+
+async function fetchShomBrestNearest(ts: number): Promise<RealShomResult | null> {
+  // SHOM REFMAR JSON API for Brest (shom_id = 3)
+  const bucketKey = String(Math.floor(ts / (30 * 60 * 1000)));
+  let points = shomCache.get(bucketKey)?.expiresAt! > Date.now()
+    ? shomCache.get(bucketKey)!.points
+    : null;
+
+  if (!points) {
+    const dtStart = new Date(ts - 90 * 60 * 1000).toISOString().slice(0, 19) + 'Z';
+    const dtEnd = new Date(ts + 90 * 60 * 1000).toISOString().slice(0, 19) + 'Z';
+    const url = `https://services.data.shom.fr/maregraphie/observation/json/3?sources=1&dtStart=${encodeURIComponent(
+      dtStart
+    )}&dtEnd=${encodeURIComponent(dtEnd)}`;
+
+    const raw = await fetchJsonWithTimeout<unknown>(
+      url,
+      { 'User-Agent': 'CharVoilePentrezApp/1.0' },
+      3500
+    );
+
+    const parsedPoints: Array<{ ms: number; h: number }> = [];
+    const arr = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown[] }).data)
+      ? (raw as { data: unknown[] }).data
+      : [];
+
+    for (const entry of arr) {
+      if (!entry || typeof entry !== 'object') continue;
+      const obj = entry as Record<string, unknown>;
+      const tRaw = obj.timestamp ?? obj.date ?? obj.t;
+      const vRaw = obj.value ?? obj.height ?? obj.h;
+      const ms = typeof tRaw === 'number'
+        ? (tRaw < 1e12 ? tRaw * 1000 : tRaw)
+        : typeof tRaw === 'string'
+        ? Date.parse(tRaw)
+        : NaN;
+      const h = typeof vRaw === 'number' ? vRaw : typeof vRaw === 'string' ? Number(vRaw) : NaN;
+      if (Number.isFinite(ms) && Number.isFinite(h)) {
+        parsedPoints.push({ ms, h });
+      }
+    }
+
+    parsedPoints.sort((a, b) => a.ms - b.ms);
+    points = parsedPoints;
+    shomCache.set(bucketKey, { points, expiresAt: Date.now() + 15 * 60 * 1000 });
+  }
+
+  if (!points || points.length === 0) return null;
+
+  let closest = points[0];
+  let bestDiff = Math.abs(closest.ms - ts);
+  for (const p of points) {
+    const diff = Math.abs(p.ms - ts);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      closest = p;
+    }
+  }
+
+  if (bestDiff > 35 * 60 * 1000) return null;
+
+  return {
+    station: 'Brest (SHOM REFMAR)',
+    waterHeightM: Number(closest.h.toFixed(2)),
+    obsTimeIso: new Date(closest.ms).toISOString(),
+    deltaMin: Math.round((closest.ms - ts) / 60000),
+  };
+}
+
+interface RealCandhisResult {
+  buoy: string;
+  waveHeightM?: number;
+  wavePeriodS?: number;
+  waveDirDeg?: number;
+  obsTimeIso: string;
+  deltaMin: number;
+}
+
+const candhisCache: { rows: Array<Record<string, unknown>>; expiresAt: number } = {
+  rows: [],
+  expiresAt: 0,
+};
+
+async function fetchCandhisNearest(ts: number): Promise<RealCandhisResult | null> {
+  const token = (process.env.CANDHIS_API_TOKEN || '').trim();
+  if (!token) return null;
+
+  let rows = candhisCache.rows;
+  if (Date.now() >= candhisCache.expiresAt || rows.length === 0) {
+    const raw = await fetchJsonWithTimeout<unknown>(
+      'https://candhis.cerema.fr/API/v1/getCampTR.php?camp=02911',
+      {
+        Authorization: token,
+        'User-Agent': 'CharVoilePentrezApp/1.0',
+      },
+      3500
+    );
+    const extracted = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown[] }).data)
+      ? (raw as { data: unknown[] }).data
+      : [];
+    rows = extracted.filter((x): x is Record<string, unknown> => Boolean(x && typeof x === 'object'));
+    candhisCache.rows = rows;
+    candhisCache.expiresAt = Date.now() + 15 * 60 * 1000;
+  }
+
+  let best: { row: Record<string, unknown>; ms: number; diff: number } | null = null;
+  for (const r of rows) {
+    const tStr = String(r.DateHeure ?? r.date ?? r.timestamp ?? '');
+    const ms = Date.parse(tStr);
+    if (!Number.isFinite(ms)) continue;
+    const diff = Math.abs(ms - ts);
+    if (diff <= 90 * 60 * 1000 && (!best || diff < best.diff)) {
+      best = { row: r, ms, diff };
+    }
+  }
+
+  if (!best) return null;
+  const hm0 = Number(best.row.Hm0 ?? best.row.hm0 ?? best.row.Hs ?? best.row.hs);
+  const tp = Number(best.row.Tp ?? best.row.tp);
+  const dir = Number(best.row.Dir ?? best.row.dir ?? best.row.Dpic);
+
+  return {
+    buoy: '02911 (Pierres Noires)',
+    waveHeightM: Number.isFinite(hm0) ? Number(hm0.toFixed(2)) : undefined,
+    wavePeriodS: Number.isFinite(tp) ? Math.round(tp) : undefined,
+    waveDirDeg: Number.isFinite(dir) ? Math.round(dir) : undefined,
+    obsTimeIso: new Date(best.ms).toISOString(),
+    deltaMin: Math.round((best.ms - ts) / 60000),
+  };
+}
+
 async function startServer(): Promise<void> {
   const app = express();
 
@@ -478,6 +768,78 @@ async function startServer(): Promise<void> {
       const message = err instanceof Error ? err.message : 'Erreur serveur Winds-Up';
       res.status(502).json({ error: message });
     }
+  });
+
+  app.get('/api/real-conditions', async (req: Request, res: Response) => {
+    const rawTs = Number(req.query.ts);
+    const requestedTs = Number.isFinite(rawTs) && rawTs > 1_500_000_000_000 ? rawTs : Date.now();
+    const requestedDate = getParisDateFromTs(requestedTs);
+    const forceRefresh = req.query.refresh === '1';
+
+    const [wuRes, metarRes, shomRes, candhisRes] = await Promise.allSettled([
+      fetchWindsUpSpot66(requestedDate, forceRefresh),
+      fetchMetarNearest(requestedTs),
+      fetchShomBrestNearest(requestedTs),
+      fetchCandhisNearest(requestedTs),
+    ]);
+
+    let windsUp: {
+      status: 'ok' | 'delayed_locked' | 'offline' | 'unavailable';
+      windKts?: number;
+      minKts?: number;
+      maxKts?: number;
+      dir?: string;
+      deg?: number;
+      time?: string;
+      deltaMin?: number;
+    } = { status: 'unavailable' };
+
+    if (wuRes.status === 'fulfilled') {
+      const wu = wuRes.value;
+      if (wu.sensorOffline) {
+        windsUp = { status: 'offline' };
+      } else {
+        let bestRow: { row: WindsUpObsRow; diffMs: number; rowMs: number } | null = null;
+        let hasLockedNearTs = false;
+        for (const r of wu.rows) {
+          const rMs = parisDateTimeToMs(requestedDate, r.time);
+          if (rMs == null) continue;
+          const diffMs = Math.abs(rMs - requestedTs);
+          if (diffMs <= 25 * 60 * 1000) {
+            if (r.locked || r.moy == null) {
+              hasLockedNearTs = true;
+            } else if (!bestRow || diffMs < bestRow.diffMs) {
+              bestRow = { row: r, diffMs, rowMs: rMs };
+            }
+          }
+        }
+
+        if (bestRow) {
+          windsUp = {
+            status: 'ok',
+            windKts: bestRow.row.moy ?? undefined,
+            minKts: bestRow.row.min ?? undefined,
+            maxKts: bestRow.row.max ?? undefined,
+            dir: bestRow.row.dir || undefined,
+            deg: bestRow.row.deg ?? undefined,
+            time: bestRow.row.time,
+            deltaMin: Math.round((bestRow.rowMs - requestedTs) / 60000),
+          };
+        } else if (hasLockedNearTs || (wu.isDelayed && Date.now() - requestedTs < 2.5 * 3600 * 1000)) {
+          windsUp = { status: 'delayed_locked' };
+        }
+      }
+    }
+
+    res.json({
+      requestedTs,
+      requestedDate,
+      windsUp,
+      metar: metarRes.status === 'fulfilled' ? metarRes.value : null,
+      shomBrest: shomRes.status === 'fulfilled' ? shomRes.value : null,
+      candhis: candhisRes.status === 'fulfilled' ? candhisRes.value : null,
+      fetchedAt: new Date().toISOString(),
+    });
   });
 
   if (process.env.NODE_ENV === 'production') {

@@ -203,6 +203,22 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
         );
         return;
       }
+
+      const charCountToCheck = monoCount !== '' || biCount !== '' ? computedChars : pCount;
+      if (charCountToCheck > maxChars) {
+        setErrorMessage(
+          `⛔ Blocage sécurité encadrement : ${charCountToCheck} chars engagés pour un plafond strict de ${maxChars} chars (${
+            secondaryInstructor ? `${primaryInstructor} + ${secondaryInstructor}` : '1 moniteur'
+          }). Réduisez le nombre de chars à ${maxChars} max${
+            monoCount === '' && biCount === ''
+              ? ' (ou détaillez Monoplaces + Biplaces)'
+              : !secondaryInstructor
+              ? ' ou doublez d’abord le créneau avec un 2e moniteur (Youenn CQP 20 / Katleen 24) en Cycle 2'
+              : ''
+          }.`
+        );
+        return;
+      }
     }
 
     const effectiveChars =
@@ -812,7 +828,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                         <input
                           type="number"
                           min={0}
-                          max={24}
+                          max={maxChars}
                           value={monoCount}
                           onChange={e => {
                             const val = e.target.value === '' ? '' : Number(e.target.value);
@@ -836,7 +852,7 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                         <input
                           type="number"
                           min={0}
-                          max={24}
+                          max={maxChars}
                           value={biCount}
                           onChange={e => {
                             const val = e.target.value === '' ? '' : Number(e.target.value);
@@ -881,8 +897,11 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                     </div>
 
                     {overLimit && (
-                      <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#991b1b', background: '#fee2e2', padding: '6px 10px', borderRadius: '6px', fontWeight: 700 }}>
-                        ⚠️ Règle école : pas plus de {maxChars} chars sur ce créneau ({liveChars} chars saisis — vérifiez l&apos;encadrement ou le doublement moniteur).
+                      <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#991b1b', background: '#fee2e2', border: '1px solid #fca5a5', padding: '7px 10px', borderRadius: '6px', fontWeight: 800 }}>
+                        ⛔ Blocage encadrement : plafond strict de {maxChars} chars dépassé ({liveChars}/{maxChars} chars). Enregistrement bloqué
+                        {!secondaryInstructor
+                          ? ' — réduisez sous 12 chars ou doublez d’abord le créneau avec un 2e moniteur (Youenn CQP 20 / Katleen 24) en Cycle 2.'
+                          : ` (${primaryInstructor} + ${secondaryInstructor}).`}
                       </div>
                     )}
 
@@ -1094,24 +1113,37 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
               >
                 {isReadOnly ? 'Fermer' : 'Annuler'}
               </button>
-              {!isReadOnly && (
-                <button
-                  type="submit"
-                  style={{
-                    padding: '7px 16px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: '#0284c7',
-                    color: '#fff',
-                    fontSize: '0.78rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
-                  }}
-                >
-                  ✓ Valider &amp; Enregistrer le REX
-                </button>
-              )}
+              {!isReadOnly && (() => {
+                const modalLiveChars = (Number(monoCount) || 0) + (Number(biCount) || 0);
+                const isBlockedOverLimit = status === 'realized' && modalLiveChars > maxChars;
+                return (
+                  <button
+                    type="submit"
+                    disabled={isBlockedOverLimit}
+                    title={
+                      isBlockedOverLimit
+                        ? `Enregistrement bloqué : ${modalLiveChars}/${maxChars} chars max autorisés`
+                        : undefined
+                    }
+                    style={{
+                      padding: '7px 16px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: isBlockedOverLimit ? '#dc2626' : '#0284c7',
+                      color: '#fff',
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      cursor: isBlockedOverLimit ? 'not-allowed' : 'pointer',
+                      opacity: isBlockedOverLimit ? 0.75 : 1,
+                      boxShadow: isBlockedOverLimit ? 'none' : '0 2px 4px rgba(2, 132, 199, 0.25)',
+                    }}
+                  >
+                    {isBlockedOverLimit
+                      ? `⛔ Bloqué (${modalLiveChars}/${maxChars} chars)`
+                      : '✓ Valider & Enregistrer le REX'}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </form>

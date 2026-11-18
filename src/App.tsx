@@ -17,6 +17,9 @@ import { SyncStatusBar } from './components/SyncStatusBar';
 import { AppLockScreen } from './components/AppLockScreen';
 import { UserManagementModal } from './components/UserManagementModal';
 import { TeamExchangeModal } from './components/TeamExchangeModal';
+import { ValidatedSlotsExportCard } from './components/ValidatedSlotsExportCard';
+import { ExpressRexModal } from './components/ExpressRexModal';
+import { getSlotWeatherRexDefaults } from './utils/slotWeatherRex';
 import {
   AgendaBookingItem,
   subscribeToValidations,
@@ -33,10 +36,12 @@ import {
   resetAllSettingsToFirestore,
   subscribeToTeamNotes,
   subscribeToObservations,
+  batchSaveObservationsToFirestore,
   getActiveInstructor,
 } from './utils/firebaseSync';
 import {
   CANCELLATION_REASONS_INFO,
+  bulkUpsertObservations,
   getStoredObservations,
 } from './utils/statisticsEngine';
 import {
@@ -115,7 +120,8 @@ const defaultSettings: AppSettings = {
   vmin: 8,
   vmax: 25,
   gmax: 35,
-  fmin: 3,
+  fmin: 1,
+  fminCustomized: false,
   parkMaxMono: 16,
   parkMaxBi: 6,
 };
@@ -162,6 +168,7 @@ export const App: React.FC = () => {
           ...parsed,
           cmax: cmaxVal,
           xpl: parsed.xplCustomized ? parsed.xpl : 'debut',
+          fmin: parsed.fminCustomized ? (parsed.fmin >= 1 ? parsed.fmin : 1) : 1,
         };
       }
     } catch {
@@ -238,7 +245,13 @@ export const App: React.FC = () => {
     const unsubSessionSettings = subscribeToSessionSettings(cloudSettings => {
       if (cloudSettings && Object.keys(cloudSettings).length > 0) {
         setSettings(prev => {
-          const merged = { ...prev, ...cloudSettings };
+          const resolvedFminCustomized = cloudSettings.fminCustomized ?? prev.fminCustomized;
+          const rawCloudFmin = cloudSettings.fmin ?? prev.fmin;
+          const merged = {
+            ...prev,
+            ...cloudSettings,
+            fmin: resolvedFminCustomized ? (rawCloudFmin >= 1 ? rawCloudFmin : 1) : 1,
+          };
           try {
             localStorage.setItem('cvSettings', JSON.stringify(merged));
           } catch {
@@ -599,6 +612,7 @@ export const App: React.FC = () => {
     defaultBookedParticipantsCount?: number;
     forceIntent?: boolean;
   } | null>(null);
+  const [expressRexDate, setExpressRexDate] = useState<string | null>(null);
 
   const [isUserModalOpen, setIsUserModalOpen] = useState<boolean>(false);
 
@@ -1017,6 +1031,183 @@ export const App: React.FC = () => {
         cycle1PublishedAt: Date.now(),
         items: computedItems,
       });
+    },
+    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap]
+  );
+
+  const handleSaveExpressRexBatch = useCallback(
+    async (ds: string, obsList: SlotObservation[]) => {
+      if (!obsList || obsList.length === 0) return;
+
+      const updatedLocal = bulkUpsertObservations(obsList);
+      setObservations(updatedLocal);
+
+      if (!isAdminLocked) {
+        const normTime = (v?: string) => (v || '').replace('h', ':');
+        const applyRexToItem = (base: ValidationItem, obs: SlotObservation): ValidationItem => {
+          if (obs.status === 'cancelled') {
+            const reason = obs.cancellationReason || 'wind_low';
+            const info = CANCELLATION_REASONS_INFO[reason];
+            const noteSuffix = obs.cancellationNote?.trim();
+
+            if (reason === 'no_clients') {
+              return {
+                ...base,
+                status: 'rejected',
+                rejectReason: "Pas d'inscrits (Vie 2)",
+                cycle1Status: 'closed_no_bookings',
+                nonPublishReason: undefined,
+                cycle2Status: undefined,
+                monoCount: 0,
+                biCount: 0,
+                charsCount: 0,
+                pilotsCount: 0,
+                rescheduledChars: 0,
+                lostChars: 0,
+              };
+            }
+            if (reason === 'instructor') {
+              const cleanReason = noteSuffix || 'Impératif personnel';
+              return {
+                ...base,
+                status: 'rejected',
+                rejectReason: `Non publié (C1) : ${cleanReason}`,
+                cycle1Status: 'not_published',
+                nonPublishReason: cleanReason,
+                cycle2Status: undefined,
+                monoCount: 0,
+                biCount: 0,
+                charsCount: 0,
+                pilotsCount: 0,
+              };
+            }
+
+            const weatherLabel = noteSuffix
+              ? `${info?.shortLabel || 'Météo'} · ${noteSuffix}`
+              : info?.label || 'Annulé météo (Vie 2)';
+            return {
+              ...base,
+              status: 'rejected',
+              rejectReason: weatherLabel,
+              cycle1Status: 'published',
+              cycle2Status: 'cancelled_weather',
+              rescheduledChars: obs.rescheduledCount ?? base.rescheduledChars,
+              lostChars: obs.lostCount ?? base.lostChars,
+              instructor: obs.author || base.instructor || 'Jérôme',
+              secondaryInstructor: obs.secondaryInstructor || base.secondaryInstructor,
+            };
+          }
+
+          const mono = obs.monoCount ?? base.monoCount ?? 0;
+          const bi = obs.biCount ?? base.biCount ?? 0;
+          const chars = obs.charsCount ?? (mono + bi > 0 ? mono + bi : base.charsCount ?? 0);
+          const pilots = obs.participantsCount ?? base.pilotsCount ?? mono + bi * 2;
+          return {
+            ...base,
+            status: 'valid',
+            rejectReason: undefined,
+            cycle1Status: 'published',
+            nonPublishReason: undefined,
+            cycle2Status: 'realized',
+            monoCount: mono,
+            biCount: bi,
+            charsCount: chars,
+            pilotsCount: pilots,
+            instructor: obs.author || base.instructor || 'Jérôme',
+            secondaryInstructor: obs.secondaryInstructor || base.secondaryInstructor,
+          };
+        };
+
+        const df = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
+        const existingRecord = validations[ds];
+        let nextItems: ValidationItem[] =
+          existingRecord && existingRecord.items && existingRecord.items.length > 0
+            ? [...existingRecord.items]
+            : df.list.map(x => {
+                const sk = kOf(x);
+                const st = lc(x.a, df.y, df.m, df.d);
+                const en = lc(x.b, df.y, df.m, df.d);
+                return {
+                  k: sk,
+                  s: st,
+                  e: en,
+                  publishedStart: st,
+                  publishedEnd: en,
+                  opt: x.opt,
+                  over: x.over,
+                  lim: x.lim,
+                  customTitle: x.customTitle,
+                  status: 'valid',
+                  cycle1Status: 'published',
+                  cycle2Status: 'awaiting_booking',
+                  charsCount: 0,
+                  monoCount: 0,
+                  biCount: 0,
+                  pilotsCount: 0,
+                };
+              });
+
+        for (const obs of obsList) {
+          let matched = false;
+          nextItems = nextItems.map(it => {
+            const isMatch =
+              it.k === obs.slotKey ||
+              (Boolean(obs.slotStart) &&
+                Boolean(obs.slotEnd) &&
+                normTime(it.publishedStart || it.s) === normTime(obs.slotStart) &&
+                normTime(it.publishedEnd || it.e) === normTime(obs.slotEnd));
+            if (isMatch) {
+              matched = true;
+              return applyRexToItem(it, obs);
+            }
+            return it;
+          });
+          if (!matched) {
+            nextItems.push(
+              applyRexToItem(
+                {
+                  k: obs.slotKey,
+                  s: obs.slotStart,
+                  e: obs.slotEnd,
+                  publishedStart: obs.slotStart,
+                  publishedEnd: obs.slotEnd,
+                  opt: false,
+                  over: 0,
+                  lim: '',
+                  customTitle: obs.customTitle,
+                  status: 'valid',
+                  cycle1Status: 'published',
+                  cycle2Status: 'awaiting_booking',
+                },
+                obs
+              )
+            );
+          }
+        }
+
+        persistDayValidation(ds, {
+          sig: existingRecord?.sig || sigOf(df),
+          ts: Date.now(),
+          k: existingRecord?.k || df.k,
+          cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+          items: nextItems,
+        });
+      }
+
+      batchSaveObservationsToFirestore(obsList).catch(err =>
+        console.warn('Erreur envoi batch Firestore Bilan Express:', err)
+      );
+
+      const realizedCount = obsList.filter(o => o.status === 'realized').length;
+      const totalChars = obsList.reduce(
+        (acc, o) => acc + (o.status === 'realized' ? o.charsCount || 0 : 0),
+        0
+      );
+      notifySync(
+        `⚡ Bilan Express enregistré (${obsList.length} créneaux · ${realizedCount} réalisée${
+          realizedCount > 1 ? 's' : ''
+        } · ${totalChars} char${totalChars > 1 ? 's' : ''})`
+      );
     },
     [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap]
   );
@@ -1506,17 +1697,29 @@ export const App: React.FC = () => {
         notifySync('🔒 Mode Moniteur / Contrôle : réservations en consultation seule');
         return;
       }
+      const existingRecord = validations[ds];
+      const currentItems = existingRecord?.items || [];
+      const existingItem = currentItems.find(it => it.k === slotKey);
+      const slotMaxChars = getSlotMaxCapacity(existingItem);
+      const summary = getSlotBookingsSummary(bookings, slotMaxChars);
+
+      if (summary.totalChars > slotMaxChars) {
+        notifySync(
+          `⛔ Blocage encadrement : ${summary.totalChars}/${slotMaxChars} chars max autorisés (${
+            existingItem?.secondaryInstructor
+              ? `${existingItem.instructor || 'Jérôme'} + ${existingItem.secondaryInstructor}`
+              : '1 moniteur'
+          }). Enregistrement bloqué.`
+        );
+        return;
+      }
+
       const resKey = buildReservationKey(ds, slotKey);
       setBookingsMap(prev => ({ ...prev, [resKey]: bookings }));
       saveBookingToFirestore(resKey, bookings).catch(err =>
         console.warn('Erreur Firestore réservations:', err)
       );
 
-      const existingRecord = validations[ds];
-      const currentItems = existingRecord?.items || [];
-      const existingItem = currentItems.find(it => it.k === slotKey);
-      const slotMaxChars = getSlotMaxCapacity(existingItem);
-      const summary = getSlotBookingsSummary(bookings, slotMaxChars);
       const instructor = getActiveInstructor() || 'Jérôme';
 
       let nextItem: ValidationItem;
@@ -1555,9 +1758,7 @@ export const App: React.FC = () => {
           pilotsCount: summary.totalPeople,
         };
         notifySync(
-          summary.totalChars > slotMaxChars
-            ? `⚠️ ${summary.totalChars}/${slotMaxChars} chars inscrits (dépassement encadrement) · Cycle 2 actif`
-            : `⚡ ${summary.totalChars} char(s) inscrit(s) · Créneau basculé en Cycle 2`
+          `⚡ ${summary.totalChars}/${slotMaxChars} char(s) inscrit(s) · Créneau basculé en Cycle 2`
         );
       } else {
         nextItem = {
@@ -1662,6 +1863,13 @@ export const App: React.FC = () => {
         const mono = payload.monoCount ?? existingCounts.mono;
         const bi = payload.biCount ?? existingCounts.bi;
         const chars = mono + bi > 0 ? mono + bi : existingCounts.totalChars;
+        const slotMaxChars = getSlotMaxCapacity(existingItem);
+        if (chars > slotMaxChars) {
+          notifySync(
+            `⛔ Blocage encadrement : ${chars}/${slotMaxChars} chars max autorisés sur ce créneau. Enregistrement bloqué.`
+          );
+          return;
+        }
         updatedSource = {
           ...baseItem,
           publishedStart: baseItem.publishedStart || startTimeStr,
@@ -1708,6 +1916,30 @@ export const App: React.FC = () => {
             : `🕒 Séance décalée (${payload.shiftMinutes > 0 ? '+' : ''}${payload.shiftMinutes} min) ➔ ${payload.newStart} - ${payload.newEnd}`
         );
       } else if (payload.type === 'merge') {
+        // Vérifier le plafond AVANT toute fusion (blocage strict à 12 / 20 / 24 chars selon encadrement cible)
+        const targetSess = record.list.find(s => kOf(s) === payload.targetSlotKey);
+        if (targetSess) {
+          const existingTarget = currentItems.find(it => it.k === payload.targetSlotKey);
+          const tCounts = getValidationItemChars(existingTarget);
+          const tBook = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(ds, payload.targetSlotKey)] || []
+          );
+          const sourceEffectiveChars = Math.max(bookingChars, existingCounts.totalChars);
+          const targetEffectiveChars = Math.max(tBook.totalChars, tCounts.totalChars);
+          const combChars = sourceEffectiveChars + targetEffectiveChars;
+          const targetMaxChars = getSlotMaxCapacity(existingTarget);
+          if (combChars > targetMaxChars) {
+            notifySync(
+              `⛔ Regroupement bloqué : ${combChars}/${targetMaxChars} chars dépasserait le plafond encadrement (${
+                existingTarget?.secondaryInstructor
+                  ? `${existingTarget.instructor || 'Jérôme'} + ${existingTarget.secondaryInstructor}`
+                  : '1 moniteur'
+              }). Doublez le créneau cible ou scindez.`
+            );
+            return;
+          }
+        }
+
         updatedSource = {
           ...baseItem,
           publishedStart: baseItem.publishedStart || startTimeStr,
@@ -1721,7 +1953,6 @@ export const App: React.FC = () => {
         };
 
         // Ajouter les chars déplacés sur le créneau cible pour refléter la jauge combinée
-        const targetSess = record.list.find(s => kOf(s) === payload.targetSlotKey);
         if (targetSess) {
           const tStart = lc(targetSess.a, record.y, record.m, record.d);
           const tEnd = lc(targetSess.b, record.y, record.m, record.d);
@@ -1764,14 +1995,19 @@ export const App: React.FC = () => {
 
           const targetMaxChars = getSlotMaxCapacity(existingTarget);
           notifySync(
-            combChars > targetMaxChars
-              ? `⚠️ Regroupé (${combChars}/${targetMaxChars} chars : dépassement encadrement)`
-              : `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${targetMaxChars} chars)`
+            `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${targetMaxChars} chars)`
           );
         }
       } else if (payload.type === 'double_instructor') {
         const cleanSec = payload.secondaryInstructor?.trim();
+        const currentSlotChars = Math.max(bookingChars, existingCounts.totalChars);
         if (!cleanSec) {
+          if (currentSlotChars > MAX_CHARS_PER_INSTRUCTOR) {
+            notifySync(
+              `⛔ Impossible de retirer ${baseItem.secondaryInstructor || 'le 2e moniteur'} : ${currentSlotChars} chars engagés dépassent le plafond solo de ${MAX_CHARS_PER_INSTRUCTOR} chars.`
+            );
+            return;
+          }
           updatedSource = {
             ...baseItem,
             publishedStart: baseItem.publishedStart || startTimeStr,
@@ -1791,6 +2027,12 @@ export const App: React.FC = () => {
               ? 8
               : MAX_CHARS_PER_INSTRUCTOR;
           const totalCap = MAX_CHARS_PER_INSTRUCTOR + addChars;
+          if (currentSlotChars > totalCap) {
+            notifySync(
+              `⛔ Plafond insuffisant (${totalCap} chars max) pour les ${currentSlotChars} chars déjà engagés sur ce créneau.`
+            );
+            return;
+          }
           updatedSource = {
             ...baseItem,
             publishedStart: baseItem.publishedStart || startTimeStr,
@@ -2105,7 +2347,15 @@ export const App: React.FC = () => {
               onOpenCycle2={handleOpenCycle2FromCalendar}
               observations={observations}
               onOpenObservationModal={slot => setActiveObservationSlot(slot)}
+              onOpenExpressRex={ds => setExpressRexDate(ds)}
               isReadOnly={isAdminLocked}
+            />
+
+            <ValidatedSlotsExportCard
+              year={year}
+              month={month}
+              validations={validations}
+              bookingsMap={bookingsMap}
             />
 
             <TableView
@@ -2230,6 +2480,7 @@ export const App: React.FC = () => {
             onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
             observations={observations}
             onOpenObservationModal={slot => setActiveObservationSlot(slot)}
+            onOpenExpressRex={ds => setExpressRexDate(ds)}
             isReadOnly={isAdminLocked}
             focusDate={focusDate}
             onFocusDateChange={handleFocusDateChange}
@@ -2396,55 +2647,91 @@ export const App: React.FC = () => {
         )}
 
         {/* Modal de saisie rapide d'un relevé terrain depuis le calendrier */}
-        {activeObservationSlot && (
-          <SlotObservationModal
-            key={`${activeObservationSlot.dateStr}_${activeObservationSlot.slotKey}`}
-            isOpen={Boolean(activeObservationSlot)}
-            onClose={() => setActiveObservationSlot(null)}
-            dateStr={activeObservationSlot.dateStr}
-            slotKey={activeObservationSlot.slotKey}
-            slotStart={activeObservationSlot.slotStart}
-            slotEnd={activeObservationSlot.slotEnd}
-            slotTitle={activeObservationSlot.customTitle}
-            isCustom={activeObservationSlot.isCustom}
-            maxChars={activeObservationSlot.maxChars}
-            primaryInstructor={activeObservationSlot.primaryInstructor}
-            secondaryInstructor={activeObservationSlot.secondaryInstructor}
-            initialObservation={findObservationForSlot(
-              activeObservationSlot.dateStr,
-              activeObservationSlot.slotKey,
-              activeObservationSlot.slotStart,
-              activeObservationSlot.slotEnd
-            )}
-            currentUserName={currentUser?.username}
-            customNonPublishReasons={settings.customNonPublishReasons}
-            defaultStatus={activeObservationSlot.defaultStatus}
-            defaultCancellationReason={activeObservationSlot.defaultCancellationReason}
-            defaultCancellationNote={activeObservationSlot.defaultCancellationNote}
-            defaultMonoCount={activeObservationSlot.defaultMonoCount}
-            defaultBiCount={activeObservationSlot.defaultBiCount}
-            defaultParticipantsCount={activeObservationSlot.defaultParticipantsCount}
-            defaultBookedParticipantsCount={activeObservationSlot.defaultBookedParticipantsCount}
-            forceIntent={activeObservationSlot.forceIntent}
-            onSaveSuccess={(updated, savedObs) => {
-              setObservations(updated);
-              if (savedObs) {
-                syncValidationFromRex(savedObs);
-                if (savedObs.status === 'realized') {
-                  notifySync(
-                    savedObs.charsCount
-                      ? `🏁 Séance effectuée (${savedObs.charsCount} char${savedObs.charsCount > 1 ? 's' : ''}) & REX enregistrés`
-                      : '🏁 Séance effectuée & REX enregistrés'
-                  );
-                } else if (savedObs.cancellationReason === 'no_clients') {
-                  notifySync("⛔ Annulé (Vie 2) : Pas d'inscrits & REX enregistrés");
-                } else {
-                  notifySync('⛔ Annulé (Vie 2) & REX enregistrés');
+        {activeObservationSlot && (() => {
+          const weatherDefaults = getSlotWeatherRexDefaults(
+            activeObservationSlot.dateStr,
+            activeObservationSlot.slotStart,
+            activeObservationSlot.slotEnd,
+            EX,
+            windList
+          );
+          return (
+            <SlotObservationModal
+              key={`${activeObservationSlot.dateStr}_${activeObservationSlot.slotKey}`}
+              isOpen={Boolean(activeObservationSlot)}
+              onClose={() => setActiveObservationSlot(null)}
+              dateStr={activeObservationSlot.dateStr}
+              slotKey={activeObservationSlot.slotKey}
+              slotStart={activeObservationSlot.slotStart}
+              slotEnd={activeObservationSlot.slotEnd}
+              slotTitle={activeObservationSlot.customTitle}
+              isCustom={activeObservationSlot.isCustom}
+              maxChars={activeObservationSlot.maxChars}
+              primaryInstructor={activeObservationSlot.primaryInstructor}
+              secondaryInstructor={activeObservationSlot.secondaryInstructor}
+              defaultPressure={weatherDefaults.pressureHpa ?? null}
+              defaultWindKts={weatherDefaults.windKts ?? null}
+              defaultGustKts={weatherDefaults.gustKts ?? null}
+              defaultWindDir={weatherDefaults.windDir ?? null}
+              defaultWaveH={weatherDefaults.waveH ?? null}
+              initialObservation={findObservationForSlot(
+                activeObservationSlot.dateStr,
+                activeObservationSlot.slotKey,
+                activeObservationSlot.slotStart,
+                activeObservationSlot.slotEnd
+              )}
+              currentUserName={currentUser?.username}
+              customNonPublishReasons={settings.customNonPublishReasons}
+              defaultStatus={activeObservationSlot.defaultStatus}
+              defaultCancellationReason={activeObservationSlot.defaultCancellationReason}
+              defaultCancellationNote={activeObservationSlot.defaultCancellationNote}
+              defaultMonoCount={activeObservationSlot.defaultMonoCount}
+              defaultBiCount={activeObservationSlot.defaultBiCount}
+              defaultParticipantsCount={activeObservationSlot.defaultParticipantsCount}
+              defaultBookedParticipantsCount={activeObservationSlot.defaultBookedParticipantsCount}
+              forceIntent={activeObservationSlot.forceIntent}
+              onSaveSuccess={(updated, savedObs) => {
+                setObservations(updated);
+                if (savedObs) {
+                  syncValidationFromRex(savedObs);
+                  if (savedObs.status === 'realized') {
+                    notifySync(
+                      savedObs.charsCount
+                        ? `🏁 Séance effectuée (${savedObs.charsCount} char${savedObs.charsCount > 1 ? 's' : ''}) & REX enregistrés`
+                        : '🏁 Séance effectuée & REX enregistrés'
+                    );
+                  } else if (savedObs.cancellationReason === 'no_clients') {
+                    notifySync("⛔ Annulé (Vie 2) : Pas d'inscrits & REX enregistrés");
+                  } else {
+                    notifySync('⛔ Annulé (Vie 2) & REX enregistrés');
+                  }
                 }
-              }
-              setActiveObservationSlot(null);
-            }}
+                setActiveObservationSlot(null);
+              }}
+              isReadOnly={isReadOnly}
+            />
+          );
+        })()}
+
+        {/* Modal Bilan Express fin de journée (tous les créneaux en une seule vue) */}
+        {expressRexDate && (
+          <ExpressRexModal
+            isOpen={Boolean(expressRexDate)}
+            onClose={() => setExpressRexDate(null)}
+            initialDate={expressRexDate}
+            settings={settings}
+            EX={EX}
+            W={tideW}
+            first={first}
+            last={last}
+            windList={windList}
+            customSlotsMap={customSlotsMap}
+            validations={validations}
+            bookingsMap={bookingsMap}
+            observations={observations}
+            currentUserName={currentUser?.username || 'Jérôme'}
             isReadOnly={isReadOnly}
+            onSaveBatch={handleSaveExpressRexBatch}
           />
         )}
 

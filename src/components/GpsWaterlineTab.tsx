@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, BeachCadreConfig, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
 import {
   deleteWaterlineGpsLogFromFirestore,
@@ -14,10 +14,17 @@ import {
   saveStoredBeachCadreConfig,
 } from '../utils/beachCadreEngine';
 import {
+  applyRealConditionsToLog,
   buildWaterlineSnapshot,
+  consolidateGpsLogWithRealData,
+  enqueueOfflineGpsLog,
   exportWaterlineLogsAsCsv,
+  fetchRealConditionsAt,
   findRecentDuplicateGpsLog,
+  getOfflineGpsQueue,
   getStoredWaterlineLogs,
+  mergeOfflineQueueWithLogs,
+  removeOfflineGpsLog,
   requestSmoothedHighAccuracyGps,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
@@ -46,21 +53,33 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   isReadOnly = false,
 }) => {
   const [logs, setLogs] = useState<GpsWaterlineLog[]>(() => getStoredWaterlineLogs());
+  const [offlineQueue, setOfflineQueue] = useState<GpsWaterlineLog[]>(() => getOfflineGpsQueue());
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine !== false : true
+  );
   const [cadreConfig, setCadreConfig] = useState<BeachCadreConfig>(() => getStoredBeachCadreConfig());
   const [author, setAuthor] = useState<string>(() => getActiveInstructor());
   const [beachState, setBeachState] = useState<GpsWaterlineLog['beachState']>('dur');
   const [quickNote, setQuickNote] = useState<string>('');
   
-  // États de capture
+  // États de capture & consolidation réel H+2
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [sampleProgress, setSampleProgress] = useState<{ current: number; total: number; lastAcc: number } | null>(null);
   const [captureStatus, setCaptureStatus] = useState<string>('');
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [lastLoggedItem, setLastLoggedItem] = useState<GpsWaterlineLog | null>(null);
+  const [isConsolidating, setIsConsolidating] = useState<boolean>(false);
+  const [consolidationFeedback, setConsolidationFeedback] = useState<string>('');
+  const syncInFlightRef = useRef<boolean>(false);
 
   // Filtre d'affichage
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
   const [filterZone, setFilterZone] = useState<'all' | BayZoneId>('all');
+
+  const displayedLogs = useMemo(
+    () => mergeOfflineQueueWithLogs(logs, offlineQueue),
+    [logs, offlineQueue]
+  );
 
   // Gamification Étape 2 : Objectif 300 mesures & Modèle Empirique
   const TARGET_MEASURES = 300;
@@ -73,10 +92,20 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     }
   });
 
-  const totalCount = logs.length;
+  const totalCount = displayedLogs.length;
   const isRealModeUnlocked = totalCount >= TARGET_MEASURES || isDemoUnlocked;
   const progressPercent = Math.min(100, Math.round((totalCount / TARGET_MEASURES) * 100));
   const remainingCount = Math.max(0, TARGET_MEASURES - totalCount);
+  const pendingRealCount = useMemo(
+    () =>
+      displayedLogs.filter(
+        l =>
+          !l.offlineQueued &&
+          l.consolidationStatus !== 'consolidated' &&
+          Date.now() - l.timestamp <= 14 * 24 * 3600 * 1000
+      ).length,
+    [displayedLogs]
+  );
 
   // Détection du cap des 300 mesures pour déclencher l'alerte festive
   useEffect(() => {
@@ -143,7 +172,132 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     await saveBeachCadreConfigToFirestore(nextConfig, author);
   };
 
-  // Déclencheur du relevé terrain avec moyennage GPS 4 mesures et filtrage 15m
+  const syncOfflineAndConsolidatePending = useCallback(
+    async (options?: { silent?: boolean; forceRefresh?: boolean }) => {
+      if (syncInFlightRef.current || isReadOnly) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        if (!options?.silent) {
+          setConsolidationFeedback('📴 Hors-ligne : la synchronisation reprendra dès le retour du réseau.');
+        }
+        return;
+      }
+
+      syncInFlightRef.current = true;
+      setIsConsolidating(true);
+      if (!options?.silent) {
+        setConsolidationFeedback('🔄 Synchronisation de la file plage & consolidation des capteurs réels...');
+      }
+
+      let syncedOfflineCount = 0;
+      let consolidatedCount = 0;
+
+      try {
+        // 1. Vider la file hors-ligne vers Firestore (+ récupération capteurs réels immédiate)
+        const currentQueue = getOfflineGpsQueue();
+        for (const qItem of currentQueue) {
+          try {
+            const { id: _oldOfflineId, offlineQueued: _oq, ...payloadBase } = qItem;
+            let readyPayload: Omit<GpsWaterlineLog, 'id'> = {
+              ...payloadBase,
+              consolidationStatus: 'pending_real',
+            };
+            const realData = await fetchRealConditionsAt(qItem.timestamp, Boolean(options?.forceRefresh));
+            if (realData) {
+              const applied = applyRealConditionsToLog(
+                { ...readyPayload, id: qItem.id },
+                realData
+              );
+              const { id: _appliedId, ...cleanApplied } = applied.updatedLog;
+              readyPayload = cleanApplied;
+            }
+            await upsertWaterlineGpsLogToFirestore(readyPayload);
+            const remaining = removeOfflineGpsLog(qItem.id);
+            setOfflineQueue(remaining);
+            syncedOfflineCount++;
+          } catch {
+            // Conserver dans la file hors-ligne si l'envoi échoue
+          }
+        }
+
+        // 2. Consolider les relevés récents en attente (ex: après H+2 pour Winds-Up)
+        const now = Date.now();
+        const maxAgeMs = 14 * 24 * 3600 * 1000;
+        const candidates = logs.filter(l => {
+          if (l.consolidationStatus === 'consolidated') return false;
+          const ageMs = now - l.timestamp;
+          if (ageMs > maxAgeMs) return false;
+          if (options?.silent) {
+            // En auto : consolider si aucune donnée réelle encore présente ou si H+2 écoulé
+            return !l.realWeatherSnapshot || ageMs >= 2 * 3600 * 1000;
+          }
+          return true;
+        });
+
+        const batch = candidates.slice(0, options?.silent ? 6 : 15);
+        for (const item of batch) {
+          const { updatedLog, changed } = await consolidateGpsLogWithRealData(
+            item,
+            Boolean(options?.forceRefresh)
+          );
+          if (changed) {
+            const { id: docId, ...restPayload } = updatedLog;
+            await upsertWaterlineGpsLogToFirestore(restPayload, docId);
+            if (lastLoggedItem?.id === docId) {
+              setLastLoggedItem(updatedLog);
+            }
+            consolidatedCount++;
+          }
+        }
+
+        if (!options?.silent || syncedOfflineCount > 0 || consolidatedCount > 0) {
+          const parts: string[] = [];
+          if (syncedOfflineCount > 0) parts.push(`${syncedOfflineCount} relevé(s) hors-ligne envoyé(s)`);
+          if (consolidatedCount > 0) parts.push(`${consolidatedCount} relevé(s) consolidé(s) avec Winds-Up/METAR/SHOM`);
+          setConsolidationFeedback(
+            parts.length > 0
+              ? `✓ ${parts.join(' · ')}`
+              : '✓ Tous les relevés récents sont à jour (Winds-Up Spot 66 public disponible 2h après la prise).'
+          );
+        }
+      } catch (err) {
+        console.warn('Erreur consolidation réel GPS:', err);
+        if (!options?.silent) {
+          setConsolidationFeedback('⚠️ Certains capteurs réels n’ont pas répondu pour le moment.');
+        }
+      } finally {
+        setIsConsolidating(false);
+        syncInFlightRef.current = false;
+      }
+    },
+    [isReadOnly, logs, lastLoggedItem]
+  );
+
+  // Écoute réseau (retour de connexion plage -> envoi auto + consolidation)
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      void syncOfflineAndConsolidatePending({ silent: true });
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [syncOfflineAndConsolidatePending]);
+
+  // Passage automatique au chargement quand la liste Firestore est prête
+  const initialAutoConsolidatedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (initialAutoConsolidatedRef.current) return;
+    if (!isOnline || logs.length === 0) return;
+    initialAutoConsolidatedRef.current = true;
+    void syncOfflineAndConsolidatePending({ silent: true });
+  }, [isOnline, logs.length, syncOfflineAndConsolidatePending]);
+
+  // Déclencheur du relevé terrain avec moyennage GPS 4 mesures, file hors-ligne plage & couche réelle
   const handleCaptureNow = async () => {
     if (isReadOnly) {
       alert('Mode consultation active : vous ne pouvez pas enregistrer de relevé.');
@@ -162,10 +316,10 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         setCaptureStatus(`🛰️ Échantillonnage GPS : mesure ${curr} sur ${tot} (précision : ${acc} m)...`);
       });
 
-      setCaptureStatus('⚡ Capture instantanée des flux météo AROME & calcul hydrodynamique...');
+      setCaptureStatus('⚡ Capture AROME/SHOM & interro capteurs réels...');
 
-      // 2. Calcul du snapshot (avec largeur depuis la dune si cadre étalonné)
-      const snapshot = buildWaterlineSnapshot(
+      // 2. Calcul du snapshot théorique (toujours conservé intact)
+      let snapshot: Omit<GpsWaterlineLog, 'id'> = buildWaterlineSnapshot(
         gpsResult,
         author,
         settings,
@@ -176,37 +330,87 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         activeCadreProfile
       );
 
-      // 3. Détection intelligente anti-doublon (même auteur, même endroit < 25m, il y a moins de 60s)
+      // 3. Détection anti-doublon sur tous les relevés visibles (y compris file hors-ligne)
       const recentDup = findRecentDuplicateGpsLog(
         gpsResult.latitude,
         gpsResult.longitude,
         author,
-        logs,
+        displayedLogs,
         60
       );
 
-      // 4. Enregistrement Firestore (mise à jour si doublon immédiat, sinon nouveau document)
-      const { id: savedId, isUpdated } = await upsertWaterlineGpsLogToFirestore(
-        snapshot,
-        recentDup ? recentDup.id : undefined
-      );
-
-      const fullLog: GpsWaterlineLog = {
-        ...snapshot,
-        id: savedId,
-      };
-
-      setLastLoggedItem(fullLog);
-      setQuickNote('');
-      if (isUpdated) {
-        setCaptureStatus(`🛡️ Relevé actualisé (anti-doublon 60s) · Précision lissée : ±${gpsResult.accuracyM} m`);
-      } else {
-        setCaptureStatus(`✓ Relevé fiabilisé enregistré (4 échantillons) · Précision : ±${gpsResult.accuracyM} m`);
+      // 4. Si hors-ligne sur la plage : stockage garanti dans la file locale immédiate
+      const networkAvailable = typeof navigator === 'undefined' || navigator.onLine !== false;
+      if (!networkAvailable) {
+        const queuedItem = enqueueOfflineGpsLog(
+          snapshot,
+          recentDup?.offlineQueued ? recentDup.id : undefined
+        );
+        setOfflineQueue(getOfflineGpsQueue());
+        setLastLoggedItem(queuedItem);
+        setQuickNote('');
+        setCaptureStatus(
+          `📴 Hors-ligne plage : relevé sauvegardé localement (±${gpsResult.accuracyM} m). Envoi & météo réelle auto dès le retour du réseau.`
+        );
+        setTimeout(() => setCaptureStatus(''), 8000);
+        return;
       }
-      setTimeout(() => setCaptureStatus(''), 6000);
-    } catch (err: any) {
+
+      // 5. En ligne : tenter de récupérer immédiatement METAR / SHOM Brest / Winds-Up si dispo
+      const realData = await fetchRealConditionsAt(gpsResult.timestamp, false);
+      if (realData) {
+        const applied = applyRealConditionsToLog(
+          { ...snapshot, id: 'tmp' },
+          realData
+        );
+        const { id: _tmpId, ...cleanSnapshot } = applied.updatedLog;
+        snapshot = cleanSnapshot;
+      } else {
+        snapshot = { ...snapshot, consolidationStatus: 'pending_real' };
+      }
+
+      // 6. Enregistrement Firestore avec repli automatique hors-ligne en cas de coupure réseau 4G sur la plage
+      try {
+        const { id: savedId, isUpdated } = await upsertWaterlineGpsLogToFirestore(
+          snapshot,
+          recentDup && !recentDup.offlineQueued ? recentDup.id : undefined
+        );
+
+        const fullLog: GpsWaterlineLog = {
+          ...snapshot,
+          id: savedId,
+        };
+
+        setLastLoggedItem(fullLog);
+        setQuickNote('');
+        if (isUpdated) {
+          setCaptureStatus(`🛡️ Relevé actualisé (anti-doublon 60s) · Précision lissée : ±${gpsResult.accuracyM} m`);
+        } else {
+          setCaptureStatus(
+            `✓ Relevé enregistré (±${gpsResult.accuracyM} m) · Couche réelle ${
+              fullLog.consolidationStatus === 'consolidated' ? 'consolidée' : 'complétée à H+2'
+            }`
+          );
+        }
+        setTimeout(() => setCaptureStatus(''), 7000);
+      } catch (writeErr) {
+        console.warn('Échec réseau Firestore sur la plage, bascule file hors-ligne:', writeErr);
+        const queuedItem = enqueueOfflineGpsLog(
+          snapshot,
+          recentDup?.offlineQueued ? recentDup.id : undefined
+        );
+        setOfflineQueue(getOfflineGpsQueue());
+        setLastLoggedItem(queuedItem);
+        setQuickNote('');
+        setCaptureStatus(
+          `📴 Réseau instable : relevé mis en file d'attente locale (±${gpsResult.accuracyM} m) pour envoi automatique.`
+        );
+        setTimeout(() => setCaptureStatus(''), 8000);
+      }
+    } catch (err: unknown) {
       console.error('Erreur capture GPS:', err);
-      setCaptureError(err?.message || 'Erreur inattendue lors de la mesure GPS.');
+      const errMsg = err instanceof Error ? err.message : 'Erreur inattendue lors de la mesure GPS.';
+      setCaptureError(errMsg);
       setCaptureStatus('');
     } finally {
       setIsCapturing(false);
@@ -217,6 +421,11 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   const handleDeleteLog = async (id: string) => {
     if (isReadOnly) return;
     if (!window.confirm('Supprimer définitivement ce point de relevé GPS ?')) return;
+    if (id.startsWith('offline_')) {
+      setOfflineQueue(removeOfflineGpsLog(id));
+      if (lastLoggedItem?.id === id) setLastLoggedItem(null);
+      return;
+    }
     try {
       await deleteWaterlineGpsLogFromFirestore(id);
       if (lastLoggedItem?.id === id) setLastLoggedItem(null);
@@ -226,11 +435,11 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   };
 
   const handleExportCsv = () => {
-    if (logs.length === 0) {
+    if (displayedLogs.length === 0) {
       alert('Aucun relevé GPS à exporter pour le moment.');
       return;
     }
-    const csv = exportWaterlineLogsAsCsv(logs, activeCadreProfile);
+    const csv = exportWaterlineLogsAsCsv(displayedLogs, activeCadreProfile);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -247,7 +456,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   const softMarginM = activeCadreProfile?.softSandMarginM ?? 50;
 
   const logsWithZone = useMemo(() => {
-    return logs.map(l => {
+    return displayedLogs.map(l => {
       const dyn = evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadreProfile);
       const zone = classifyBayZone(l.latitude, l.longitude, dyn.lateralPosPct ?? l.lateralPosPct);
       const rawWidth = dyn.widthFromDuneM ?? l.measuredWidthFromDuneM ?? null;
@@ -538,10 +747,27 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             )}
           </button>
 
-          {/* Badge de réassurance anti-doublon */}
-          <div style={{ marginTop: '10px', fontSize: '0.68rem', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-            <span>🛡️</span>
-            <span>Sécurité anti-doublon active (60s) : actualise intelligemment la mesure si ré-appuyé au même endroit.</span>
+          {/* Badge de réassurance anti-doublon + statut réseau & file plage */}
+          <div style={{ marginTop: '10px', fontSize: '0.68rem', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <span>🛡️ Anti-doublon 60s</span>
+            <span>·</span>
+            <span style={{ color: isOnline ? '#15803d' : '#b45309', fontWeight: 700 }}>
+              {isOnline ? '📶 Réseau actif' : '📴 Mode hors-ligne plage (file locale garantie)'}
+            </span>
+            {offlineQueue.length > 0 && (
+              <span
+                style={{
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  border: '1px solid #fcd34d',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontWeight: 800,
+                }}
+              >
+                ⏳ {offlineQueue.length} point{offlineQueue.length > 1 ? 's' : ''} en attente d&apos;envoi
+              </span>
+            )}
           </div>
 
           {/* Jauge d'échantillonnage multi-mesures (Étape 1 Modèle Empirique) */}
@@ -684,18 +910,41 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               </div>
             </div>
 
-            {/* Météo capturée */}
+            {/* Météo capturée (Théorique + Réel) */}
             <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '0.66rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }}>
-                💨 Météo AROME capturée à l'instant T
+                💨 Météo Théorique vs Réelle
               </div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                {lastLoggedItem.weatherSnapshot.windSpeedKts} nds (raf. {lastLoggedItem.weatherSnapshot.windGustKts}) {lastLoggedItem.weatherSnapshot.windDirectionComp}
+              <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#0f172a', marginTop: '4px' }}>
+                Théo (AROME) : {lastLoggedItem.weatherSnapshot.windSpeedKts} nds (raf. {lastLoggedItem.weatherSnapshot.windGustKts}) {lastLoggedItem.weatherSnapshot.windDirectionComp} · {lastLoggedItem.weatherSnapshot.pressureHpa} hPa
+                {lastLoggedItem.weatherSnapshot.waveHeightM != null && ` · Houle ${lastLoggedItem.weatherSnapshot.waveHeightM}m`}
               </div>
-              <div style={{ fontSize: '0.72rem', color: '#475569', marginTop: '4px' }}>
-                Pression : <strong>{lastLoggedItem.weatherSnapshot.pressureHpa} hPa</strong>
-                {lastLoggedItem.weatherSnapshot.waveHeightM != null && ` · Houle : ${lastLoggedItem.weatherSnapshot.waveHeightM}m`}
-              </div>
+              {lastLoggedItem.realWeatherSnapshot ? (
+                <div style={{ fontSize: '0.76rem', color: '#166534', fontWeight: 700, marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #cbd5e1' }}>
+                  Réel :{' '}
+                  {lastLoggedItem.realWeatherSnapshot.windSpeedKts != null
+                    ? `${lastLoggedItem.realWeatherSnapshot.windSpeedKts} nds${
+                        lastLoggedItem.realWeatherSnapshot.windGustKts != null
+                          ? ` (raf. ${lastLoggedItem.realWeatherSnapshot.windGustKts})`
+                          : ''
+                      } ${lastLoggedItem.realWeatherSnapshot.windDirectionComp || ''} (${
+                        lastLoggedItem.realWeatherSnapshot.windSource === 'windsup_spot66' ? 'Winds-Up Spot 66' : 'METAR'
+                      })`
+                    : 'Vent balise en attente H+2'}
+                  {lastLoggedItem.realWeatherSnapshot.pressureHpa != null &&
+                    ` · ${lastLoggedItem.realWeatherSnapshot.pressureHpa} hPa (${lastLoggedItem.realWeatherSnapshot.pressureStation || 'METAR'})`}
+                  {lastLoggedItem.realWeatherSnapshot.shomBrestHeightM != null &&
+                    ` · SHOM Brest ${lastLoggedItem.realWeatherSnapshot.shomBrestHeightM} m`}
+                  {lastLoggedItem.realWeatherSnapshot.waveHeightM != null &&
+                    ` · Houle ${lastLoggedItem.realWeatherSnapshot.waveHeightM} m`}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: '5px' }}>
+                  {lastLoggedItem.offlineQueued
+                    ? '📴 En file locale — capteurs réels récupérés au retour réseau'
+                    : '⏳ Capteurs réels Winds-Up consolidés automatiquement à H+2'}
+                </div>
+              )}
             </div>
 
             {/* Comparaison Hydrodynamique */}
@@ -814,7 +1063,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
       {/* RÉFÉRENTIEL CADRE TERRAIN FIXE (DUNE + CÔTÉS GAUCHE/DROITE MAIRIE & JÉRÔME) */}
       <BeachCadrePanel
         config={cadreConfig}
-        logs={logs}
+        logs={displayedLogs}
         author={author}
         isReadOnly={isReadOnly}
         onSaveConfig={handleSaveCadreConfig}
@@ -822,7 +1071,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
       {/* MODULE LITTO3D FINISTÈRE (IGN / SHOM) : COUPE 2D & LARGEUR DE ROULAGE (POINT 8) */}
       <div style={{ marginBottom: '20px' }}>
-        <Litto3DBeachSection settings={settings} EX={EX} logs={logs} activeCadre={activeCadreProfile} />
+        <Litto3DBeachSection settings={settings} EX={EX} logs={displayedLogs} activeCadre={activeCadreProfile} />
       </div>
 
       {/* TABLEAU DES RELEVÉS GPS AVEC FILTRES ET EXPORT */}
@@ -885,26 +1134,63 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              style={{
-                padding: '6px 12px',
-                background: '#0284c7',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <span>📥 Exporter Excel / CSV</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  disabled={isConsolidating || !isOnline}
+                  onClick={() => void syncOfflineAndConsolidatePending({ silent: false, forceRefresh: true })}
+                  title="Envoyer la file hors-ligne et consolider les relevés avec les capteurs réels (Winds-Up H+2, METAR, SHOM Brest)"
+                  style={{
+                    padding: '6px 11px',
+                    background: isConsolidating || !isOnline ? '#cbd5e1' : '#0f766e',
+                    color: isConsolidating || !isOnline ? '#475569' : '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: isConsolidating || !isOnline ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <span>{isConsolidating ? '⏳ Consolidation...' : '🔄 Synchroniser & consolider réel'}</span>
+                  {(offlineQueue.length > 0 || pendingRealCount > 0) && (
+                    <span style={{ background: 'rgba(255,255,255,0.22)', padding: '1px 5px', borderRadius: '4px' }}>
+                      {offlineQueue.length + pendingRealCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                style={{
+                  padding: '6px 12px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>📥 Exporter Excel / CSV</span>
+              </button>
+            </div>
           </div>
+
+          {consolidationFeedback && (
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: consolidationFeedback.startsWith('✓') ? '#0f766e' : '#b45309', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '5px 10px' }}>
+              {consolidationFeedback}
+            </div>
+          )}
 
           {/* Filtrage & synthèse automatique 3 zones : Lestrevet / Lieue de Grève / Pentrez */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -922,7 +1208,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 cursor: 'pointer',
               }}
             >
-              Toutes zones ({logs.length})
+              Toutes zones ({displayedLogs.length})
             </button>
             {zoneSummaries.map(zs => {
               const active = filterZone === zs.meta.zoneId;
@@ -960,7 +1246,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 <th style={{ padding: '8px 10px' }}>Coordonnées GPS</th>
                 <th style={{ padding: '8px 10px' }}>Précision</th>
                 <th style={{ padding: '8px 10px' }}>Largeur Dune / Zone</th>
-                <th style={{ padding: '8px 10px' }}>Météo AROME capturée</th>
+                <th style={{ padding: '8px 10px' }}>Météo Théo vs Réel</th>
                 <th style={{ padding: '8px 10px' }}>Modèle SHOM brut</th>
                 <th style={{ padding: '8px 10px' }}>Modèle Corrigé</th>
                 <th style={{ padding: '8px 10px' }}>Surcote réelle</th>
@@ -1062,8 +1348,29 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       </div>
                     </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
-                      <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> ({log.weatherSnapshot.windDirectionComp}) · {log.weatherSnapshot.pressureHpa} hPa
-                      {log.weatherSnapshot.waveHeightM != null ? ` · ${log.weatherSnapshot.waveHeightM}m` : ''}
+                      <div>
+                        <span style={{ fontSize: '0.64rem', fontWeight: 700, color: '#64748b' }}>Théo :</span>{' '}
+                        <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> ({log.weatherSnapshot.windDirectionComp}) · {log.weatherSnapshot.pressureHpa} hPa
+                        {log.weatherSnapshot.waveHeightM != null ? ` · ${log.weatherSnapshot.waveHeightM}m` : ''}
+                      </div>
+                      {log.realWeatherSnapshot ? (
+                        <div style={{ fontSize: '0.68rem', color: '#166534', marginTop: '2px' }}>
+                          <strong>Réel :</strong>{' '}
+                          {log.realWeatherSnapshot.windSpeedKts != null
+                            ? `${log.realWeatherSnapshot.windSpeedKts} nds ${log.realWeatherSnapshot.windDirectionComp || ''}`
+                            : 'vent H+2'}
+                          {log.realWeatherSnapshot.pressureHpa != null
+                            ? ` · ${log.realWeatherSnapshot.pressureHpa} hPa (${log.realWeatherSnapshot.pressureStation || 'METAR'})`
+                            : ''}
+                          {log.realWeatherSnapshot.shomBrestHeightM != null
+                            ? ` · Brest ${log.realWeatherSnapshot.shomBrestHeightM}m`
+                            : ''}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '0.64rem', color: log.offlineQueued ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
+                          {log.offlineQueued ? '📴 En file hors-ligne' : '⏳ Réel en attente (H+2)'}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#64748b' }}>
                       {log.theoreticalWaterHeightM} m

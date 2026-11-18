@@ -15,11 +15,13 @@ import {
   AuditSeverity,
   AuditSlotEntry,
   DataAuditReport,
+  formatObsReasonFr,
 } from '../utils/dataAuditEngine';
 import {
   DEFAULT_NON_PUBLISH_REASONS,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
+  getObservationChars,
   getSlotMaxCapacity,
   getValidationItemChars,
   normalizeClosureReason,
@@ -73,9 +75,134 @@ interface DataAuditReconciliationModalProps {
 
 type AuditFilterMode = 'all' | 'conflict' | 'warning' | 'ok' | 'unverified' | 'verified';
 
-interface EditDraftState {
+type ReconciliationSituation =
+  | 'realized'
+  | 'cancelled_weather'
+  | 'closed_no_bookings'
+  | 'not_published'
+  | 'excluded'
+  | 'shifted'
+  | 'open_active';
+
+type BulkDaySituation =
+  | 'not_published'
+  | 'excluded'
+  | 'closed_no_bookings'
+  | 'cancelled_weather'
+  | 'open_active'
+  | 'realized';
+
+const SITUATION_META: Record<
+  ReconciliationSituation,
+  { label: string; short: string; group: string; badgeBg: string; badgeFg: string; border: string }
+> = {
+  realized: {
+    label: '🏁 Séance effectuée (roulée)',
+    short: 'Séance effectuée',
+    group: 'Bilan final',
+    badgeBg: '#dcfce7',
+    badgeFg: '#166534',
+    border: '#16a34a',
+  },
+  cancelled_weather: {
+    label: '⛔ Annulée · Météo / État plage',
+    short: 'Annulée météo',
+    group: 'Bilan final',
+    badgeBg: '#fee2e2',
+    badgeFg: '#991b1b',
+    border: '#dc2626',
+  },
+  closed_no_bookings: {
+    label: '👥 Annulée · Pas d’inscrits',
+    short: 'Pas d’inscrits',
+    group: 'Commercial / Clients',
+    badgeBg: '#f3e8ff',
+    badgeFg: '#6b21a8',
+    border: '#9333ea',
+  },
+  not_published: {
+    label: '🚫 École fermée · Non publié',
+    short: 'École fermée',
+    group: 'Offre école',
+    badgeBg: '#fef3c7',
+    badgeFg: '#92400e',
+    border: '#d97706',
+  },
+  excluded: {
+    label: '➖ Hors offre (exclu des stats)',
+    short: 'Hors offre',
+    group: 'Offre école',
+    badgeBg: '#f1f5f9',
+    badgeFg: '#334155',
+    border: '#64748b',
+  },
+  shifted: {
+    label: '🕒 Séance décalée (horaire modifié)',
+    short: 'Séance décalée',
+    group: 'En cours / Terrain',
+    badgeBg: '#ffedd5',
+    badgeFg: '#9a3412',
+    border: '#ea580c',
+  },
+  open_active: {
+    label: '📅 À venir / Inscriptions en cours',
+    short: 'Ouvert / En cours',
+    group: 'Planning actif',
+    badgeBg: '#e0f2fe',
+    badgeFg: '#0369a1',
+    border: '#0284c7',
+  },
+};
+
+const normalizeTimeHHhMM = (raw?: string): string | null => {
+  const clean = (raw || '').trim().toLowerCase().replace(':', 'h');
+  const m = clean.match(/^(\d{1,2})h(\d{0,2})$/);
+  if (!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = m[2] ? parseInt(m[2].padEnd(2, '0'), 10) : 0;
+  if (Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return `${String(hh).padStart(2, '0')}h${String(mm).padStart(2, '0')}`;
+};
+
+const timeToMinutes = (raw?: string): number | null => {
+  const norm = normalizeTimeHHhMM(raw);
+  if (!norm) return null;
+  const [h, m] = norm.split('h').map(Number);
+  return h * 60 + m;
+};
+
+const mapSituationToCycleStates = (
+  situation: ReconciliationSituation | BulkDaySituation,
+  totalChars: number
+): {
   c1Status: 'published' | 'not_published' | 'excluded' | 'closed_no_bookings';
-  c2Status: 'awaiting_booking' | 'confirmed' | 'shifted' | 'cancelled_weather' | 'realized';
+  c2Status?: 'awaiting_booking' | 'confirmed' | 'shifted' | 'cancelled_weather' | 'realized';
+  isRejected: boolean;
+} => {
+  switch (situation) {
+    case 'realized':
+      return { c1Status: 'published', c2Status: 'realized', isRejected: false };
+    case 'shifted':
+      return { c1Status: 'published', c2Status: 'shifted', isRejected: false };
+    case 'open_active':
+      return {
+        c1Status: 'published',
+        c2Status: totalChars > 0 ? 'confirmed' : 'awaiting_booking',
+        isRejected: false,
+      };
+    case 'cancelled_weather':
+      return { c1Status: 'published', c2Status: 'cancelled_weather', isRejected: true };
+    case 'closed_no_bookings':
+      return { c1Status: 'closed_no_bookings', isRejected: true };
+    case 'not_published':
+      return { c1Status: 'not_published', isRejected: true };
+    case 'excluded':
+      return { c1Status: 'excluded', isRejected: true };
+  }
+};
+
+interface EditDraftState {
+  situation: ReconciliationSituation;
   nonPublishReason: string;
   weatherReason: string;
   publishedStart: string;
@@ -97,8 +224,7 @@ interface EditDraftState {
 }
 
 interface DayBulkDraftState {
-  c1Status: 'published' | 'not_published' | 'excluded' | 'closed_no_bookings';
-  c2Status: 'awaiting_booking' | 'confirmed' | 'cancelled_weather' | 'realized';
+  situation: BulkDaySituation;
   nonPublishReason: string;
   weatherReason: string;
   instructor: string;
@@ -106,7 +232,7 @@ interface DayBulkDraftState {
   secondaryQualification?: 'CQP' | 'DE_BPJEPS';
   secondaryMaxChars?: number;
   realignSlotKeys: boolean;
-  syncObservationsMode: 'existing_only' | 'all_slots' | 'none';
+  syncObservationsMode: 'existing_only' | 'all_slots';
   auditNote: string;
 }
 
@@ -163,6 +289,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showPedagogyGuide, setShowPedagogyGuide] = useState<boolean>(
+    () => report.conflictCount > 0 || report.warningCount > 0 || report.unverifiedCount > 0
+  );
 
   const allNonPublishChoices = useMemo(() => {
     const merged = [...DEFAULT_NON_PUBLISH_REASONS, ...customNonPublishReasons];
@@ -240,29 +369,138 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
 
   if (!isOpen) return null;
 
+  const evaluateDraftCoherence = (
+    d: EditDraftState,
+    entry: AuditSlotEntry
+  ): { blockingErrors: string[]; warnings: string[] } => {
+    const blockingErrors: string[] = [];
+    const warnings: string[] = [];
+    const todayStr = tdy();
+
+    const pStartMin = timeToMinutes(d.publishedStart);
+    const pEndMin = timeToMinutes(d.publishedEnd);
+    if (pStartMin === null || pEndMin === null) {
+      blockingErrors.push('Format d’horaire invalide (utilise le format 10h00 ou 10:00).');
+    } else if (pEndMin <= pStartMin) {
+      blockingErrors.push('L’heure de fin doit être postérieure à l’heure de début.');
+    }
+
+    if (d.situation === 'shifted') {
+      const aStartMin = timeToMinutes(d.actualStart);
+      const aEndMin = timeToMinutes(d.actualEnd);
+      if (aStartMin === null || aEndMin === null) {
+        blockingErrors.push('Format de l’horaire décalé invalide (utilise 10h00 ou 10:00).');
+      } else if (aEndMin <= aStartMin) {
+        blockingErrors.push('L’heure de fin décalée doit être postérieure à l’heure de début décalée.');
+      } else if (pStartMin !== null && pEndMin !== null && aStartMin === pStartMin && aEndMin === pEndMin) {
+        warnings.push('L’horaire décalé est identique à l’horaire initial : si rien n’a bougé, choisis plutôt « Séance effectuée » ou « Ouvert / En cours ».');
+      }
+    }
+
+    const totalChars = d.monoCount + d.biCount;
+
+    if (d.situation === 'realized' && totalChars <= 0) {
+      blockingErrors.push(
+        'Une séance effectuée doit compter au moins 1 char (mono ou bi). Sinon choisis « 👥 Annulée · Pas d’inscrits ».'
+      );
+    }
+
+    if (d.situation === 'open_active' && entry.ds < todayStr) {
+      blockingErrors.push(
+        'Cette date est déjà passée : tu ne peux pas la laisser « En cours ». Choisis « Séance effectuée », « Annulée Météo », « Pas d’inscrits », « École fermée » ou « Hors offre ».'
+      );
+    }
+
+    if (d.situation === 'not_published') {
+      const norm = normalizeClosureReason(d.nonPublishReason);
+      if (!d.nonPublishReason.trim() || norm.isGenericClosed) {
+        blockingErrors.push(
+          'Précise un vrai motif de fermeture école (Vacances, Réunion, Impératif personnel…) au lieu d’un simple « Fermé ».'
+        );
+      }
+    }
+
+    if (d.situation === 'cancelled_weather') {
+      const norm = normalizeClosureReason(d.weatherReason);
+      if (!d.weatherReason.trim() || norm.isGenericClosed) {
+        blockingErrors.push('Précise la cause météo ou l’état de plage (vent faible, vent fort, secteur, plage…).');
+      }
+    }
+
+    if (
+      entry.bookingSummary.totalChars > 0 &&
+      (d.situation === 'excluded' || d.situation === 'not_published' || d.situation === 'closed_no_bookings')
+    ) {
+      blockingErrors.push(
+        `${entry.bookings.length} dossier(s) client (${entry.bookingSummary.totalChars} char(s)) sont inscrits sur ce créneau : impossible de le classer sans inscrits / fermé / hors offre tant que ces inscriptions existent.`
+      );
+    }
+
+    if (d.situation === 'realized' || d.situation === 'shifted' || d.situation === 'open_active') {
+      const cleanSec = d.secondaryInstructor.trim();
+      const secAddChars = cleanSec
+        ? d.secondaryMaxChars ?? (d.secondaryQualification === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR)
+        : undefined;
+      const secQual: 'CQP' | 'DE_BPJEPS' | undefined = cleanSec
+        ? d.secondaryQualification || (secAddChars! <= 8 ? 'CQP' : 'DE_BPJEPS')
+        : undefined;
+      const maxCap = getSlotMaxCapacity({
+        secondaryInstructor: cleanSec || undefined,
+        secondaryQualification: secQual,
+        secondaryMaxChars: secAddChars,
+      });
+      if (totalChars > maxCap) {
+        blockingErrors.push(
+          `Capacité dépassée (${totalChars}/${maxCap} chars) : réduis le nombre de chars ou ajoute un 2e moniteur (Youenn +8 → 20 max, Katleen +12 → 24 max).`
+        );
+      }
+
+      if (
+        entry.bookingSummary.totalChars > 0 &&
+        totalChars !== entry.bookingSummary.totalChars
+      ) {
+        warnings.push(
+          `Les inscriptions clients comptent ${entry.bookingSummary.totalChars} char(s) contre ${totalChars} saisi(s) ici (vérifie si le chiffre saisi est bien le réel).`
+        );
+      }
+    }
+
+    if (
+      d.realignSlotKey &&
+      entry.computedMatch &&
+      entry.computedMatch.slotKey !== entry.slotKey &&
+      validations[entry.ds]?.items?.some(it => it.k === entry.computedMatch!.slotKey)
+    ) {
+      warnings.push(
+        `Un autre créneau existe déjà sur la référence cible (${entry.computedMatch.startTime}–${entry.computedMatch.endTime}) : le réalignement fusionnera les deux lignes.`
+      );
+    }
+
+    return { blockingErrors, warnings };
+  };
+
   const openEditor = (entry: AuditSlotEntry) => {
     setActionError(null);
     setConfirmDeleteKey(null);
     const val = entry.valItem;
     const obs = entry.obs;
+    const todayStr = tdy();
 
-    // Déduction intelligente des valeurs initiales (en privilégiant la donnée la plus riche)
-    let c1Status: EditDraftState['c1Status'] = 'published';
-    let c2Status: EditDraftState['c2Status'] = 'awaiting_booking';
+    let situation: ReconciliationSituation = entry.ds < todayStr ? 'realized' : 'open_active';
     let nonPublishReason = '';
     let weatherReason: string = C2_WEATHER_REASONS[0];
 
     if (val) {
       const effC1 = getEffectiveCycle1Status(val);
-      c1Status = effC1 === 'unpublished' ? 'published' : effC1;
       const effC2 = getEffectiveCycle2Status(val, entry.bookingSummary.totalChars);
-      c2Status =
-        effC2 === 'confirmed' ||
-        effC2 === 'shifted' ||
-        effC2 === 'cancelled_weather' ||
-        effC2 === 'realized'
-          ? effC2
-          : 'awaiting_booking';
+
+      if (effC1 === 'excluded') situation = 'excluded';
+      else if (effC1 === 'not_published') situation = 'not_published';
+      else if (effC1 === 'closed_no_bookings') situation = 'closed_no_bookings';
+      else if (effC2 === 'cancelled_weather') situation = 'cancelled_weather';
+      else if (effC2 === 'realized') situation = 'realized';
+      else if (effC2 === 'shifted') situation = 'shifted';
+      else situation = 'open_active';
 
       const rawNonPub =
         val.nonPublishReason ||
@@ -272,56 +510,62 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         const norm = normalizeClosureReason(rawNonPub);
         nonPublishReason = norm.isGenericClosed ? 'Impératif personnel' : norm.label;
       }
-      if (c2Status === 'cancelled_weather') {
+      if (situation === 'cancelled_weather') {
+        const rawW = val.rejectReason || obs?.cancellationNote || '';
+        const normW = normalizeClosureReason(rawW);
         weatherReason =
-          val.rejectReason ||
-          obs?.cancellationNote ||
-          mapCancellationReasonToWeatherText(obs?.cancellationReason);
+          rawW && !normW.isGenericClosed
+            ? rawW
+            : mapCancellationReasonToWeatherText(obs?.cancellationReason);
       }
 
-      // Si val était encore en attente alors qu'un REX existe déjà, pré-remplir le verdict REX pour réconciliation rapide
-      if (c1Status === 'published' && c2Status === 'awaiting_booking' && obs) {
-        if (obs.status === 'realized') {
-          c2Status = 'realized';
-        } else if (obs.cancellationReason === 'no_clients') {
-          c1Status = 'closed_no_bookings';
-        } else if (
-          (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
-          (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
-        ) {
-          c1Status = 'excluded';
-        } else if (obs.cancellationReason === 'instructor') {
-          c1Status = 'not_published';
-          const norm = normalizeClosureReason(obs.cancellationNote);
-          nonPublishReason = norm.isGenericClosed
-            ? 'Impératif personnel'
-            : norm.label || 'Impératif personnel';
-        } else {
-          c2Status = 'cancelled_weather';
-          weatherReason =
-            obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
+      // Si planning resté en attente/actif sur une date passée ou avec REX existant -> pré-proposer le verdict REX ou clôture cohérente
+      if (situation === 'open_active') {
+        if (obs) {
+          if (obs.status === 'realized') {
+            situation = 'realized';
+          } else if (obs.cancellationReason === 'no_clients') {
+            situation = 'closed_no_bookings';
+          } else if (
+            (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
+            (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
+          ) {
+            situation = 'excluded';
+          } else if (obs.cancellationReason === 'instructor') {
+            situation = 'not_published';
+            const norm = normalizeClosureReason(obs.cancellationNote);
+            nonPublishReason = norm.isGenericClosed
+              ? 'Impératif personnel'
+              : norm.label || 'Impératif personnel';
+          } else {
+            situation = 'cancelled_weather';
+            weatherReason =
+              obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
+          }
+        } else if (entry.ds < todayStr) {
+          const valC = getValidationItemChars(val);
+          const hasChars = valC.totalChars > 0 || entry.bookingSummary.totalChars > 0;
+          situation = hasChars ? 'realized' : 'closed_no_bookings';
         }
       }
     } else if (obs) {
       if (obs.status === 'realized') {
-        c1Status = 'published';
-        c2Status = 'realized';
+        situation = 'realized';
       } else if (obs.cancellationReason === 'no_clients') {
-        c1Status = 'closed_no_bookings';
+        situation = 'closed_no_bookings';
       } else if (
         (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
         (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
       ) {
-        c1Status = 'excluded';
+        situation = 'excluded';
       } else if (obs.cancellationReason === 'instructor') {
-        c1Status = 'not_published';
+        situation = 'not_published';
         const norm = normalizeClosureReason(obs.cancellationNote);
         nonPublishReason = norm.isGenericClosed
           ? 'Impératif personnel'
           : norm.label || 'Impératif personnel';
       } else {
-        c1Status = 'published';
-        c2Status = 'cancelled_weather';
+        situation = 'cancelled_weather';
         weatherReason =
           obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
       }
@@ -330,12 +574,17 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const valChars = getValidationItemChars(val);
     const obsMono = obs?.monoCount ?? 0;
     const obsBi = obs?.biCount ?? 0;
+    const obsTotal = getObservationChars(obs);
     const monoCount =
       valChars.mono > 0
         ? valChars.mono
         : obsMono > 0
         ? obsMono
-        : entry.bookingSummary.mono;
+        : entry.bookingSummary.mono > 0
+        ? entry.bookingSummary.mono
+        : valChars.totalChars === 0 && obsTotal > 0 && obsBi === 0
+        ? obsTotal
+        : 0;
     const biCount =
       valChars.bi > 0 ? valChars.bi : obsBi > 0 ? obsBi : entry.bookingSummary.bi;
     const computedPeople = monoCount + biCount * 2;
@@ -348,8 +597,15 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         ? entry.bookingSummary.people
         : computedPeople;
 
-    const pStart = val?.publishedStart || val?.s || obs?.slotStart || '10h00';
-    const pEnd = val?.publishedEnd || val?.e || obs?.slotEnd || '11h00';
+    const shouldRealign = Boolean(entry.computedMatch && !entry.computedMatch.isExactKeyMatch);
+    const pStart =
+      shouldRealign && entry.computedMatch
+        ? entry.computedMatch.startTime
+        : val?.publishedStart || val?.s || obs?.slotStart || '10h00';
+    const pEnd =
+      shouldRealign && entry.computedMatch
+        ? entry.computedMatch.endTime
+        : val?.publishedEnd || val?.e || obs?.slotEnd || '11h00';
 
     const secName = val?.secondaryInstructor || obs?.secondaryInstructor || '';
     const inferredSecQual: 'CQP' | 'DE_BPJEPS' | undefined = val?.secondaryQualification
@@ -364,8 +620,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       (inferredSecQual === 'CQP' ? 8 : inferredSecQual === 'DE_BPJEPS' ? MAX_CHARS_PER_INSTRUCTOR : undefined);
 
     setDraft({
-      c1Status,
-      c2Status,
+      situation,
       nonPublishReason: nonPublishReason || 'Impératif personnel',
       weatherReason,
       publishedStart: pStart,
@@ -381,14 +636,21 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       secondaryInstructor: secName,
       secondaryQualification: inferredSecQual,
       secondaryMaxChars: inferredSecMaxChars,
-      realignSlotKey: Boolean(entry.computedMatch && !entry.computedMatch.isExactKeyMatch),
-      syncObservation: Boolean(obs),
+      realignSlotKey: shouldRealign,
+      syncObservation: Boolean(obs) || situation === 'realized' || situation === 'cancelled_weather',
       auditNote: entry.signOff?.note || '',
     });
     setEditingEntryKey(entry.entryKey);
   };
 
   const handleToggleSignOff = async (entry: AuditSlotEntry) => {
+    if (!entry.isVerified && entry.severity === 'conflict') {
+      setActionError(
+        'Contradiction rouge détectée : clique sur « ⚖️ Trancher » pour aligner les sources avant de valider.'
+      );
+      openEditor(entry);
+      return;
+    }
     setSavingKey(entry.entryKey);
     setActionError(null);
     try {
@@ -442,13 +704,13 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const firstWithVal = dayEntries.find(e => e.valItem)?.valItem;
     const firstWithObs = dayEntries.find(e => e.obs)?.obs;
     const effC1 = firstWithVal ? getEffectiveCycle1Status(firstWithVal) : 'not_published';
-    const c1Status: DayBulkDraftState['c1Status'] =
+    const situation: BulkDaySituation =
       effC1 === 'excluded'
         ? 'excluded'
         : effC1 === 'closed_no_bookings'
         ? 'closed_no_bookings'
         : effC1 === 'published'
-        ? 'published'
+        ? 'open_active'
         : 'not_published';
 
     const rawNonPub =
@@ -472,8 +734,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       (bulkSecQual === 'CQP' ? 8 : bulkSecQual === 'DE_BPJEPS' ? MAX_CHARS_PER_INSTRUCTOR : undefined);
 
     setBulkDraft({
-      c1Status,
-      c2Status: 'awaiting_booking',
+      situation,
       nonPublishReason: norm.isGenericClosed
         ? 'Impératif personnel'
         : norm.label || 'Impératif personnel',
@@ -491,13 +752,24 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
 
   const handleValidateWholeDay = async (dayEntries: AuditSlotEntry[], verify: boolean) => {
     if (dayEntries.length === 0) return;
+    const targets = verify
+      ? dayEntries.filter(e => e.severity !== 'conflict' && !e.isVerified)
+      : dayEntries.filter(e => e.isVerified);
+    if (targets.length === 0) {
+      if (verify && dayEntries.some(e => e.severity === 'conflict')) {
+        setActionError(
+          'Les créneaux en contradiction rouge doivent être tranchés individuellement (« ⚖️ Trancher ») ou uniformisés via « ⚡ Valider / uniformiser la journée ».'
+        );
+      }
+      return;
+    }
     setIsBatchSaving(true);
     setActionError(null);
     try {
       const now = Date.now();
       const author = getActiveInstructor();
       const batchMap: Record<string, DataAuditEntrySignOff | null> = {};
-      dayEntries.forEach(e => {
+      targets.forEach(e => {
         batchMap[e.entryKey] = verify
           ? {
               entryKey: e.entryKey,
@@ -518,31 +790,80 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
 
   const handleSaveBulkDay = async (ds: string, dayEntries: AuditSlotEntry[]) => {
     if (!bulkDraft || dayEntries.length === 0) return;
+
+    const todayStr = tdy();
+    if (bulkDraft.situation === 'open_active' && ds < todayStr) {
+      setActionError(
+        'Cette journée est déjà passée : tu ne peux pas l’uniformiser en « À venir / En cours ». Choisis « École fermée », « Annulée Météo », « Pas d’inscrits », « Hors offre » ou « Effectuée ».'
+      );
+      return;
+    }
+
+    const totalBookedDay = dayEntries.reduce((acc, e) => acc + e.bookingSummary.totalChars, 0);
+    if (
+      totalBookedDay > 0 &&
+      (bulkDraft.situation === 'excluded' ||
+        bulkDraft.situation === 'not_published' ||
+        bulkDraft.situation === 'closed_no_bookings')
+    ) {
+      setActionError(
+        `Impossible sur toute la journée : ${totalBookedDay} char(s) client(s) sont inscrits ce jour-là. Traite les créneaux inscrits individuellement ou choisis « Annulée Météo ».`
+      );
+      return;
+    }
+
+    const cleanNonPubReason = bulkDraft.nonPublishReason.trim();
+    if (
+      bulkDraft.situation === 'not_published' &&
+      (!cleanNonPubReason || normalizeClosureReason(cleanNonPubReason).isGenericClosed)
+    ) {
+      setActionError('Précise un vrai motif de fermeture école (Vacances, Réunion, Impératif personnel…).');
+      return;
+    }
+
+    if (
+      bulkDraft.situation === 'cancelled_weather' &&
+      (!bulkDraft.weatherReason.trim() || normalizeClosureReason(bulkDraft.weatherReason).isGenericClosed)
+    ) {
+      setActionError('Précise une cause météo ou plage pour toute la journée.');
+      return;
+    }
+
+    if (bulkDraft.situation === 'realized') {
+      const zeroSlot = dayEntries.find(e => {
+        const vc = getValidationItemChars(e.valItem).totalChars;
+        const oc = getObservationChars(e.obs);
+        return Math.max(vc, oc, e.bookingSummary.totalChars) <= 0;
+      });
+      if (zeroSlot) {
+        setActionError(
+          `Le créneau ${zeroSlot.displayTime} a 0 char saisi : saisis ses chars sur sa fiche avant de marquer toute la journée « Effectuée ».`
+        );
+        return;
+      }
+    }
+
     setIsBatchSaving(true);
     setActionError(null);
 
     try {
       const author = getActiveInstructor();
       const now = Date.now();
-      const cleanNonPubReason = bulkDraft.nonPublishReason.trim() || 'Impératif personnel';
-      if (bulkDraft.c1Status === 'not_published' && onAddCustomNonPublishReason) {
-        onAddCustomNonPublishReason(cleanNonPubReason);
+      const finalNonPubReason = cleanNonPubReason || 'Impératif personnel';
+      if (bulkDraft.situation === 'not_published' && onAddCustomNonPublishReason) {
+        onAddCustomNonPublishReason(finalNonPubReason);
       }
 
-      const isRejected =
-        bulkDraft.c1Status === 'excluded' ||
-        bulkDraft.c1Status === 'not_published' ||
-        bulkDraft.c1Status === 'closed_no_bookings' ||
-        (bulkDraft.c1Status === 'published' && bulkDraft.c2Status === 'cancelled_weather');
+      const { c1Status, c2Status, isRejected } = mapSituationToCycleStates(bulkDraft.situation, 0);
 
       const rejectReason =
-        bulkDraft.c1Status === 'excluded'
+        c1Status === 'excluded'
           ? 'Hors offre / Non pertinent (C1)'
-          : bulkDraft.c1Status === 'not_published'
-          ? `Non publié (C1) : ${cleanNonPubReason}`
-          : bulkDraft.c1Status === 'closed_no_bookings'
+          : c1Status === 'not_published'
+          ? `Non publié (C1) : ${finalNonPubReason}`
+          : c1Status === 'closed_no_bookings'
           ? "Pas d'inscrits (Vie 2)"
-          : bulkDraft.c2Status === 'cancelled_weather'
+          : c2Status === 'cancelled_weather'
           ? bulkDraft.weatherReason.trim() || 'Annulé météo (Vie 2)'
           : undefined;
 
@@ -568,8 +889,41 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             : entry.slotKey;
 
         const existingVal = entry.valItem;
-        const pStart = existingVal?.publishedStart || existingVal?.s || entry.obs?.slotStart || entry.startTime;
-        const pEnd = existingVal?.publishedEnd || existingVal?.e || entry.obs?.slotEnd || entry.endTime;
+        const pStart =
+          bulkDraft.realignSlotKeys && entry.computedMatch
+            ? entry.computedMatch.startTime
+            : existingVal?.publishedStart || existingVal?.s || entry.obs?.slotStart || entry.startTime;
+        const pEnd =
+          bulkDraft.realignSlotKeys && entry.computedMatch
+            ? entry.computedMatch.endTime
+            : existingVal?.publishedEnd || existingVal?.e || entry.obs?.slotEnd || entry.endTime;
+
+        const existingValChars = getValidationItemChars(existingVal);
+        const slotChars =
+          existingValChars.totalChars > 0
+            ? existingValChars.totalChars
+            : Math.max(getObservationChars(entry.obs), entry.bookingSummary.totalChars);
+        const slotMono =
+          existingValChars.mono > 0
+            ? existingValChars.mono
+            : (entry.obs?.monoCount ?? 0) > 0
+            ? entry.obs!.monoCount!
+            : entry.bookingSummary.mono;
+        const slotBi =
+          existingValChars.bi > 0
+            ? existingValChars.bi
+            : (entry.obs?.biCount ?? 0) > 0
+            ? entry.obs!.biCount!
+            : entry.bookingSummary.bi;
+        const slotPeople =
+          existingVal?.pilotsCount ?? entry.obs?.participantsCount ?? entry.bookingSummary.people;
+
+        const effectiveC2 =
+          bulkDraft.situation === 'open_active'
+            ? slotChars > 0
+              ? 'confirmed'
+              : 'awaiting_booking'
+            : c2Status;
 
         const nextItem: ValidationItem = {
           k: targetSlotKey,
@@ -583,22 +937,18 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           customTitle: entry.computedMatch?.customTitle ?? existingVal?.customTitle ?? entry.obs?.customTitle,
           status: isRejected ? 'rejected' : 'valid',
           rejectReason,
-          cycle1Status: bulkDraft.c1Status,
-          nonPublishReason: bulkDraft.c1Status === 'not_published' ? cleanNonPubReason : undefined,
-          cycle2Status: bulkDraft.c1Status === 'published' ? bulkDraft.c2Status : undefined,
+          cycle1Status: c1Status,
+          nonPublishReason: c1Status === 'not_published' ? finalNonPubReason : undefined,
+          cycle2Status: c1Status === 'published' ? effectiveC2 : undefined,
           instructor: bulkDraft.instructor.trim() || 'Jérôme',
           assignedPilot: bulkDraft.instructor.trim() || 'Jérôme',
-          secondaryInstructor: cleanBulkSec || undefined,
-          secondaryQualification: bulkSecQual,
-          secondaryMaxChars: bulkSecAddChars,
-          monoCount: isRejected ? 0 : existingVal?.monoCount ?? entry.bookingSummary.mono,
-          biCount: isRejected ? 0 : existingVal?.biCount ?? entry.bookingSummary.bi,
-          charsCount: isRejected
-            ? 0
-            : existingVal?.charsCount ?? entry.bookingSummary.totalChars,
-          pilotsCount: isRejected
-            ? 0
-            : existingVal?.pilotsCount ?? entry.bookingSummary.people,
+          secondaryInstructor: isRejected ? undefined : cleanBulkSec || undefined,
+          secondaryQualification: isRejected ? undefined : bulkSecQual,
+          secondaryMaxChars: isRejected ? undefined : bulkSecAddChars,
+          monoCount: isRejected ? 0 : slotMono,
+          biCount: isRejected ? 0 : slotBi,
+          charsCount: isRejected ? 0 : slotChars,
+          pilotsCount: isRejected ? 0 : slotPeople,
         };
 
         if (targetSlotKey !== entry.slotKey) {
@@ -611,31 +961,31 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         }
         nextItemsMap.set(targetSlotKey, nextItem);
 
+        // Si un REX existe déjà, toujours le garder aligné pour ne jamais créer de contradiction
         const shouldSyncObs =
-          bulkDraft.syncObservationsMode === 'all_slots' ||
-          (bulkDraft.syncObservationsMode === 'existing_only' && Boolean(entry.obs)) ||
-          (Boolean(entry.obs) && targetSlotKey !== entry.slotKey);
+          Boolean(entry.obs) ||
+          bulkDraft.syncObservationsMode === 'all_slots';
 
         if (shouldSyncObs) {
           const obsStatus: 'realized' | 'cancelled' = isRejected ? 'cancelled' : 'realized';
           const obsCancelReason: CancellationReason | undefined =
-            bulkDraft.c1Status === 'excluded'
+            c1Status === 'excluded'
               ? 'other'
-              : bulkDraft.c1Status === 'closed_no_bookings'
+              : c1Status === 'closed_no_bookings'
               ? 'no_clients'
-              : bulkDraft.c1Status === 'not_published'
+              : c1Status === 'not_published'
               ? 'instructor'
-              : bulkDraft.c2Status === 'cancelled_weather'
+              : c2Status === 'cancelled_weather'
               ? mapWeatherTextToCancellationReason(bulkDraft.weatherReason)
               : undefined;
           const obsCancelNote =
-            bulkDraft.c1Status === 'excluded'
+            c1Status === 'excluded'
               ? 'Hors offre / Non pertinent (C1)'
-              : bulkDraft.c1Status === 'not_published'
-              ? cleanNonPubReason
-              : bulkDraft.c1Status === 'closed_no_bookings'
+              : c1Status === 'not_published'
+              ? finalNonPubReason
+              : c1Status === 'closed_no_bookings'
               ? "Pas d'inscrits (Vie 2)"
-              : bulkDraft.c2Status === 'cancelled_weather'
+              : c2Status === 'cancelled_weather'
               ? bulkDraft.weatherReason.trim()
               : undefined;
 
@@ -659,7 +1009,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             charsCount: obsStatus === 'realized' ? nextItem.charsCount : undefined,
             participantsCount: obsStatus === 'realized' ? nextItem.pilotsCount : undefined,
             author: bulkDraft.instructor.trim() || entry.obs?.author || author,
-            secondaryInstructor: cleanBulkSec || undefined,
+            secondaryInstructor: isRejected ? undefined : cleanBulkSec || undefined,
             updatedAt: now,
           };
           await saveObservationToFirestore(updatedObs);
@@ -673,8 +1023,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           verifiedAt: now,
           note:
             bulkDraft.auditNote.trim() ||
-            (bulkDraft.c1Status === 'not_published'
-              ? `Journée entière uniformisée · ${cleanNonPubReason}`
+            (c1Status === 'not_published'
+              ? `Journée entière uniformisée · ${finalNonPubReason}`
               : 'Journée entière mise en cohérence en bloc'),
         };
       }
@@ -825,6 +1175,12 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
 
   const handleSaveReconciledEntry = async (entry: AuditSlotEntry) => {
     if (!draft) return;
+    const { blockingErrors } = evaluateDraftCoherence(draft, entry);
+    if (blockingErrors.length > 0) {
+      setActionError(blockingErrors[0]);
+      return;
+    }
+
     setSavingKey(entry.entryKey);
     setActionError(null);
 
@@ -835,33 +1191,40 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           ? entry.computedMatch.slotKey
           : entry.slotKey;
 
+      const normStart =
+        draft.realignSlotKey && entry.computedMatch
+          ? entry.computedMatch.startTime
+          : normalizeTimeHHhMM(draft.publishedStart) || entry.startTime;
+      const normEnd =
+        draft.realignSlotKey && entry.computedMatch
+          ? entry.computedMatch.endTime
+          : normalizeTimeHHhMM(draft.publishedEnd) || entry.endTime;
+      const normActualStart = normalizeTimeHHhMM(draft.actualStart) || normStart;
+      const normActualEnd = normalizeTimeHHhMM(draft.actualEnd) || normEnd;
+
       const totalChars = draft.monoCount + draft.biCount;
       const people =
         draft.pilotsCount > 0 ? draft.pilotsCount : draft.monoCount + draft.biCount * 2;
 
+      const { c1Status, c2Status, isRejected } = mapSituationToCycleStates(draft.situation, totalChars);
+
       const cleanNonPubReason = draft.nonPublishReason.trim() || 'Impératif personnel';
-      if (draft.c1Status === 'not_published' && onAddCustomNonPublishReason) {
+      if (c1Status === 'not_published' && onAddCustomNonPublishReason) {
         onAddCustomNonPublishReason(cleanNonPubReason);
       }
 
-      const isRejected =
-        draft.c1Status === 'excluded' ||
-        draft.c1Status === 'not_published' ||
-        draft.c1Status === 'closed_no_bookings' ||
-        (draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather');
-
       const rejectReason =
-        draft.c1Status === 'excluded'
+        c1Status === 'excluded'
           ? 'Hors offre / Non pertinent (C1)'
-          : draft.c1Status === 'not_published'
+          : c1Status === 'not_published'
           ? `Non publié (C1) : ${cleanNonPubReason}`
-          : draft.c1Status === 'closed_no_bookings'
+          : c1Status === 'closed_no_bookings'
           ? "Pas d'inscrits (Vie 2)"
-          : draft.c2Status === 'cancelled_weather'
+          : c2Status === 'cancelled_weather'
           ? draft.weatherReason.trim() || 'Annulé météo (Vie 2)'
           : undefined;
 
-      const cleanSec = draft.secondaryInstructor.trim();
+      const cleanSec = isRejected ? '' : draft.secondaryInstructor.trim();
       const secAddChars = cleanSec
         ? draft.secondaryMaxChars ??
           (draft.secondaryQualification === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR)
@@ -869,54 +1232,39 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       const secQual: 'CQP' | 'DE_BPJEPS' | undefined = cleanSec
         ? draft.secondaryQualification || (secAddChars! <= 8 ? 'CQP' : 'DE_BPJEPS')
         : undefined;
-      const zeroOutCounts = draft.c1Status !== 'published';
 
       const existingVal = entry.valItem;
       const nextItem: ValidationItem = {
         k: targetSlotKey,
-        s: draft.publishedStart.trim() || entry.startTime,
-        e: draft.publishedEnd.trim() || entry.endTime,
-        publishedStart: draft.publishedStart.trim() || entry.startTime,
-        publishedEnd: draft.publishedEnd.trim() || entry.endTime,
+        s: normStart,
+        e: normEnd,
+        publishedStart: normStart,
+        publishedEnd: normEnd,
         opt: entry.computedMatch?.opt ?? existingVal?.opt ?? false,
         over: entry.computedMatch?.over ?? existingVal?.over ?? 0,
         lim: entry.computedMatch?.lim ?? existingVal?.lim ?? '',
         customTitle: entry.computedMatch?.customTitle ?? existingVal?.customTitle ?? entry.obs?.customTitle,
         status: isRejected ? 'rejected' : 'valid',
         rejectReason,
-        cycle1Status: draft.c1Status,
-        nonPublishReason: draft.c1Status === 'not_published' ? cleanNonPubReason : undefined,
-        cycle2Status:
-          draft.c1Status === 'published' ? draft.c2Status : undefined,
-        actualStart:
-          draft.c1Status === 'published' && draft.c2Status === 'shifted'
-            ? draft.actualStart.trim()
-            : undefined,
-        actualEnd:
-          draft.c1Status === 'published' && draft.c2Status === 'shifted'
-            ? draft.actualEnd.trim()
-            : undefined,
-        shiftMinutes:
-          draft.c1Status === 'published' && draft.c2Status === 'shifted'
-            ? existingVal?.shiftMinutes
-            : undefined,
+        cycle1Status: c1Status,
+        nonPublishReason: c1Status === 'not_published' ? cleanNonPubReason : undefined,
+        cycle2Status: c1Status === 'published' ? c2Status : undefined,
+        actualStart: draft.situation === 'shifted' ? normActualStart : undefined,
+        actualEnd: draft.situation === 'shifted' ? normActualEnd : undefined,
+        shiftMinutes: draft.situation === 'shifted' ? existingVal?.shiftMinutes : undefined,
         instructor: draft.instructor.trim() || 'Jérôme',
         assignedPilot: draft.instructor.trim() || 'Jérôme',
         secondaryInstructor: cleanSec || undefined,
         secondaryQualification: secQual,
         secondaryMaxChars: secAddChars,
-        monoCount: zeroOutCounts ? 0 : draft.monoCount,
-        biCount: zeroOutCounts ? 0 : draft.biCount,
-        charsCount: zeroOutCounts ? 0 : totalChars,
-        pilotsCount: zeroOutCounts ? 0 : people,
+        monoCount: isRejected ? 0 : draft.monoCount,
+        biCount: isRejected ? 0 : draft.biCount,
+        charsCount: isRejected ? 0 : totalChars,
+        pilotsCount: isRejected ? 0 : people,
         rescheduledChars:
-          draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather'
-            ? draft.rescheduledChars
-            : undefined,
+          c2Status === 'cancelled_weather' ? draft.rescheduledChars : undefined,
         lostChars:
-          draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather'
-            ? draft.lostChars
-            : undefined,
+          c2Status === 'cancelled_weather' ? draft.lostChars : undefined,
       };
 
       // 1. Mettre à jour validations[ds]
@@ -943,27 +1291,28 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         await saveBookingToFirestore(`${entry.ds}_${entry.slotKey}`, []);
       }
 
-      // 3. Synchroniser l'Observation REX si demandé (ou si déjà présente et clé changée)
-      if (draft.syncObservation || (entry.obs && targetSlotKey !== entry.slotKey)) {
+      // 3. Toujours garder le REX aligné s'il existe déjà (pour éviter toute réapparition de contradiction), ou en créer un si demandé
+      const mustSyncObs = Boolean(entry.obs) || draft.syncObservation;
+      if (mustSyncObs && draft.situation !== 'open_active') {
         const obsStatus: 'realized' | 'cancelled' = isRejected ? 'cancelled' : 'realized';
         const obsCancelReason: CancellationReason | undefined =
-          draft.c1Status === 'excluded'
+          c1Status === 'excluded'
             ? 'other'
-            : draft.c1Status === 'closed_no_bookings'
+            : c1Status === 'closed_no_bookings'
             ? 'no_clients'
-            : draft.c1Status === 'not_published'
+            : c1Status === 'not_published'
             ? 'instructor'
-            : draft.c2Status === 'cancelled_weather'
+            : c2Status === 'cancelled_weather'
             ? mapWeatherTextToCancellationReason(draft.weatherReason)
             : undefined;
         const obsCancelNote =
-          draft.c1Status === 'excluded'
+          c1Status === 'excluded'
             ? 'Hors offre / Non pertinent (C1)'
-            : draft.c1Status === 'not_published'
+            : c1Status === 'not_published'
             ? cleanNonPubReason
-            : draft.c1Status === 'closed_no_bookings'
+            : c1Status === 'closed_no_bookings'
             ? "Pas d'inscrits (Vie 2)"
-            : draft.c2Status === 'cancelled_weather'
+            : c2Status === 'cancelled_weather'
             ? draft.weatherReason.trim()
             : undefined;
 
@@ -987,15 +1336,15 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           charsCount: obsStatus === 'realized' ? totalChars : undefined,
           participantsCount: obsStatus === 'realized' ? people : undefined,
           bookedParticipantsCount:
-            obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
+            obsStatus === 'cancelled' && c2Status === 'cancelled_weather'
               ? people || entry.obs?.bookedParticipantsCount
               : undefined,
           rescheduledCount:
-            obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
+            obsStatus === 'cancelled' && c2Status === 'cancelled_weather'
               ? draft.rescheduledChars
               : undefined,
           lostCount:
-            obsStatus === 'cancelled' && draft.c2Status === 'cancelled_weather'
+            obsStatus === 'cancelled' && c2Status === 'cancelled_weather'
               ? draft.lostChars
               : undefined,
           author: draft.instructor.trim() || entry.obs?.author || author,
@@ -1003,6 +1352,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           updatedAt: Date.now(),
         };
         await saveObservationToFirestore(updatedObs);
+      } else if (draft.situation === 'open_active' && entry.obs?.id) {
+        // Si repassé en "À venir / En cours" (futur), supprimer l'ancien REX pour éviter une contradiction Planning Actif vs REX
+        await deleteObservationFromFirestore(entry.obs.id);
       }
 
       // 4. Signer la vérification dans l'audit Cloud
@@ -1015,7 +1367,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         verified: true,
         verifiedBy: author,
         verifiedAt: Date.now(),
-        note: draft.auditNote.trim() || 'Mis en cohérence avec le modèle Cycle 1 / Cycle 2',
+        note: draft.auditNote.trim() || `Mis en cohérence · ${SITUATION_META[draft.situation].short}`,
       });
 
       setEditingEntryKey(null);
@@ -1046,6 +1398,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       }
       if (entry.obs?.id) {
         await deleteObservationFromFirestore(entry.obs.id);
+      }
+      if (entry.bookings.length > 0) {
+        await saveBookingToFirestore(`${entry.ds}_${entry.slotKey}`, []);
       }
       if (entry.signOff) {
         await saveDataAuditSignOffToFirestore(entry.entryKey, null);
@@ -1088,7 +1443,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         e.summaryStatusLabel,
         valChars,
         e.obs ? e.obs.status : 'Aucun REX',
-        e.obs?.charsCount ?? '',
+        e.obs ? getObservationChars(e.obs) : '',
         e.bookingSummary.totalChars,
         e.issues.map(i => i.label).join(' | ') || 'OK',
         e.isVerified ? `${e.signOff?.verifiedBy || 'Jérôme'} (${new Date(e.signOff?.verifiedAt || 0).toLocaleDateString('fr-FR')})` : 'Non validé',
@@ -1110,10 +1465,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
 
   const severityBadge = (severity: AuditSeverity) => {
     if (severity === 'conflict') {
-      return { label: '🔴 Incohérence / Isolée', bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5' };
+      return { label: '🔴 Contradiction à trancher', bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5' };
     }
     if (severity === 'warning') {
-      return { label: '🟠 Héritée / À préciser', bg: '#fef3c7', fg: '#92400e', bd: '#fcd34d' };
+      return { label: '🟠 À préciser / En attente', bg: '#fef3c7', fg: '#92400e', bd: '#fcd34d' };
     }
     return { label: '🟢 Cohérente', bg: '#dcfce7', fg: '#166534', bd: '#86efac' };
   };
@@ -1183,10 +1538,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
               </span>
             </div>
             <h3 style={{ margin: '6px 0 2px', fontSize: '1.12rem', fontWeight: 900 }}>
-              🩺 Vérification & Mise en Cohérence des Données Existantes (Cycle 1 / Cycle 2 / REX)
+              🩺 Mise en Conformité &amp; Cohérence des Données Existantes (Cycle 1 / Cycle 2 / REX)
             </h3>
             <div style={{ fontSize: '0.74rem', color: '#cbd5e1' }}>
-              Passe en revue toutes les données déjà enregistrées : valide en 1 clic si c’est cohérent, ou corrige directement sur place pour aligner Cycle 1, Cycle 2 et REX.
+              Passe en revue l’historique déjà enregistré : valide en 1 clic ou corrige sur place pour aligner Cycle 1, Cycle 2 et REX (en complément du Bilan Express ◀ Jour préc. pour rattraper les journées sans REX).
             </div>
           </div>
 
@@ -1291,27 +1646,94 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           </div>
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-            {settings && EX.length > 0 && (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={() => setShowAddDayClosure(v => !v)}
+                onClick={() => setShowPedagogyGuide(v => !v)}
                 style={{
                   padding: '6px 11px',
                   borderRadius: '6px',
-                  border: '1.5px solid #d97706',
-                  background: showAddDayClosure ? '#d97706' : '#fffbeb',
-                  color: showAddDayClosure ? '#ffffff' : '#92400e',
+                  border: '1.5px solid #0284c7',
+                  background: showPedagogyGuide ? '#0284c7' : '#f0f9ff',
+                  color: showPedagogyGuide ? '#ffffff' : '#0369a1',
                   fontSize: '0.72rem',
                   fontWeight: 800,
                   cursor: 'pointer',
                 }}
               >
-                {showAddDayClosure
-                  ? 'Fermer saisie journée complète'
-                  : '➕ Déclarer / fermer une journée entière (ex. Hier / Aujourd’hui)'}
+                {showPedagogyGuide
+                  ? '🧭 Masquer le guide (Pourquoi & comment vérifier)'
+                  : '🧭 Guide Jérôme : Pourquoi & comment vérifier ?'}
               </button>
-            )}
+
+              {settings && EX.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddDayClosure(v => !v)}
+                  style={{
+                    padding: '6px 11px',
+                    borderRadius: '6px',
+                    border: '1.5px solid #d97706',
+                    background: showAddDayClosure ? '#d97706' : '#fffbeb',
+                    color: showAddDayClosure ? '#ffffff' : '#92400e',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showAddDayClosure
+                    ? 'Fermer saisie journée complète'
+                    : '➕ Déclarer / fermer une journée entière (ex. Hier / Aujourd’hui)'}
+                </button>
+              )}
+            </div>
           </div>
+
+          {showPedagogyGuide && (
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1.5px solid #bae6fd',
+                borderRadius: '10px',
+                padding: '10px 12px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(235px, 1fr))',
+                gap: '10px',
+                fontSize: '0.72rem',
+                color: '#1e293b',
+                lineHeight: 1.42,
+              }}
+            >
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontWeight: 900, color: '#0369a1', marginBottom: '4px' }}>
+                  1. Pourquoi on vérifie la cohérence ?
+                </div>
+                <div>
+                  Pour partir sur une base <strong>100 % propre</strong> : éviter qu’un ancien créneau « Fermé » passe pour un manque de clients, fiabiliser vos <strong>stats Vie 1 / Vie 2</strong>, sécuriser l’export vers <strong>anny</strong> et caler juste le seuil de Lestrevet.
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontWeight: 900, color: '#6d28d9', marginBottom: '4px' }}>
+                  2. Ce qui a changé (Avant → Aujourd’hui)
+                </div>
+                <div>
+                  Avant, un créneau était juste <em>Validé</em> ou <em>Fermé</em>. Aujourd’hui on distingue : <strong>Cycle 1</strong> (mis en vente sur anny / fermeture école / <em>Hors offre</em>), <strong>Cycle 2</strong> (terrain, décalage, 2e moniteur) et le <strong>REX</strong> (bilan final, simplifié par le <strong>Bilan Express</strong>).
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                <div style={{ fontWeight: 900, color: '#b45309', marginBottom: '4px' }}>
+                  3. Ce qu’il faut vérifier &amp; valider
+                </div>
+                <div>
+                  <strong>🔴 Rouge :</strong> contradiction Planning vs REX ➔ clique <em>✏️ Corriger / Aligner</em> pour trancher.<br />
+                  <strong>🟠 Orange :</strong> motif « Fermé » vague, horaire marée recalculé ou séance passée en attente ➔ précise, valide si c’était réel, ou passe par <em>Bilan Express ◀ Jour préc.</em>.<br />
+                  <strong>🟢 Vert :</strong> déjà juste ➔ clique <em>✅ Valider</em> pour signer.
+                </div>
+              </div>
+            </div>
+          )}
 
           {showAddDayClosure && (
             <div
@@ -1515,7 +1937,19 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                 const dayVerifiedCount = allOfDay.filter(e => e.isVerified).length;
                 const dayConflictCount = allOfDay.filter(e => e.severity === 'conflict').length;
                 const dayWarningCount = allOfDay.filter(e => e.severity === 'warning').length;
+                const daySignableUnverifiedCount = allOfDay.filter(
+                  e => !e.isVerified && e.severity !== 'conflict'
+                ).length;
                 const allDayVerified = allOfDay.length > 0 && dayVerifiedCount === allOfDay.length;
+                const isPastDay = ds < tdy();
+                const dayTotalBookedChars = allOfDay.reduce(
+                  (sum, e) => sum + e.bookingSummary.totalChars,
+                  0
+                );
+                const bulkNeedsReason = bulkDraft?.situation === 'not_published';
+                const bulkNeedsWeather = bulkDraft?.situation === 'cancelled_weather';
+                const bulkShowInstructors =
+                  bulkDraft?.situation === 'open_active' || bulkDraft?.situation === 'realized';
 
                 return (
                   <div
@@ -1602,7 +2036,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                             : `⚡ Valider / uniformiser la journée (${allOfDay.length})`}
                         </button>
 
-                        {!allDayVerified && (
+                        {daySignableUnverifiedCount > 0 && (
                           <button
                             type="button"
                             disabled={isBatchSaving}
@@ -1618,7 +2052,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               cursor: 'pointer',
                             }}
                           >
-                            ✅ Valider le jour
+                            {dayConflictCount > 0
+                              ? `✅ Valider les ${daySignableUnverifiedCount} sans conflit`
+                              : '✅ Valider le jour'}
                           </button>
                         )}
 
@@ -1662,140 +2098,133 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                           ⚡ Traitement groupé pour toute la journée du {formatDateFr(ds)} ({allOfDay.length} créneaux) :
                         </div>
                         <div style={{ fontSize: '0.72rem', color: '#78350f' }}>
-                          Pratique si tous les créneaux du jour partagent la même situation (ex. journée entièrement fermée pour impératif personnel, déplacement, vacances ou météo). L’horaire propre à chaque créneau est automatiquement conservé.
+                          Pratique si tous les créneaux du jour partagent la même réalité (ex. journée entièrement fermée, météo toute la journée, hors offre). L’horaire propre à chaque créneau est conservé automatiquement.
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
                           <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                            Décision Cycle 1 pour toute la journée :
+                            Réalité unique pour toute la journée :
                             <select
-                              value={bulkDraft.c1Status}
+                              value={bulkDraft.situation}
                               onChange={e =>
                                 setBulkDraft({
                                   ...bulkDraft,
-                                  c1Status: e.target.value as DayBulkDraftState['c1Status'],
+                                  situation: e.target.value as BulkDaySituation,
                                 })
                               }
                               style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
                             >
-                              <option value="not_published">🚫 Journée fermée · À ne pas publier (motif perso/école)</option>
-                              <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
-                              <option value="closed_no_bookings">⛔ Annulée · Pas d’inscrits (Vie 2)</option>
-                              <option value="published">✅ À publier (Cycle 1 ouvert)</option>
+                              <option value="not_published" disabled={dayTotalBookedChars > 0}>
+                                🚫 École fermée · Non publié (motif perso/école){dayTotalBookedChars > 0 ? ' [inscrits présents]' : ''}
+                              </option>
+                              <option value="excluded" disabled={dayTotalBookedChars > 0}>
+                                ➖ Hors offre (exclu des stats){dayTotalBookedChars > 0 ? ' [inscrits présents]' : ''}
+                              </option>
+                              <option value="closed_no_bookings" disabled={dayTotalBookedChars > 0}>
+                                👥 Annulée · Pas d’inscrits{dayTotalBookedChars > 0 ? ' [inscrits présents]' : ''}
+                              </option>
+                              <option value="cancelled_weather">⛔ Annulée · Météo / État plage</option>
+                              <option value="realized">🏁 Séances effectuées (conserve les chars de chaque créneau)</option>
+                              <option value="open_active" disabled={isPastDay}>
+                                📅 À venir / Inscriptions en cours{isPastDay ? ' [interdit : date passée]' : ''}
+                              </option>
                             </select>
                           </label>
 
-                          {bulkDraft.c1Status === 'published' && (
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                              Statut Cycle 2 pour toute la journée :
-                              <select
-                                value={bulkDraft.c2Status}
-                                onChange={e =>
-                                  setBulkDraft({
-                                    ...bulkDraft,
-                                    c2Status: e.target.value as DayBulkDraftState['c2Status'],
-                                  })
-                                }
-                                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
-                              >
-                                <option value="awaiting_booking">📅 Cycle 1 publié (en attente d’inscrits)</option>
-                                <option value="confirmed">⚡ Cycle 2 actif (inscrits confirmés)</option>
-                                <option value="realized">🏁 Séance effectuée (Réalisé)</option>
-                                <option value="cancelled_weather">⛔ Annulé Météo / Plage (Vie 2)</option>
-                              </select>
-                            </label>
-                          )}
+                          {bulkShowInstructors && (
+                            <>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
+                                Moniteur principal :
+                                <input
+                                  type="text"
+                                  value={bulkDraft.instructor}
+                                  onChange={e => setBulkDraft({ ...bulkDraft, instructor: e.target.value })}
+                                  style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                />
+                              </label>
 
-                          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                            Moniteur principal :
-                            <input
-                              type="text"
-                              value={bulkDraft.instructor}
-                              onChange={e => setBulkDraft({ ...bulkDraft, instructor: e.target.value })}
-                              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
-                            />
-                          </label>
-
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                            <span>2e moniteur (optionnel) :</span>
-                            <input
-                              type="text"
-                              value={bulkDraft.secondaryInstructor}
-                              onChange={e =>
-                                setBulkDraft({
-                                  ...bulkDraft,
-                                  secondaryInstructor: e.target.value,
-                                  secondaryQualification: e.target.value.trim()
-                                    ? bulkDraft.secondaryQualification || 'CQP'
-                                    : undefined,
-                                  secondaryMaxChars: e.target.value.trim()
-                                    ? bulkDraft.secondaryMaxChars ?? 8
-                                    : undefined,
-                                })
-                              }
-                              placeholder="Aucun (12 chars max)"
-                              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
-                            />
-                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                              {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
-                                const isSel = bulkDraft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
-                                return (
-                                  <button
-                                    key={p.name}
-                                    type="button"
-                                    onClick={() =>
-                                      setBulkDraft({
-                                        ...bulkDraft,
-                                        secondaryInstructor: p.name,
-                                        secondaryQualification: p.qualification,
-                                        secondaryMaxChars: p.addChars,
-                                      })
-                                    }
-                                    style={{
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
-                                      background: isSel ? '#f5f3ff' : '#fff',
-                                      color: isSel ? '#6d28d9' : '#475569',
-                                      fontSize: '0.66rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
-                                  </button>
-                                );
-                              })}
-                              {bulkDraft.secondaryInstructor.trim() && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
+                                <span>2e moniteur (optionnel) :</span>
+                                <input
+                                  type="text"
+                                  value={bulkDraft.secondaryInstructor}
+                                  onChange={e =>
                                     setBulkDraft({
                                       ...bulkDraft,
-                                      secondaryInstructor: '',
-                                      secondaryQualification: undefined,
-                                      secondaryMaxChars: undefined,
+                                      secondaryInstructor: e.target.value,
+                                      secondaryQualification: e.target.value.trim()
+                                        ? bulkDraft.secondaryQualification || 'CQP'
+                                        : undefined,
+                                      secondaryMaxChars: e.target.value.trim()
+                                        ? bulkDraft.secondaryMaxChars ?? 8
+                                        : undefined,
                                     })
                                   }
-                                  style={{
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    border: '1px solid #fca5a5',
-                                    background: '#fff',
-                                    color: '#dc2626',
-                                    fontSize: '0.66rem',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  ✕ Retirer
-                                </button>
-                              )}
-                            </div>
-                          </div>
+                                  placeholder="Aucun (12 chars max)"
+                                  style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                />
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                  {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
+                                    const isSel = bulkDraft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
+                                    return (
+                                      <button
+                                        key={p.name}
+                                        type="button"
+                                        onClick={() =>
+                                          setBulkDraft({
+                                            ...bulkDraft,
+                                            secondaryInstructor: p.name,
+                                            secondaryQualification: p.qualification,
+                                            secondaryMaxChars: p.addChars,
+                                          })
+                                        }
+                                        style={{
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
+                                          background: isSel ? '#f5f3ff' : '#fff',
+                                          color: isSel ? '#6d28d9' : '#475569',
+                                          fontSize: '0.66rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
+                                      </button>
+                                    );
+                                  })}
+                                  {bulkDraft.secondaryInstructor.trim() && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setBulkDraft({
+                                          ...bulkDraft,
+                                          secondaryInstructor: '',
+                                          secondaryQualification: undefined,
+                                          secondaryMaxChars: undefined,
+                                        })
+                                      }
+                                      style={{
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        border: '1px solid #fca5a5',
+                                        background: '#fff',
+                                        color: '#dc2626',
+                                        fontSize: '0.66rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      ✕ Retirer
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
 
-                        {bulkDraft.c1Status === 'not_published' && (
+                        {bulkNeedsReason && (
                           <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
                             <div style={{ fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                               Motif de fermeture appliqué à toute la journée (pour les Statistiques) :
@@ -1831,10 +2260,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                           </div>
                         )}
 
-                        {bulkDraft.c1Status === 'published' && bulkDraft.c2Status === 'cancelled_weather' && (
+                        {bulkNeedsWeather && (
                           <div style={{ background: '#fef2f2', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fca5a5' }}>
                             <div style={{ fontWeight: 800, color: '#991b1b', marginBottom: '5px' }}>
-                              Cause météo appliquée à toute la journée :
+                              Cause météo ou plage appliquée à toute la journée :
                             </div>
                             <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '6px' }}>
                               {C2_WEATHER_REASONS.map(r => (
@@ -1867,23 +2296,24 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                         )}
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#0369a1' }}>
-                            <span>🔄 Synchronisation Observations REX (Statistiques) :</span>
-                            <select
-                              value={bulkDraft.syncObservationsMode}
-                              onChange={e =>
-                                setBulkDraft({
-                                  ...bulkDraft,
-                                  syncObservationsMode: e.target.value as DayBulkDraftState['syncObservationsMode'],
-                                })
-                              }
-                              style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid #bae6fd', background: '#fff', fontWeight: 700 }}
-                            >
-                              <option value="existing_only">Mettre à jour les REX déjà existants ce jour</option>
-                              <option value="all_slots">Créer / aligner un REX sur chacun des {allOfDay.length} créneaux</option>
-                              <option value="none">Ne modifier que Cycle 1 / Cycle 2 (validations)</option>
-                            </select>
-                          </label>
+                          {bulkDraft.situation !== 'open_active' && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#0369a1', flexWrap: 'wrap' }}>
+                              <span>🔄 Bilan final REX :</span>
+                              <select
+                                value={bulkDraft.syncObservationsMode}
+                                onChange={e =>
+                                  setBulkDraft({
+                                    ...bulkDraft,
+                                    syncObservationsMode: e.target.value as DayBulkDraftState['syncObservationsMode'],
+                                  })
+                                }
+                                style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid #bae6fd', background: '#fff', fontWeight: 700 }}
+                              >
+                                <option value="existing_only">Mettre à jour les REX déjà existants (garantit 0 contradiction)</option>
+                                <option value="all_slots">Créer / aligner un REX sur chacun des {allOfDay.length} créneaux</option>
+                              </select>
+                            </label>
+                          )}
 
                           {allOfDay.some(e => e.computedMatch && !e.computedMatch.isExactKeyMatch) && (
                             <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 800, color: '#b45309', cursor: 'pointer' }}>
@@ -2037,23 +2467,46 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          disabled={isRowBusy}
-                          onClick={() => handleToggleSignOff(entry)}
-                          style={{
-                            padding: '5px 10px',
-                            borderRadius: '6px',
-                            border: entry.isVerified ? '1px solid #cbd5e1' : 'none',
-                            background: entry.isVerified ? '#f8fafc' : '#16a34a',
-                            color: entry.isVerified ? '#475569' : '#ffffff',
-                            fontSize: '0.72rem',
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {entry.isVerified ? '↩️ Retirer visa' : '✅ Valider telle quelle'}
-                        </button>
+                        {entry.severity !== 'conflict' ? (
+                          <button
+                            type="button"
+                            disabled={isRowBusy}
+                            onClick={() => handleToggleSignOff(entry)}
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '6px',
+                              border: entry.isVerified ? '1px solid #cbd5e1' : 'none',
+                              background: entry.isVerified ? '#f8fafc' : '#16a34a',
+                              color: entry.isVerified ? '#475569' : '#ffffff',
+                              fontSize: '0.72rem',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {entry.isVerified ? '↩️ Retirer visa' : '✅ Valider'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isRowBusy}
+                            onClick={() =>
+                              isEditing ? (setEditingEntryKey(null), setDraft(null)) : openEditor(entry)
+                            }
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              background: '#dc2626',
+                              color: '#ffffff',
+                              fontSize: '0.72rem',
+                              fontWeight: 900,
+                              cursor: 'pointer',
+                            }}
+                            title="Une contradiction rouge doit être tranchée avant de pouvoir valider ce créneau"
+                          >
+                            ⚖️ Trancher la contradiction
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -2072,7 +2525,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                             cursor: 'pointer',
                           }}
                         >
-                          {isEditing ? 'Fermer édition' : '✏️ Modifier / Mettre en cohérence'}
+                          {isEditing ? 'Fermer édition' : '✏️ Corriger / Aligner'}
                         </button>
                       </div>
                     </div>
@@ -2086,7 +2539,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                         marginBottom: entry.issues.length > 0 || entry.signOff?.note ? '8px' : 0,
                       }}
                     >
-                      {/* Colonne 1 : Validations Cycle 1/2 */}
+                      {/* Colonne 1 : Planning (Avant & Pendant séance) */}
                       <div
                         style={{
                           background: entry.valItem ? '#f8fafc' : '#fef2f2',
@@ -2097,7 +2550,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                         }}
                       >
                         <div style={{ fontWeight: 900, color: '#0f172a', marginBottom: '3px' }}>
-                          📋 Cycle 1 / Cycle 2 (validations)
+                          📋 Planning (Avant &amp; Pendant séance)
                         </div>
                         {entry.valItem ? (
                           <div style={{ color: '#334155', lineHeight: 1.45 }}>
@@ -2115,18 +2568,18 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                             </div>
                             {entry.valItem.rejectReason && (
                               <div style={{ color: '#991b1b' }}>
-                                <strong>Motif brut :</strong> {entry.valItem.rejectReason}
+                                <strong>Motif enregistré :</strong> {entry.valItem.rejectReason}
                               </div>
                             )}
                           </div>
                         ) : (
                           <div style={{ color: '#991b1b', fontWeight: 700 }}>
-                            ❌ Aucune fiche Cycle 1 / Cycle 2 trouvée pour ce créneau.
+                            ❌ Aucune fiche planning trouvée pour ce créneau.
                           </div>
                         )}
                       </div>
 
-                      {/* Colonne 2 : Observation REX */}
+                      {/* Colonne 2 : Bilan final (REX après séance) */}
                       <div
                         style={{
                           background: entry.obs ? '#f0f9ff' : '#f8fafc',
@@ -2137,13 +2590,13 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                         }}
                       >
                         <div style={{ fontWeight: 900, color: '#0369a1', marginBottom: '3px' }}>
-                          📝 Observation REX terrain
+                          📝 Bilan final (REX après séance)
                         </div>
                         {entry.obs ? (
                           <div style={{ color: '#334155', lineHeight: 1.45 }}>
                             <div>
                               <strong>Statut REX :</strong>{' '}
-                              {entry.obs.status === 'realized' ? '🏁 Réalisée' : `⛔ Annulée (${entry.obs.cancellationReason || 'non précisé'})`}
+                              {entry.obs.status === 'realized' ? '🏁 Réalisée' : `⛔ Annulée (${formatObsReasonFr(entry.obs.cancellationReason)})`}
                             </div>
                             {entry.obs.cancellationNote && (
                               <div>
@@ -2151,7 +2604,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               </div>
                             )}
                             <div>
-                              <strong>Matériel REX :</strong> {entry.obs.charsCount ?? ((entry.obs.monoCount || 0) + (entry.obs.biCount || 0))} char(s) · {entry.obs.participantsCount ?? 0} pilote(s)
+                              <strong>Matériel REX :</strong> {getObservationChars(entry.obs)} char(s) · {entry.obs.participantsCount ?? 0} pilote(s)
                             </div>
                             {(entry.obs.waterDeltaCm != null || entry.obs.notes) && (
                               <div style={{ color: '#475569' }}>
@@ -2235,489 +2688,741 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                       </div>
                     )}
 
-                    {/* ÉDITEUR INLINE DE MISE EN COHÉRENCE */}
-                    {isEditing && draft && (
-                      <div
-                        style={{
-                          marginTop: '10px',
-                          padding: '12px',
-                          borderRadius: '10px',
-                          background: '#f0f9ff',
-                          border: '1.5px solid #0284c7',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '10px',
-                          fontSize: '0.74rem',
-                        }}
-                      >
-                        <div style={{ fontWeight: 900, color: '#0369a1', fontSize: '0.82rem' }}>
-                          ✏️ Mettre en cohérence ce créneau dans le modèle Cycle 1 / Cycle 2
-                        </div>
+                    {/* ÉDITEUR INLINE DE MISE EN COHÉRENCE UNIFIÉ */}
+                    {isEditing && draft && (() => {
+                      const coherence = evaluateDraftCoherence(draft, entry);
+                      const isPastEntry = entry.ds < tdy();
+                      const hasClientBookings = entry.bookingSummary.totalChars > 0;
+                      const showCharsAndStaff =
+                        draft.situation === 'realized' ||
+                        draft.situation === 'shifted' ||
+                        draft.situation === 'open_active';
+                      const obsTotal = getObservationChars(entry.obs);
+                      const hasDistinctSources =
+                        showCharsAndStaff &&
+                        ((valChars.totalChars > 0 && valChars.totalChars !== draft.monoCount + draft.biCount) ||
+                          (obsTotal > 0 && obsTotal !== draft.monoCount + draft.biCount) ||
+                          (entry.bookingSummary.totalChars > 0 &&
+                            entry.bookingSummary.totalChars !== draft.monoCount + draft.biCount));
 
-                        {/* Ligne 1 : Décision Cycle 1 & Cycle 2 */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-                          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                            Étape 1 · Décision Cycle 1 :
-                            <select
-                              value={draft.c1Status}
-                              onChange={e =>
-                                setDraft({
-                                  ...draft,
-                                  c1Status: e.target.value as EditDraftState['c1Status'],
-                                })
-                              }
-                              style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
-                            >
-                              <option value="published">✅ À publier (Cycle 1 ouvert)</option>
-                              <option value="excluded">➖ Hors offre / Non pertinent (exclu des stats)</option>
-                              <option value="not_published">🚫 À ne pas publier (motif perso/école)</option>
-                              <option value="closed_no_bookings">⛔ Annulé · Pas d’inscrits (Vie 2)</option>
-                            </select>
-                          </label>
+                      const situationOrder: ReconciliationSituation[] = [
+                        'realized',
+                        'cancelled_weather',
+                        'shifted',
+                        'closed_no_bookings',
+                        'not_published',
+                        'excluded',
+                        'open_active',
+                      ];
 
-                          {draft.c1Status === 'published' && (
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontWeight: 800, color: '#0f172a' }}>
-                              Étape 2 · Statut Cycle 2 :
-                              <select
-                                value={draft.c2Status}
-                                onChange={e =>
-                                  setDraft({
-                                    ...draft,
-                                    c2Status: e.target.value as EditDraftState['c2Status'],
-                                  })
-                                }
-                                style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 700, background: '#fff' }}
-                              >
-                                <option value="awaiting_booking">📅 Cycle 1 publié (en attente d’inscrits)</option>
-                                <option value="confirmed">⚡ Cycle 2 actif (inscrits confirmés)</option>
-                                <option value="shifted">🕒 Décalé (horaire C2 ajusté)</option>
-                                <option value="realized">🏁 Séance effectuée (Réalisé)</option>
-                                <option value="cancelled_weather">⛔ Annulé Météo / Plage (Vie 2)</option>
-                              </select>
-                            </label>
-                          )}
-                        </div>
-
-                        {/* Motif si À ne pas publier (Cycle 1) */}
-                        {draft.c1Status === 'not_published' && (
-                          <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                            <div style={{ fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                              Motif de non-publication (Cycle 1) :
+                      return (
+                        <div
+                          style={{
+                            marginTop: '10px',
+                            padding: '12px',
+                            borderRadius: '10px',
+                            background: '#f0f9ff',
+                            border: '1.5px solid #0284c7',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                            fontSize: '0.74rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                            <div style={{ fontWeight: 900, color: '#0369a1', fontSize: '0.84rem' }}>
+                              ✏️ Mettre en cohérence ce créneau (1 seule vérité Planning + REX)
                             </div>
-                            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                              {allNonPublishChoices.map(reason => (
-                                <button
-                                  key={reason}
-                                  type="button"
-                                  onClick={() => setDraft({ ...draft, nonPublishReason: reason })}
-                                  style={{
-                                    padding: '4px 8px',
-                                    borderRadius: '5px',
-                                    border: draft.nonPublishReason === reason ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                                    background: draft.nonPublishReason === reason ? '#e0f2fe' : '#f8fafc',
-                                    color: draft.nonPublishReason === reason ? '#0369a1' : '#334155',
-                                    fontSize: '0.70rem',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {reason}
-                                </button>
-                              ))}
-                            </div>
-                            <input
-                              type="text"
-                              value={draft.nonPublishReason}
-                              onChange={e => setDraft({ ...draft, nonPublishReason: e.target.value })}
-                              placeholder="Préciser le motif (Réunion, Impératif personnel, Vacances...)"
-                              style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.74rem' }}
-                            />
+                            <span style={{ fontSize: '0.68rem', color: '#475569', fontWeight: 700 }}>
+                              Les options impossibles (ex. « En cours » sur date passée ou « Sans inscrits » avec clients) sont verrouillées.
+                            </span>
                           </div>
-                        )}
 
-                        {/* Cause météo si Annulé Vie 2 */}
-                        {draft.c1Status === 'published' && draft.c2Status === 'cancelled_weather' && (
-                          <div style={{ background: '#fef2f2', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fca5a5', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <div style={{ fontWeight: 800, color: '#991b1b' }}>
-                              Motif d’annulation Météo / Terrain (Vie 2) :
+                          {/* Étape 1 : Choix unique de la réalité du créneau */}
+                          <div>
+                            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>
+                              1. Que s’est-il réellement passé sur ce créneau ?
                             </div>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {C2_WEATHER_REASONS.map(r => (
-                                <button
-                                  key={r}
-                                  type="button"
-                                  onClick={() => setDraft({ ...draft, weatherReason: r })}
-                                  style={{
-                                    padding: '4px 8px',
-                                    borderRadius: '5px',
-                                    border: draft.weatherReason === r ? '1.5px solid #dc2626' : '1px solid #fca5a5',
-                                    background: draft.weatherReason === r ? '#fee2e2' : '#fff',
-                                    color: '#991b1b',
-                                    fontSize: '0.70rem',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {r}
-                                </button>
-                              ))}
-                            </div>
-                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                              <input
-                                type="text"
-                                value={draft.weatherReason}
-                                onChange={e => setDraft({ ...draft, weatherReason: e.target.value })}
-                                placeholder="Précision météo..."
-                                style={{ flex: 1, minWidth: '180px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #fca5a5', fontSize: '0.74rem' }}
-                              />
-                              <label style={{ fontWeight: 700, color: '#166534' }}>
-                                Replacés :
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={draft.rescheduledChars}
-                                  onChange={e => setDraft({ ...draft, rescheduledChars: Math.max(0, Number(e.target.value) || 0) })}
-                                  style={{ width: '50px', marginLeft: '4px', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                />
-                              </label>
-                              <label style={{ fontWeight: 700, color: '#991b1b' }}>
-                                Perdus :
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={draft.lostChars}
-                                  onChange={e => setDraft({ ...draft, lostChars: Math.max(0, Number(e.target.value) || 0) })}
-                                  style={{ width: '50px', marginLeft: '4px', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        )}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))', gap: '6px' }}>
+                              {situationOrder.map(sit => {
+                                const meta = SITUATION_META[sit];
+                                const isSelected = draft.situation === sit;
+                                const isDisabled =
+                                  (sit === 'open_active' && isPastEntry) ||
+                                  (hasClientBookings &&
+                                    (sit === 'closed_no_bookings' ||
+                                      sit === 'not_published' ||
+                                      sit === 'excluded'));
+                                const disabledReason =
+                                  sit === 'open_active' && isPastEntry
+                                    ? 'Date déjà passée'
+                                    : hasClientBookings &&
+                                      (sit === 'closed_no_bookings' ||
+                                        sit === 'not_published' ||
+                                        sit === 'excluded')
+                                    ? `${entry.bookingSummary.totalChars} char(s) client(s) présent(s)`
+                                    : undefined;
 
-                        {/* Horaires & Matériel & Moniteurs */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-                          <label style={{ fontWeight: 700 }}>
-                            Début C1 :
-                            <input
-                              type="text"
-                              value={draft.publishedStart}
-                              onChange={e => setDraft({ ...draft, publishedStart: e.target.value })}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          <label style={{ fontWeight: 700 }}>
-                            Fin C1 :
-                            <input
-                              type="text"
-                              value={draft.publishedEnd}
-                              onChange={e => setDraft({ ...draft, publishedEnd: e.target.value })}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          {draft.c1Status === 'published' && draft.c2Status === 'shifted' && (
-                            <>
-                              <label style={{ fontWeight: 700 }}>
-                                Début C2 réel :
-                                <input
-                                  type="text"
-                                  value={draft.actualStart}
-                                  onChange={e => setDraft({ ...draft, actualStart: e.target.value })}
-                                  style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #f59e0b' }}
-                                />
-                              </label>
-                              <label style={{ fontWeight: 700 }}>
-                                Fin C2 réelle :
-                                <input
-                                  type="text"
-                                  value={draft.actualEnd}
-                                  onChange={e => setDraft({ ...draft, actualEnd: e.target.value })}
-                                  style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #f59e0b' }}
-                                />
-                              </label>
-                            </>
-                          )}
-                          <label style={{ fontWeight: 700 }}>
-                            Monoplaces :
-                            <input
-                              type="number"
-                              min={0}
-                              max={24}
-                              value={draft.monoCount}
-                              onChange={e => {
-                                const mono = Math.max(0, Number(e.target.value) || 0);
-                                setDraft({
-                                  ...draft,
-                                  monoCount: mono,
-                                  pilotsCount: mono + draft.biCount * 2,
-                                });
-                              }}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          <label style={{ fontWeight: 700 }}>
-                            Biplaces :
-                            <input
-                              type="number"
-                              min={0}
-                              max={24}
-                              value={draft.biCount}
-                              onChange={e => {
-                                const bi = Math.max(0, Number(e.target.value) || 0);
-                                setDraft({
-                                  ...draft,
-                                  biCount: bi,
-                                  pilotsCount: draft.monoCount + bi * 2,
-                                });
-                              }}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          <label style={{ fontWeight: 700 }}>
-                            Pilotes / pers. :
-                            <input
-                              type="number"
-                              min={0}
-                              max={48}
-                              value={draft.pilotsCount}
-                              onChange={e => setDraft({ ...draft, pilotsCount: Math.max(0, Number(e.target.value) || 0) })}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          <label style={{ fontWeight: 700 }}>
-                            Moniteur 1 :
-                            <input
-                              type="text"
-                              value={draft.instructor}
-                              onChange={e => setDraft({ ...draft, instructor: e.target.value })}
-                              style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                            />
-                          </label>
-                          <div style={{ fontWeight: 700 }}>
-                            <label style={{ display: 'block' }}>
-                              2e moniteur :
-                              <input
-                                type="text"
-                                value={draft.secondaryInstructor}
-                                onChange={e => {
-                                  const valName = e.target.value;
-                                  setDraft({
-                                    ...draft,
-                                    secondaryInstructor: valName,
-                                    secondaryQualification: valName.trim()
-                                      ? valName.toLowerCase().includes('youenn')
-                                        ? 'CQP'
-                                        : draft.secondaryQualification || 'DE_BPJEPS'
-                                      : undefined,
-                                    secondaryMaxChars: valName.trim()
-                                      ? valName.toLowerCase().includes('youenn')
-                                        ? 8
-                                        : draft.secondaryMaxChars ?? MAX_CHARS_PER_INSTRUCTOR
-                                      : undefined,
-                                  });
-                                }}
-                                placeholder="Optionnel (Youenn, Katleen...)"
-                                style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1' }}
-                              />
-                            </label>
-                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
-                              {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
-                                const isSel = draft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
                                 return (
                                   <button
-                                    key={p.name}
+                                    key={sit}
                                     type="button"
-                                    onClick={() =>
+                                    disabled={isDisabled}
+                                    title={disabledReason}
+                                    onClick={() => {
+                                      let nextMono = draft.monoCount;
+                                      let nextBi = draft.biCount;
+                                      let nextPilots = draft.pilotsCount;
+                                      if (sit === 'realized' && nextMono + nextBi === 0) {
+                                        if (obsTotal > 0 && entry.obs) {
+                                          nextMono = entry.obs.monoCount ?? obsTotal;
+                                          nextBi = entry.obs.biCount ?? 0;
+                                          nextPilots = entry.obs.participantsCount ?? nextMono + nextBi * 2;
+                                        } else if (entry.bookingSummary.totalChars > 0) {
+                                          nextMono = entry.bookingSummary.mono;
+                                          nextBi = entry.bookingSummary.bi;
+                                          nextPilots = entry.bookingSummary.people;
+                                        }
+                                      }
+                                      const nextNonPub =
+                                        sit === 'not_published' &&
+                                        (!draft.nonPublishReason.trim() ||
+                                          normalizeClosureReason(draft.nonPublishReason).isGenericClosed)
+                                          ? 'Impératif personnel'
+                                          : draft.nonPublishReason;
+                                      const nextWeather =
+                                        sit === 'cancelled_weather' &&
+                                        (!draft.weatherReason.trim() ||
+                                          normalizeClosureReason(draft.weatherReason).isGenericClosed)
+                                          ? C2_WEATHER_REASONS[0]
+                                          : draft.weatherReason;
                                       setDraft({
                                         ...draft,
-                                        secondaryInstructor: p.name,
-                                        secondaryQualification: p.qualification,
-                                        secondaryMaxChars: p.addChars,
-                                      })
-                                    }
+                                        situation: sit,
+                                        monoCount: nextMono,
+                                        biCount: nextBi,
+                                        pilotsCount: nextPilots,
+                                        nonPublishReason: nextNonPub,
+                                        weatherReason: nextWeather,
+                                        syncObservation:
+                                          Boolean(entry.obs) ||
+                                          (sit !== 'open_active' && draft.syncObservation) ||
+                                          sit === 'realized' ||
+                                          sit === 'cancelled_weather',
+                                      });
+                                    }}
                                     style={{
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
-                                      background: isSel ? '#f5f3ff' : '#fff',
-                                      color: isSel ? '#6d28d9' : '#475569',
-                                      fontSize: '0.65rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
+                                      textAlign: 'left',
+                                      padding: '7px 9px',
+                                      borderRadius: '8px',
+                                      border: isSelected ? `2px solid ${meta.border}` : '1px solid #cbd5e1',
+                                      background: isDisabled ? '#f1f5f9' : isSelected ? meta.badgeBg : '#ffffff',
+                                      color: isDisabled ? '#94a3b8' : isSelected ? meta.badgeFg : '#1e293b',
+                                      opacity: isDisabled ? 0.65 : 1,
+                                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '2px',
                                     }}
                                   >
-                                    +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
+                                    <span style={{ fontWeight: 900, fontSize: '0.73rem' }}>{meta.label}</span>
+                                    <span style={{ fontSize: '0.64rem', opacity: 0.85 }}>
+                                      {disabledReason ? `🔒 ${disabledReason}` : meta.group}
+                                    </span>
                                   </button>
                                 );
                               })}
-                              {draft.secondaryInstructor.trim() && (
-                                <>
-                                  <select
-                                    value={draft.secondaryQualification === 'CQP' ? 'CQP' : 'DE_BPJEPS'}
-                                    onChange={e => {
-                                      const q = e.target.value as 'CQP' | 'DE_BPJEPS';
-                                      setDraft({
-                                        ...draft,
-                                        secondaryQualification: q,
-                                        secondaryMaxChars: q === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR,
-                                      });
+                            </div>
+                          </div>
+
+                          {/* Motif si École fermée · Non publié */}
+                          {draft.situation === 'not_published' && (
+                            <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
+                              <div style={{ fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                                Motif de fermeture école (exclu des calculs de taux de remplissage) :
+                              </div>
+                              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                                {allNonPublishChoices.map(reason => (
+                                  <button
+                                    key={reason}
+                                    type="button"
+                                    onClick={() => setDraft({ ...draft, nonPublishReason: reason })}
+                                    style={{
+                                      padding: '4px 8px',
+                                      borderRadius: '5px',
+                                      border: draft.nonPublishReason === reason ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                                      background: draft.nonPublishReason === reason ? '#e0f2fe' : '#f8fafc',
+                                      color: draft.nonPublishReason === reason ? '#0369a1' : '#334155',
+                                      fontSize: '0.70rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
                                     }}
-                                    style={{ padding: '2px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.65rem', fontWeight: 700, background: '#fff' }}
                                   >
-                                    <option value="CQP">CQP (+8 → 20 max)</option>
-                                    <option value="DE_BPJEPS">Diplômé (+12 → 24 max)</option>
-                                  </select>
+                                    {reason}
+                                  </button>
+                                ))}
+                              </div>
+                              <input
+                                type="text"
+                                value={draft.nonPublishReason}
+                                onChange={e => setDraft({ ...draft, nonPublishReason: e.target.value })}
+                                placeholder="Préciser le motif (Réunion, Impératif personnel, Vacances...)"
+                                style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.74rem' }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Cause météo si Annulée Météo / État plage */}
+                          {draft.situation === 'cancelled_weather' && (
+                            <div style={{ background: '#fef2f2', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fca5a5', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <div style={{ fontWeight: 800, color: '#991b1b' }}>
+                                Cause météo ou état de plage :
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {C2_WEATHER_REASONS.map(r => (
+                                  <button
+                                    key={r}
+                                    type="button"
+                                    onClick={() => setDraft({ ...draft, weatherReason: r })}
+                                    style={{
+                                      padding: '4px 8px',
+                                      borderRadius: '5px',
+                                      border: draft.weatherReason === r ? '1.5px solid #dc2626' : '1px solid #fca5a5',
+                                      background: draft.weatherReason === r ? '#fee2e2' : '#fff',
+                                      color: '#991b1b',
+                                      fontSize: '0.70rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {r}
+                                  </button>
+                                ))}
+                              </div>
+                              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  value={draft.weatherReason}
+                                  onChange={e => setDraft({ ...draft, weatherReason: e.target.value })}
+                                  placeholder="Précision météo..."
+                                  style={{ flex: 1, minWidth: '180px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #fca5a5', fontSize: '0.74rem', background: '#fff' }}
+                                />
+                                <label style={{ fontWeight: 700, color: '#166534' }}>
+                                  Replacés :
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={draft.rescheduledChars}
+                                    onChange={e => setDraft({ ...draft, rescheduledChars: Math.max(0, Number(e.target.value) || 0) })}
+                                    style={{ width: '50px', marginLeft: '4px', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                                <label style={{ fontWeight: 700, color: '#991b1b' }}>
+                                  Perdus :
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={draft.lostChars}
+                                    onChange={e => setDraft({ ...draft, lostChars: Math.max(0, Number(e.target.value) || 0) })}
+                                    style={{ width: '50px', marginLeft: '4px', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Bandeau d'alignement rapide des chiffres si les sources divergent */}
+                          {showCharsAndStaff &&
+                            (valChars.totalChars > 0 || obsTotal > 0 || entry.bookingSummary.totalChars > 0) &&
+                            hasDistinctSources && (
+                              <div
+                                style={{
+                                  background: '#ffffff',
+                                  border: '1px solid #bae6fd',
+                                  borderRadius: '8px',
+                                  padding: '7px 10px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  flexWrap: 'wrap',
+                                }}
+                              >
+                                <span style={{ fontWeight: 800, color: '#0369a1' }}>⚡ Reprendre les chiffres de :</span>
+                                {valChars.totalChars > 0 && (
                                   <button
                                     type="button"
                                     onClick={() =>
                                       setDraft({
                                         ...draft,
-                                        secondaryInstructor: '',
-                                        secondaryQualification: undefined,
-                                        secondaryMaxChars: undefined,
+                                        monoCount: valChars.mono,
+                                        biCount: valChars.bi,
+                                        pilotsCount: entry.valItem?.pilotsCount ?? valChars.people,
                                       })
                                     }
-                                    style={{
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      border: '1px solid #fca5a5',
-                                      background: '#fff',
-                                      color: '#dc2626',
-                                      fontSize: '0.65rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                    }}
+                                    style={{ padding: '3px 8px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#f8fafc', fontWeight: 700, cursor: 'pointer' }}
                                   >
-                                    ✕
+                                    📋 Planning ({valChars.totalChars} ch · {valChars.mono}m/{valChars.bi}b)
                                   </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {(() => {
-                          const draftMaxCap = getSlotMaxCapacity({
-                            secondaryInstructor: draft.secondaryInstructor.trim() || undefined,
-                            secondaryQualification: draft.secondaryQualification,
-                            secondaryMaxChars: draft.secondaryMaxChars,
-                          });
-                          const draftTotalChars = draft.monoCount + draft.biCount;
-                          if (draftTotalChars <= draftMaxCap) return null;
-                          return (
-                            <div style={{ color: '#991b1b', fontWeight: 800, fontSize: '0.72rem' }}>
-                              ⚠️ Total {draftTotalChars} chars : dépasse le plafond de {draftMaxCap} chars{' '}
-                              {draft.secondaryInstructor.trim()
-                                ? `(${draft.instructor || 'Jérôme'} + ${draft.secondaryInstructor})`
-                                : '(sans 2e moniteur renseigné)'}.
-                            </div>
-                          );
-                        })()}
-
-                        {/* Options de réalignement & synchronisation REX */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          {entry.computedMatch && !entry.computedMatch.isExactKeyMatch && (
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 800, color: '#b45309', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={draft.realignSlotKey}
-                                onChange={e => setDraft({ ...draft, realignSlotKey: e.target.checked })}
-                              />
-                              <span>
-                                🔗 Réaligner la clé du créneau sur la grille actuelle ({entry.computedMatch.slotKey} · {entry.computedMatch.startTime}–{entry.computedMatch.endTime})
-                              </span>
-                            </label>
-                          )}
-
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#0369a1', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={draft.syncObservation}
-                              onChange={e => setDraft({ ...draft, syncObservation: e.target.checked })}
-                            />
-                            <span>
-                              🔄 {entry.obs ? 'Mettre aussi à jour l’Observation REX existante pour garantir 100 % de cohérence' : 'Créer aussi une fiche Observation REX cohérente avec cette correction'}
-                            </span>
-                          </label>
-                        </div>
-
-                        <label style={{ fontWeight: 700 }}>
-                          Commentaire de validation / traçabilité (optionnel) :
-                          <input
-                            type="text"
-                            value={draft.auditNote}
-                            onChange={e => setDraft({ ...draft, auditNote: e.target.value })}
-                            placeholder="Ex: Motif Fermé reclassé en Réunion · Chars alignés avec le cahier..."
-                            style={{ width: '100%', marginTop: '3px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                          />
-                        </label>
-
-                        {/* Boutons bas du formulaire */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', paddingTop: '4px' }}>
-                          <div>
-                            {confirmDeleteKey === entry.entryKey ? (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ color: '#991b1b', fontWeight: 800 }}>Supprimer définitivement ?</span>
-                                <button
-                                  type="button"
-                                  disabled={isRowBusy}
-                                  onClick={() => handleDeleteEntry(entry)}
-                                  style={{ padding: '5px 10px', borderRadius: '6px', border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
-                                >
-                                  Oui, supprimer
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteKey(null)}
-                                  style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
-                                >
-                                  Non
-                                </button>
+                                )}
+                                {obsTotal > 0 && entry.obs && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        monoCount: entry.obs!.monoCount ?? obsTotal,
+                                        biCount: entry.obs!.biCount ?? 0,
+                                        pilotsCount:
+                                          entry.obs!.participantsCount ??
+                                          (entry.obs!.monoCount ?? obsTotal) + (entry.obs!.biCount ?? 0) * 2,
+                                      })
+                                    }
+                                    style={{ padding: '3px 8px', borderRadius: '5px', border: '1px solid #7dd3fc', background: '#f0f9ff', color: '#0369a1', fontWeight: 700, cursor: 'pointer' }}
+                                  >
+                                    📝 REX ({obsTotal} ch)
+                                  </button>
+                                )}
+                                {entry.bookingSummary.totalChars > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        monoCount: entry.bookingSummary.mono,
+                                        biCount: entry.bookingSummary.bi,
+                                        pilotsCount: entry.bookingSummary.people,
+                                      })
+                                    }
+                                    style={{ padding: '3px 8px', borderRadius: '5px', border: '1px solid #86efac', background: '#f0fdf4', color: '#166534', fontWeight: 700, cursor: 'pointer' }}
+                                  >
+                                    👥 Inscrits ({entry.bookingSummary.totalChars} ch)
+                                  </button>
+                                )}
                               </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteKey(entry.entryKey)}
-                                style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #fca5a5', background: '#fff', color: '#dc2626', fontWeight: 700, cursor: 'pointer' }}
-                                title="Supprimer un ancien test ou doublon inutile"
-                              >
-                                🗑️ Supprimer l’entrée
-                              </button>
+                            )}
+
+                          {/* Horaires (+ Matériel & Moniteurs uniquement si la séance est active / effectuée / décalée) */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                            <label style={{ fontWeight: 700 }}>
+                              Début {draft.realignSlotKey && entry.computedMatch ? '(aligné)' : ':'}
+                              <input
+                                type="text"
+                                readOnly={Boolean(draft.realignSlotKey && entry.computedMatch)}
+                                value={
+                                  draft.realignSlotKey && entry.computedMatch
+                                    ? entry.computedMatch.startTime
+                                    : draft.publishedStart
+                                }
+                                onChange={e => setDraft({ ...draft, publishedStart: e.target.value })}
+                                style={{
+                                  width: '100%',
+                                  marginTop: '3px',
+                                  padding: '5px 7px',
+                                  borderRadius: '5px',
+                                  border: '1px solid #cbd5e1',
+                                  background: draft.realignSlotKey && entry.computedMatch ? '#f1f5f9' : '#ffffff',
+                                }}
+                              />
+                            </label>
+                            <label style={{ fontWeight: 700 }}>
+                              Fin {draft.realignSlotKey && entry.computedMatch ? '(alignée)' : ':'}
+                              <input
+                                type="text"
+                                readOnly={Boolean(draft.realignSlotKey && entry.computedMatch)}
+                                value={
+                                  draft.realignSlotKey && entry.computedMatch
+                                    ? entry.computedMatch.endTime
+                                    : draft.publishedEnd
+                                }
+                                onChange={e => setDraft({ ...draft, publishedEnd: e.target.value })}
+                                style={{
+                                  width: '100%',
+                                  marginTop: '3px',
+                                  padding: '5px 7px',
+                                  borderRadius: '5px',
+                                  border: '1px solid #cbd5e1',
+                                  background: draft.realignSlotKey && entry.computedMatch ? '#f1f5f9' : '#ffffff',
+                                }}
+                              />
+                            </label>
+
+                            {draft.situation === 'shifted' && (
+                              <>
+                                <label style={{ fontWeight: 700 }}>
+                                  Début réel (décalé) :
+                                  <input
+                                    type="text"
+                                    value={draft.actualStart}
+                                    onChange={e => setDraft({ ...draft, actualStart: e.target.value })}
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #f59e0b', background: '#fff' }}
+                                  />
+                                </label>
+                                <label style={{ fontWeight: 700 }}>
+                                  Fin réelle (décalée) :
+                                  <input
+                                    type="text"
+                                    value={draft.actualEnd}
+                                    onChange={e => setDraft({ ...draft, actualEnd: e.target.value })}
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #f59e0b', background: '#fff' }}
+                                  />
+                                </label>
+                              </>
+                            )}
+
+                            {showCharsAndStaff && (
+                              <>
+                                <label style={{ fontWeight: 700 }}>
+                                  Monoplaces :
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={24}
+                                    value={draft.monoCount}
+                                    onChange={e => {
+                                      const mono = Math.max(0, Number(e.target.value) || 0);
+                                      setDraft({
+                                        ...draft,
+                                        monoCount: mono,
+                                        pilotsCount: mono + draft.biCount * 2,
+                                      });
+                                    }}
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                                <label style={{ fontWeight: 700 }}>
+                                  Biplaces :
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={24}
+                                    value={draft.biCount}
+                                    onChange={e => {
+                                      const bi = Math.max(0, Number(e.target.value) || 0);
+                                      setDraft({
+                                        ...draft,
+                                        biCount: bi,
+                                        pilotsCount: draft.monoCount + bi * 2,
+                                      });
+                                    }}
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                                <label style={{ fontWeight: 700 }}>
+                                  Pilotes / pers. :
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={48}
+                                    value={draft.pilotsCount}
+                                    onChange={e => setDraft({ ...draft, pilotsCount: Math.max(0, Number(e.target.value) || 0) })}
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                              </>
+                            )}
+
+                            <label style={{ fontWeight: 700 }}>
+                              Moniteur principal :
+                              <input
+                                type="text"
+                                value={draft.instructor}
+                                onChange={e => setDraft({ ...draft, instructor: e.target.value })}
+                                style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff' }}
+                              />
+                            </label>
+
+                            {showCharsAndStaff && (
+                              <div style={{ fontWeight: 700 }}>
+                                <label style={{ display: 'block' }}>
+                                  2e moniteur :
+                                  <input
+                                    type="text"
+                                    value={draft.secondaryInstructor}
+                                    onChange={e => {
+                                      const valName = e.target.value;
+                                      setDraft({
+                                        ...draft,
+                                        secondaryInstructor: valName,
+                                        secondaryQualification: valName.trim()
+                                          ? valName.toLowerCase().includes('youenn')
+                                            ? 'CQP'
+                                            : draft.secondaryQualification || 'DE_BPJEPS'
+                                          : undefined,
+                                        secondaryMaxChars: valName.trim()
+                                          ? valName.toLowerCase().includes('youenn')
+                                            ? 8
+                                            : draft.secondaryMaxChars ?? MAX_CHARS_PER_INSTRUCTOR
+                                          : undefined,
+                                      });
+                                    }}
+                                    placeholder="Optionnel (Youenn, Katleen...)"
+                                    style={{ width: '100%', marginTop: '3px', padding: '5px 7px', borderRadius: '5px', border: '1px solid #cbd5e1', background: '#fff' }}
+                                  />
+                                </label>
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                                  {SECONDARY_INSTRUCTOR_PRESETS.map(p => {
+                                    const isSel = draft.secondaryInstructor.toLowerCase().includes(p.name.toLowerCase());
+                                    return (
+                                      <button
+                                        key={p.name}
+                                        type="button"
+                                        onClick={() =>
+                                          setDraft({
+                                            ...draft,
+                                            secondaryInstructor: p.name,
+                                            secondaryQualification: p.qualification,
+                                            secondaryMaxChars: p.addChars,
+                                          })
+                                        }
+                                        style={{
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          border: isSel ? '1.5px solid #6d28d9' : '1px solid #cbd5e1',
+                                          background: isSel ? '#f5f3ff' : '#fff',
+                                          color: isSel ? '#6d28d9' : '#475569',
+                                          fontSize: '0.65rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        +{p.name} ({p.qualification === 'CQP' ? '+8 → 20' : '+12 → 24'})
+                                      </button>
+                                    );
+                                  })}
+                                  {draft.secondaryInstructor.trim() && (
+                                    <>
+                                      <select
+                                        value={draft.secondaryQualification === 'CQP' ? 'CQP' : 'DE_BPJEPS'}
+                                        onChange={e => {
+                                          const q = e.target.value as 'CQP' | 'DE_BPJEPS';
+                                          setDraft({
+                                            ...draft,
+                                            secondaryQualification: q,
+                                            secondaryMaxChars: q === 'CQP' ? 8 : MAX_CHARS_PER_INSTRUCTOR,
+                                          });
+                                        }}
+                                        style={{ padding: '2px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.65rem', fontWeight: 700, background: '#fff' }}
+                                      >
+                                        <option value="CQP">CQP (+8 → 20 max)</option>
+                                        <option value="DE_BPJEPS">Diplômé (+12 → 24 max)</option>
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDraft({
+                                            ...draft,
+                                            secondaryInstructor: '',
+                                            secondaryQualification: undefined,
+                                            secondaryMaxChars: undefined,
+                                          })
+                                        }
+                                        style={{
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          border: '1px solid #fca5a5',
+                                          background: '#fff',
+                                          color: '#dc2626',
+                                          fontSize: '0.65rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
                             )}
                           </div>
 
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingEntryKey(null);
-                                setDraft(null);
-                                setConfirmDeleteKey(null);
-                              }}
-                              style={{ padding: '7px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                              Annuler
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isRowBusy}
-                              onClick={() => handleSaveReconciledEntry(entry)}
-                              style={{
-                                padding: '7px 14px',
-                                borderRadius: '6px',
-                                border: 'none',
-                                background: '#0284c7',
-                                color: '#ffffff',
-                                fontWeight: 900,
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 8px rgba(2, 132, 199, 0.3)',
-                              }}
-                            >
-                              {isRowBusy ? 'Enregistrement…' : '💾 Enregistrer & Valider comme cohérente'}
-                            </button>
+                          {/* Options de réalignement & synchronisation REX */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            {entry.computedMatch && !entry.computedMatch.isExactKeyMatch && (
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 800, color: '#b45309', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={draft.realignSlotKey}
+                                  onChange={e =>
+                                    setDraft({
+                                      ...draft,
+                                      realignSlotKey: e.target.checked,
+                                      publishedStart: e.target.checked
+                                        ? entry.computedMatch!.startTime
+                                        : draft.publishedStart,
+                                      publishedEnd: e.target.checked
+                                        ? entry.computedMatch!.endTime
+                                        : draft.publishedEnd,
+                                    })
+                                  }
+                                />
+                                <span>
+                                  🔗 Réaligner la référence du créneau sur la grille actuelle ({entry.computedMatch.startTime}–{entry.computedMatch.endTime})
+                                </span>
+                              </label>
+                            )}
+
+                            {draft.situation !== 'open_active' ? (
+                              <label
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '7px',
+                                  fontWeight: 700,
+                                  color: '#0369a1',
+                                  cursor: entry.obs ? 'default' : 'pointer',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  disabled={Boolean(entry.obs)}
+                                  checked={Boolean(entry.obs) || draft.syncObservation}
+                                  onChange={e => setDraft({ ...draft, syncObservation: e.target.checked })}
+                                />
+                                <span>
+                                  🔄{' '}
+                                  {entry.obs
+                                    ? 'Le bilan REX existant sera automatiquement mis à jour (garantit 0 contradiction Planning / REX).'
+                                    : 'Créer aussi une fiche Bilan REX cohérente avec cette décision'}
+                                </span>
+                              </label>
+                            ) : entry.obs ? (
+                              <div style={{ color: '#b45309', fontWeight: 700 }}>
+                                ℹ️ En repassant ce créneau en « À venir / En cours », son ancien bilan REX prématuré sera nettoyé pour garder les écrans cohérents.
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <label style={{ fontWeight: 700 }}>
+                            Commentaire de validation / traçabilité (optionnel) :
+                            <input
+                              type="text"
+                              value={draft.auditNote}
+                              onChange={e => setDraft({ ...draft, auditNote: e.target.value })}
+                              placeholder="Ex: Motif Fermé reclassé en Réunion · Chars alignés avec le cahier..."
+                              style={{ width: '100%', marginTop: '3px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                            />
+                          </label>
+
+                          {/* Garde-fou temps réel */}
+                          {(coherence.blockingErrors.length > 0 || coherence.warnings.length > 0) && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              {coherence.blockingErrors.map((errMsg, idx) => (
+                                <div
+                                  key={`blk-${idx}`}
+                                  style={{
+                                    background: '#fee2e2',
+                                    border: '1px solid #fca5a5',
+                                    color: '#991b1b',
+                                    padding: '6px 9px',
+                                    borderRadius: '6px',
+                                    fontWeight: 800,
+                                    fontSize: '0.72rem',
+                                  }}
+                                >
+                                  ⛔ {errMsg}
+                                </div>
+                              ))}
+                              {coherence.warnings.map((warnMsg, idx) => (
+                                <div
+                                  key={`wrn-${idx}`}
+                                  style={{
+                                    background: '#fef3c7',
+                                    border: '1px solid #fcd34d',
+                                    color: '#92400e',
+                                    padding: '6px 9px',
+                                    borderRadius: '6px',
+                                    fontWeight: 700,
+                                    fontSize: '0.72rem',
+                                  }}
+                                >
+                                  ⚠️ {warnMsg}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Boutons bas du formulaire */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', paddingTop: '4px' }}>
+                            <div>
+                              {confirmDeleteKey === entry.entryKey ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  <span style={{ color: '#991b1b', fontWeight: 800 }}>
+                                    {entry.bookings.length > 0
+                                      ? `Supprimer ce créneau ET ses ${entry.bookings.length} dossier(s) client(s) ?`
+                                      : 'Supprimer définitivement ?'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={isRowBusy}
+                                    onClick={() => handleDeleteEntry(entry)}
+                                    style={{ padding: '5px 10px', borderRadius: '6px', border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
+                                  >
+                                    Oui, supprimer
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteKey(null)}
+                                    style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                                  >
+                                    Non
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteKey(entry.entryKey)}
+                                  style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #fca5a5', background: '#fff', color: '#dc2626', fontWeight: 700, cursor: 'pointer' }}
+                                  title="Supprimer un ancien test ou doublon inutile"
+                                >
+                                  🗑️ Supprimer l’entrée
+                                </button>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingEntryKey(null);
+                                  setDraft(null);
+                                  setConfirmDeleteKey(null);
+                                }}
+                                style={{ padding: '7px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#475569', fontWeight: 700, cursor: 'pointer' }}
+                              >
+                                Annuler
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRowBusy || coherence.blockingErrors.length > 0}
+                                title={coherence.blockingErrors[0] || undefined}
+                                onClick={() => handleSaveReconciledEntry(entry)}
+                                style={{
+                                  padding: '7px 14px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  background: coherence.blockingErrors.length > 0 ? '#dc2626' : '#0284c7',
+                                  color: '#ffffff',
+                                  fontWeight: 900,
+                                  opacity: coherence.blockingErrors.length > 0 || isRowBusy ? 0.72 : 1,
+                                  cursor: coherence.blockingErrors.length > 0 || isRowBusy ? 'not-allowed' : 'pointer',
+                                  boxShadow:
+                                    coherence.blockingErrors.length > 0
+                                      ? 'none'
+                                      : '0 2px 8px rgba(2, 132, 199, 0.3)',
+                                }}
+                              >
+                                {isRowBusy
+                                  ? 'Enregistrement…'
+                                  : coherence.blockingErrors.length > 0
+                                  ? '⛔ Corriger le blocage ci-dessus'
+                                  : '💾 Enregistrer & Valider comme cohérente'}
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                           </div>
                         );
                       })}

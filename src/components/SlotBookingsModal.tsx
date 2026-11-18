@@ -72,7 +72,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
   if (!isOpen) return null;
 
   const handleAddRow = () => {
-    if (isReadOnly) return;
+    if (isReadOnly || summary.totalChars >= maxChars) return;
     const remaining = Math.max(0, maxChars - summary.totalChars);
     const defaultMono = remaining > 0 ? 1 : 0;
     const newRow: AgendaBookingItem = {
@@ -118,7 +118,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
   };
 
   const handleSave = () => {
-    if (isReadOnly) return;
+    if (isReadOnly || summary.isOverCapacity) return;
     const cleaned = draftList.filter(
       b => b.name.trim() || b.phone.trim() || (b.monoCount || 0) > 0 || (b.biCount || 0) > 0
     );
@@ -291,10 +291,11 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
           >
             {summary.isOverCapacity && (
               <div>
-                ⚠️ Encadrement dépassé : {summary.totalChars} chars engagés pour un plafond de {maxChars} chars
+                ⛔ Blocage encadrement : {summary.totalChars} chars engagés pour un plafond strict de {maxChars} chars
                 {secondaryInstructor
                   ? ` (${primaryInstructor} + ${secondaryInstructor})`
-                  : ' (1 moniteur — doublez le créneau si besoin)'}.
+                  : ' (1 moniteur — doublez d’abord le créneau avec un 2e moniteur en Cycle 2 pour passer à 20 ou 24 chars)'}
+                . Réduisez le nombre de chars à {maxChars} max pour pouvoir enregistrer.
               </div>
             )}
             {fleetAlerts.monoOver && (
@@ -428,7 +429,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
                         <input
                           type="number"
                           min={0}
-                          max={12}
+                          max={maxChars}
                           disabled={isReadOnly}
                           value={row.monoCount ?? 0}
                           onChange={e => handleUpdateField(row.id, { monoCount: Math.max(0, Number(e.target.value) || 0) })}
@@ -442,7 +443,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
                         <input
                           type="number"
                           min={0}
-                          max={12}
+                          max={maxChars}
                           disabled={isReadOnly}
                           value={row.biCount ?? 0}
                           onChange={e => handleUpdateField(row.id, { biCount: Math.max(0, Number(e.target.value) || 0) })}
@@ -501,19 +502,27 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
             {!isReadOnly && (
               <button
                 type="button"
+                disabled={summary.totalChars >= maxChars}
                 onClick={handleAddRow}
+                title={
+                  summary.totalChars >= maxChars
+                    ? `Plafond strict de ${maxChars} chars atteint`
+                    : 'Ajouter une réservation'
+                }
                 style={{
-                  background: '#e0f2fe',
-                  color: '#0369a1',
-                  border: '1.5px solid #7dd3fc',
+                  background: summary.totalChars >= maxChars ? '#f1f5f9' : '#e0f2fe',
+                  color: summary.totalChars >= maxChars ? '#94a3b8' : '#0369a1',
+                  border: summary.totalChars >= maxChars ? '1.5px solid #cbd5e1' : '1.5px solid #7dd3fc',
                   borderRadius: '8px',
                   padding: '7px 12px',
                   fontSize: '0.78rem',
                   fontWeight: 800,
-                  cursor: 'pointer',
+                  cursor: summary.totalChars >= maxChars ? 'not-allowed' : 'pointer',
                 }}
               >
-                + Ajouter une inscription
+                {summary.totalChars >= maxChars
+                  ? `⛔ Plafond atteint (${summary.totalChars}/${maxChars})`
+                  : '+ Ajouter une inscription'}
               </button>
             )}
           </div>
@@ -538,20 +547,31 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
             {!isReadOnly && (
               <button
                 type="button"
+                disabled={summary.isOverCapacity}
                 onClick={handleSave}
+                title={
+                  summary.isOverCapacity
+                    ? `Enregistrement bloqué : plafond strict de ${maxChars} chars dépassé`
+                    : undefined
+                }
                 style={{
-                  background: '#16a34a',
+                  background: summary.isOverCapacity ? '#dc2626' : '#16a34a',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '8px 16px',
                   fontSize: '0.8rem',
                   fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 6px rgba(22, 163, 74, 0.25)',
+                  cursor: summary.isOverCapacity ? 'not-allowed' : 'pointer',
+                  opacity: summary.isOverCapacity ? 0.75 : 1,
+                  boxShadow: summary.isOverCapacity
+                    ? 'none'
+                    : '0 2px 6px rgba(22, 163, 74, 0.25)',
                 }}
               >
-                💾 Enregistrer ({summary.totalChars} char{summary.totalChars > 1 ? 's' : ''})
+                {summary.isOverCapacity
+                  ? `⛔ Bloqué (${summary.totalChars}/${maxChars} chars)`
+                  : `💾 Enregistrer (${summary.totalChars}/${maxChars} char${summary.totalChars > 1 ? 's' : ''})`}
               </button>
             )}
           </div>

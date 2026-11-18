@@ -113,6 +113,7 @@ interface FocusTabProps {
     defaultBookedParticipantsCount?: number;
     forceIntent?: boolean;
   }) => void;
+  onOpenExpressRex?: (dateStr: string) => void;
   isReadOnly?: boolean;
   focusDate?: string;
   onFocusDateChange?: (ds: string) => void;
@@ -140,6 +141,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   onUpdateCustomSlots,
   onCreateAndPublishCustomSlot,
   onOpenObservationModal,
+  onOpenExpressRex,
   isReadOnly = false,
   focusDate: propFocusDate,
   onFocusDateChange,
@@ -1175,7 +1177,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 onClick={() =>
                   setOpenTool(isToolOpen('merge') ? null : { slotKey, mode: 'merge' })
                 }
-                title="Regrouper les inscrits sur un autre créneau (max 12 chars)"
+                title="Regrouper les inscrits sur un autre créneau (bloqué au-delà de 12/20/24 chars selon encadrement)"
               >
                 🔗 Regrouper
               </button>
@@ -1220,11 +1222,11 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               fontWeight: 800,
             }}
           >
-            ⚠️ Attention : {effectiveChars} chars engagés sur ce créneau, au-dessus du plafond de{' '}
-            {slotMaxChars} chars max
+            ⛔ Plafond encadrement dépassé : {effectiveChars} chars engagés sur ce créneau pour un maximum de{' '}
+            {slotMaxChars} chars
             {secondaryInstructor
               ? ` (${primaryInstructor} + ${secondaryInstructor})`
-              : ' (1 moniteur — utilisez « + Doubler » si un 2e moniteur encadre)'}
+              : ' (1 moniteur — utilisez « + Doubler » pour passer à 20 ou 24 chars)'}
             .
           </div>
         )}
@@ -1275,11 +1277,20 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {SECONDARY_INSTRUCTOR_PRESETS.map(preset => {
                   const pSt = getMonitorBadgeStyle(preset.name);
+                  const presetTotalCap = MAX_CHARS_PER_INSTRUCTOR + preset.addChars;
+                  const presetTooSmall = effectiveChars > presetTotalCap;
                   return (
                     <button
                       key={preset.name}
                       type="button"
+                      disabled={presetTooSmall}
+                      title={
+                        presetTooSmall
+                          ? `Bloqué : ${effectiveChars} chars déjà engagés > plafond ${presetTotalCap}`
+                          : undefined
+                      }
                       onClick={() => {
+                        if (presetTooSmall) return;
                         onCycle2Action(f, x, {
                           type: 'double_instructor',
                           secondaryInstructor: preset.name,
@@ -1293,15 +1304,16 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       style={{
                         padding: '5px 10px',
                         borderRadius: '6px',
-                        border: `1.5px solid ${pSt.bd}`,
-                        background: pSt.bg,
-                        color: pSt.fg,
+                        border: `1.5px solid ${presetTooSmall ? '#fca5a5' : pSt.bd}`,
+                        background: presetTooSmall ? '#fef2f2' : pSt.bg,
+                        color: presetTooSmall ? '#991b1b' : pSt.fg,
                         fontWeight: 900,
                         fontSize: '0.73rem',
-                        cursor: 'pointer',
+                        opacity: presetTooSmall ? 0.6 : 1,
+                        cursor: presetTooSmall ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      ⚡ {preset.label}
+                      ⚡ {preset.label}{presetTooSmall ? ' ⛔' : ''}
                     </button>
                   );
                 })}
@@ -1376,56 +1388,81 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 <strong>{MAX_CHARS_PER_INSTRUCTOR + doubleAddChars} chars max</strong>
               </span>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {secondaryInstructor && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onCycle2Action(f, x, {
-                        type: 'double_instructor',
-                        secondaryInstructor: undefined,
-                      });
-                      setOpenTool(null);
-                    }}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #fca5a5',
-                      background: '#fee2e2',
-                      color: '#991b1b',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🗑️ Retirer {secondaryInstructor}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={!doubleName.trim()}
-                  onClick={() => {
-                    if (!doubleName.trim()) return;
-                    onCycle2Action(f, x, {
-                      type: 'double_instructor',
-                      secondaryInstructor: doubleName.trim(),
-                      secondaryQualification: doubleQual,
-                      secondaryMaxChars: doubleAddChars,
-                      secondaryActualEnd: doubleEnd.trim() || undefined,
-                      secondaryFormula: doubleFormula.trim() || undefined,
-                    });
-                    setOpenTool(null);
-                  }}
-                  style={{
-                    padding: '5px 12px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: doubleName.trim() ? '#7c3aed' : '#94a3b8',
-                    color: '#fff',
-                    fontWeight: 800,
-                    cursor: doubleName.trim() ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  ✓ Valider doublement ({MAX_CHARS_PER_INSTRUCTOR + doubleAddChars} chars)
-                </button>
+                {secondaryInstructor && (() => {
+                  const cannotRemoveSec = effectiveChars > MAX_CHARS_PER_INSTRUCTOR;
+                  return (
+                    <button
+                      type="button"
+                      disabled={cannotRemoveSec}
+                      title={
+                        cannotRemoveSec
+                          ? `Impossible de retirer ${secondaryInstructor} tant que ${effectiveChars} chars (> ${MAX_CHARS_PER_INSTRUCTOR}) sont engagés`
+                          : undefined
+                      }
+                      onClick={() => {
+                        if (cannotRemoveSec) return;
+                        onCycle2Action(f, x, {
+                          type: 'double_instructor',
+                          secondaryInstructor: undefined,
+                        });
+                        setOpenTool(null);
+                      }}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #fca5a5',
+                        background: '#fee2e2',
+                        color: '#991b1b',
+                        fontWeight: 800,
+                        opacity: cannotRemoveSec ? 0.55 : 1,
+                        cursor: cannotRemoveSec ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {cannotRemoveSec ? `⛔ Garder ${secondaryInstructor} (${effectiveChars} chars)` : `🗑️ Retirer ${secondaryInstructor}`}
+                    </button>
+                  );
+                })()}
+                {(() => {
+                  const newCap = MAX_CHARS_PER_INSTRUCTOR + doubleAddChars;
+                  const capTooLow = effectiveChars > newCap;
+                  const canConfirm = Boolean(doubleName.trim()) && !capTooLow;
+                  return (
+                    <button
+                      type="button"
+                      disabled={!canConfirm}
+                      title={
+                        capTooLow
+                          ? `Plafond ${newCap} chars insuffisant pour les ${effectiveChars} chars déjà engagés`
+                          : undefined
+                      }
+                      onClick={() => {
+                        if (!canConfirm) return;
+                        onCycle2Action(f, x, {
+                          type: 'double_instructor',
+                          secondaryInstructor: doubleName.trim(),
+                          secondaryQualification: doubleQual,
+                          secondaryMaxChars: doubleAddChars,
+                          secondaryActualEnd: doubleEnd.trim() || undefined,
+                          secondaryFormula: doubleFormula.trim() || undefined,
+                        });
+                        setOpenTool(null);
+                      }}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: canConfirm ? '#7c3aed' : '#94a3b8',
+                        color: '#fff',
+                        fontWeight: 800,
+                        cursor: canConfirm ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {capTooLow
+                        ? `⛔ Bloqué (${effectiveChars}/${newCap} chars)`
+                        : `✓ Valider doublement (${newCap} chars)`}
+                    </button>
+                  );
+                })()}
                 <button
                   type="button"
                   onClick={() => setOpenTool(null)}
@@ -1530,7 +1567,14 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                 <button
                   key={tgt.slotKey}
                   type="button"
+                  disabled={tgt.overMax}
+                  title={
+                    tgt.overMax
+                      ? `Regroupement bloqué : ${tgt.combined} chars dépasse le plafond strict de ${tgt.maxTargetChars} chars`
+                      : `Regrouper vers ${tgt.label}`
+                  }
                   onClick={() => {
+                    if (tgt.overMax) return;
                     onCycle2Action(f, x, {
                       type: 'merge',
                       targetSlotKey: tgt.slotKey,
@@ -1541,17 +1585,25 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   style={{
                     padding: '6px 10px',
                     borderRadius: '6px',
-                    border: tgt.overMax ? '1.5px solid #ef4444' : '1.5px solid #a855f7',
+                    border: tgt.overMax ? '1.5px solid #fca5a5' : '1.5px solid #a855f7',
                     background: tgt.overMax ? '#fef2f2' : '#ffffff',
                     color: tgt.overMax ? '#991b1b' : '#581c87',
                     fontWeight: 800,
-                    cursor: 'pointer',
+                    opacity: tgt.overMax ? 0.65 : 1,
+                    cursor: tgt.overMax ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  ➔ {tgt.label} ({effectiveChars} + {tgt.oChars} = {tgt.combined}/{tgt.maxTargetChars} chars{tgt.overMax ? ' ⚠️' : ''})
+                  {tgt.overMax
+                    ? `⛔ ${tgt.label} · Bloqué (${effectiveChars} + ${tgt.oChars} = ${tgt.combined}/${tgt.maxTargetChars} max)`
+                    : `➔ ${tgt.label} (${effectiveChars} + ${tgt.oChars} = ${tgt.combined}/${tgt.maxTargetChars} chars)`}
                 </button>
               ))}
             </div>
+            {mergeTargets.some(tgt => tgt.overMax) && (
+              <div style={{ fontSize: '0.7rem', color: '#991b1b', fontWeight: 700 }}>
+                ⛔ Blocage strict à 12 / 20 / 24 chars : doublez d&apos;abord le créneau cible avec un 2e moniteur (Youenn CQP 20 / Katleen 24) si vous devez y regrouper davantage de chars.
+              </div>
+            )}
           </div>
         )}
 
@@ -1770,6 +1822,32 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               >
                 <span>✏️</span>
                 <span>Créneaux sur mesure</span>
+              </button>
+            )}
+
+            {onOpenExpressRex && (
+              <button
+                type="button"
+                onClick={() => onOpenExpressRex(currentDs)}
+                style={{
+                  background: '#0f766e',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  fontWeight: 800,
+                  fontSize: '0.74rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(15, 118, 110, 0.28)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Valider tous les créneaux de la journée en une seule vue avec météo pré-remplie"
+              >
+                <span>⚡</span>
+                <span>Bilan Express</span>
               </button>
             )}
 
@@ -2258,15 +2336,15 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
       {/* Minimum sessions setting */}
       <div className="card ctl">
-        <label>
-          Séances minimum pour « ouvrir » la journée
+        <label title="Nombre minimal de créneaux favorables pour classer la journée en OUVRIR (défaut : 1)">
+          Séances minimum pour « ouvrir » la journée (défaut : 1)
           <input
             type="text"
             inputMode="decimal"
             value={settings.fmin}
             onChange={(e) => {
               const val = parseFloat(e.target.value.replace(',', '.'));
-              onUpdateSettings({ fmin: isNaN(val) || val < 1 ? 3 : val });
+              onUpdateSettings({ fmin: isNaN(val) || val < 1 ? 1 : val, fminCustomized: true });
             }}
           />
         </label>

@@ -22,6 +22,7 @@ import {
 } from '../utils/firebaseSync';
 import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
 import { minDs, maxDs, MOIS, p2, shf } from '../utils/tides';
+import { getSlotWeatherRexDefaults } from '../utils/slotWeatherRex';
 
 interface StatisticsTabProps {
   settings: AppSettings;
@@ -1878,27 +1879,38 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   )}
 
       {/* MODAL DE SAISIE / ÉDITION D'OBSERVATION */}
-      {modalOpen && (
-        <SlotObservationModal
-          isOpen={modalOpen}
-          onClose={() => setModalOpen(false)}
-          dateStr={editingObservation?.ds || selectedDate}
-          slotKey={editingObservation?.slotKey || 's0'}
-          slotStart={editingObservation?.slotStart || '10:00'}
-          slotEnd={editingObservation?.slotEnd || '11:00'}
-          slotTitle={editingObservation?.customTitle}
-          isCustom={editingObservation?.isCustom}
-          initialObservation={editingObservation}
-          customNonPublishReasons={settings.customNonPublishReasons}
-          isReadOnly={isReadOnly}
-          onSaveSuccess={(updated, savedObs) => {
-            setObservations(updated);
-            if (savedObs) {
-              onObservationSaved?.(savedObs);
-            }
-          }}
-        />
-      )}
+      {modalOpen && (() => {
+        const obsDate = editingObservation?.ds || selectedDate;
+        const obsStart = editingObservation?.slotStart || '10:00';
+        const obsEnd = editingObservation?.slotEnd || '11:00';
+        const weatherDefaults = getSlotWeatherRexDefaults(obsDate, obsStart, obsEnd, EX, windList);
+        return (
+          <SlotObservationModal
+            isOpen={modalOpen}
+            onClose={() => setModalOpen(false)}
+            dateStr={obsDate}
+            slotKey={editingObservation?.slotKey || 's0'}
+            slotStart={obsStart}
+            slotEnd={obsEnd}
+            slotTitle={editingObservation?.customTitle}
+            isCustom={editingObservation?.isCustom}
+            defaultPressure={weatherDefaults.pressureHpa ?? null}
+            defaultWindKts={weatherDefaults.windKts ?? null}
+            defaultGustKts={weatherDefaults.gustKts ?? null}
+            defaultWindDir={weatherDefaults.windDir ?? null}
+            defaultWaveH={weatherDefaults.waveH ?? null}
+            initialObservation={editingObservation}
+            customNonPublishReasons={settings.customNonPublishReasons}
+            isReadOnly={isReadOnly}
+            onSaveSuccess={(updated, savedObs) => {
+              setObservations(updated);
+              if (savedObs) {
+                onObservationSaved?.(savedObs);
+              }
+            }}
+          />
+        );
+      })()}
 
       {/* MODAL D'IMPORT GROUPÉ CARNET / REX EXCEL & CSV */}
       {importModalOpen && (
