@@ -2290,7 +2290,13 @@ export const App: React.FC = () => {
       if (payload.type === 'confirm' || payload.type === 'realized') {
         const mono = payload.monoCount ?? existingCounts.mono;
         const bi = payload.biCount ?? existingCounts.bi;
-        const chars = mono + bi > 0 ? mono + bi : existingCounts.totalChars;
+        const chars = mono + bi > 0 ? mono + bi : Math.max(bookingChars, existingCounts.totalChars);
+        if (payload.type === 'realized' && chars <= 0) {
+          notifySync(
+            '⛔ Blocage : impossible de marquer une séance « Effectuée » avec 0 char. Renseignez au moins 1 char (ou classez « Pas d’inscrits »).'
+          );
+          return;
+        }
         const slotMaxChars = getSlotMaxCapacity(existingItem);
         if (chars > slotMaxChars) {
           notifySync(

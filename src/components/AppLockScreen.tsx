@@ -50,17 +50,20 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
     }
 
     try {
-      const inputHash = await hashPassword(plain);
+      const inputHash = (await hashPassword(plain)).toLowerCase();
+      const lowerInputHash = (await hashPassword(plain.toLowerCase())).toLowerCase();
+
+      const matchesUser = (u: AppUser): boolean => {
+        const expected = (u.passwordHash || '').toLowerCase();
+        if (!expected) return false;
+        if (inputHash === expected) return true;
+        // Tolérance casse uniquement via comparaison d'empreinte SHA-256 pour le profil Jérôme
+        if (u.id === 'usr_jerome' && lowerInputHash === expected) return true;
+        return false;
+      };
 
       // 1. Vérification contre le profil sélectionné
-      const isTargetValid =
-        selectedUser &&
-        (inputHash.toLowerCase() === selectedUser.passwordHash.toLowerCase() ||
-          // Tolérance casse pour 'lestrevet' si Jérôme
-          (selectedUser.username.toLowerCase() === 'jérôme' && plain.toLowerCase() === 'lestrevet') ||
-          (selectedUser.username.toLowerCase() === 'benoît' && plain === 'Maya2103'));
-
-      if (isTargetValid) {
+      if (selectedUser && matchesUser(selectedUser)) {
         const session = normalizeUserSession({
           id: selectedUser.id,
           username: selectedUser.username,
@@ -75,13 +78,8 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
         return;
       }
 
-      // 2. Détection intelligente : si l'utilisateur a tapé le mot de passe de l'autre profil
-      const alternateUser = users.find(
-        u =>
-          u.passwordHash.toLowerCase() === inputHash.toLowerCase() ||
-          (u.username.toLowerCase() === 'jérôme' && plain.toLowerCase() === 'lestrevet') ||
-          (u.username.toLowerCase() === 'benoît' && plain === 'Maya2103')
-      );
+      // 2. Détection intelligente : si l'utilisateur a tapé le mot de passe d'un autre profil actif
+      const alternateUser = users.find(u => u.isActive !== false && matchesUser(u));
 
       if (alternateUser) {
         // Rediriger automatiquement sur le bon profil
@@ -92,23 +90,6 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({ onUnlock }) => {
           displayName: alternateUser.displayName,
           role: alternateUser.role,
           isReadOnly: alternateUser.isReadOnly,
-          loginTime: Date.now(),
-        })!;
-        setActiveUser(session, rememberDevice);
-        setIsLoading(false);
-        onUnlock(session);
-        return;
-      }
-
-      // 3. Fallback sécurité historique ('boutdumonde', 'char2026')
-      if (['boutdumonde', 'char2026'].includes(plain.toLowerCase())) {
-        const fallbackUser = users[0] || DEFAULT_USERS[0];
-        const session = normalizeUserSession({
-          id: fallbackUser.id,
-          username: fallbackUser.username,
-          displayName: fallbackUser.displayName,
-          role: fallbackUser.role,
-          isReadOnly: fallbackUser.isReadOnly,
           loginTime: Date.now(),
         })!;
         setActiveUser(session, rememberDevice);

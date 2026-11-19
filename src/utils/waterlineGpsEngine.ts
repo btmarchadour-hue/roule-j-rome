@@ -242,17 +242,47 @@ export interface GpsCaptureResult {
   accuracyM: number;
   accuracyQuality: 'high' | 'medium' | 'low';
   samplesUsed?: number;
+  rawSamples?: number;
   spreadM?: number;
+  bestAccM?: number;
+  worstAccM?: number;
+  durationSec?: number;
+  trajectoryAcc?: number[];
   timestamp: number;
 }
 
+export interface GpsLiveProgress {
+  elapsedSec: number;
+  maxDurationSec: number;
+  rawCount: number;
+  validCount: number;
+  targetValidCount: number;
+  lastAccM: number | null;
+  bestAccM: number | null;
+  phase: 'warming' | 'acquiring' | 'converged';
+  trajectoryAcc: number[];
+}
+
+export interface ContinuousGpsOptions {
+  targetValidCount?: number;
+  maxDurationMs?: number;
+  minDurationMs?: number;
+  warmupMs?: number;
+  maxAccuracyM?: number;
+  fallbackMaxAccuracyM?: number;
+  allowLowAccuracy?: boolean;
+  signal?: AbortSignal;
+  onLiveProgress?: (progress: GpsLiveProgress) => void;
+  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void;
+}
+
 /**
-  * Capture la position GPS du smartphone avec contrainte de haute précision
+ * Capture unique haute précision (conservée pour compatibilité)
  */
 export function requestHighAccuracyGps(): Promise<GpsCaptureResult> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('La géolocalisation GPS n\'est pas supportée par ce navigateur.'));
+      reject(new Error("La géolocalisation GPS n'est pas supportée par ce navigateur."));
       return;
     }
 
@@ -274,9 +304,14 @@ export function requestHighAccuracyGps(): Promise<GpsCaptureResult> {
       },
       err => {
         let msg = 'Impossible de récupérer la position GPS.';
-        if (err.code === 1) msg = 'Autorisation GPS refusée. Veuillez autoriser l\'accès à la localisation dans les réglages de votre smartphone.';
-        else if (err.code === 2) msg = 'Signal GPS indisponible. Vérifiez que la localisation est activée.';
-        else if (err.code === 3) msg = 'Délai d\'attente GPS dépassé. Veuillez réessayer à découvert sur la plage.';
+        if (err.code === 1) {
+          msg =
+            "Autorisation GPS refusée. Autorisez la localisation (et « Position exacte » sur iPhone) dans les réglages de votre smartphone.";
+        } else if (err.code === 2) {
+          msg = 'Signal GPS indisponible. Vérifiez que la localisation est activée sur votre téléphone.';
+        } else if (err.code === 3) {
+          msg = "Délai d'attente GPS dépassé. Réessayez à ciel ouvert face à la mer.";
+        }
         reject(new Error(msg));
       },
       {
@@ -288,97 +323,21 @@ export function requestHighAccuracyGps(): Promise<GpsCaptureResult> {
   });
 }
 
-/**
- * Étape 1 du Modèle Empirique : Capture moyennée multi-échantillons (3 à 5 lectures successives)
- * avec filtrage strict de précision (rejet/avertissement si accuracy > 15 m et suppression du flottement).
- */
-export async function requestSmoothedHighAccuracyGps(
-  samplesCount: number = 4,
-  sampleDelayMs: number = 600,
-  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void
-): Promise<GpsCaptureResult> {
-  const readings: GpsCaptureResult[] = [];
-
-  for (let i = 0; i < samplesCount; i++) {
-    const single = await requestHighAccuracyGps();
-    readings.push(single);
-    onSampleProgress?.(i + 1, samplesCount, single.accuracyM);
-
-    if (i < samplesCount - 1) {
-      await new Promise(r => setTimeout(r, sampleDelayMs));
-    }
-  }
-
-  // Filtrage de précision : éliminer les lectures aberrantes (> 15m) si des lectures précises existent
-  const validReadings = readings.filter(r => r.accuracyM <= 15);
-
-  if (validReadings.length === 0) {
-    const bestAcc = Math.min(...readings.map(r => r.accuracyM));
-    throw new Error(
-      `Signal GPS insuffisant : la meilleure précision mesurée est de ${bestAcc} m (le seuil requis est inférieur à 15 m). Rapprochez-vous du front de mer à découvert pour une meilleure visibilité satellite.`
-    );
-  }
-
-  // Moyenne arithmétique sur les coordonnées fiabilisées
-  const sumLat = validReadings.reduce((sum, r) => sum + r.latitude, 0);
-  const sumLon = validReadings.reduce((sum, r) => sum + r.longitude, 0);
-  const sumAcc = validReadings.reduce((sum, r) => sum + r.accuracyM, 0);
-
-  const altitudes = validReadings.map(r => r.altitude).filter((a): a is number => a != null);
-  const avgAlt = altitudes.length > 0 ? Number((altitudes.reduce((sum, a) => sum + a, 0) / altitudes.length).toFixed(1)) : null;
-
-  const avgLat = Number((sumLat / validReadings.length).toFixed(6));
-  const avgLon = Number((sumLon / validReadings.length).toFixed(6));
-  const avgAcc = Number((sumAcc / validReadings.length).toFixed(1));
-
-  let quality: 'high' | 'medium' | 'low' = 'high';
-  if (avgAcc > 15) quality = 'low';
-  else if (avgAcc > 5) quality = 'medium';
-
-  return {
-    latitude: avgLat,
-    longitude: avgLon,
-    altitude: avgAlt,
-    accuracyM: avgAcc,
-    accuracyQuality: quality,
-    samplesUsed: validReadings.length,
-    timestamp: Date.now(),
-  };
+interface RawFix {
+  latitude: number;
+  longitude: number;
+  altitude: number | null;
+  accuracyM: number;
+  timestamp: number;
+  elapsedMs: number;
 }
 
-/**
- * Étalonnage statique haute précision pour les points fixes du Cadre Terrain (Dune, Gauche, Droite) :
- * 10 mesures espacées de ~1,6 s, filtrage <= 15 m puis élagage des valeurs les plus éloignées du centroïde médian.
- */
-export async function requestCalibratedStationaryGps(
-  samplesCount: number = 10,
-  sampleDelayMs: number = 1600,
-  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void
-): Promise<GpsCaptureResult> {
-  const readings: GpsCaptureResult[] = [];
-
-  for (let i = 0; i < samplesCount; i++) {
-    const single = await requestHighAccuracyGps();
-    readings.push(single);
-    onSampleProgress?.(i + 1, samplesCount, single.accuracyM);
-
-    if (i < samplesCount - 1) {
-      await new Promise(r => setTimeout(r, sampleDelayMs));
-    }
-  }
-
-  let pool = readings.filter(r => r.accuracyM <= 15);
-  if (pool.length === 0) {
-    // Tolérance élargie à 25 m si couverture faible, sinon erreur explicite
-    pool = readings.filter(r => r.accuracyM <= 25);
-  }
-  if (pool.length === 0) {
-    const bestAcc = Math.min(...readings.map(r => r.accuracyM));
-    throw new Error(
-      `Signal GPS insuffisant pour l'étalonnage fixe (meilleure précision : ±${bestAcc} m). Restez immobile à découvert pendant la mesure.`
-    );
-  }
-
+function buildWeightedResult(
+  pool: RawFix[],
+  allReadings: RawFix[],
+  durationSec: number,
+  trajectoryAcc: number[]
+): GpsCaptureResult {
   // Médiane robuste des coordonnées pour éliminer d'éventuels rebonds multi-trajets
   const sortedLats = [...pool].map(r => r.latitude).sort((a, b) => a - b);
   const sortedLons = [...pool].map(r => r.longitude).sort((a, b) => a - b);
@@ -386,18 +345,32 @@ export async function requestCalibratedStationaryGps(
   const medLon = sortedLons[Math.floor(sortedLons.length / 2)];
 
   let refined = pool;
-  if (pool.length >= 6) {
+  if (pool.length >= 5) {
     const withDist = pool
       .map(r => ({ r, dist: calculateGpsDistanceM(r.latitude, r.longitude, medLat, medLon) }))
       .sort((a, b) => a.dist - b.dist);
-    // Garder les 80 % centraux les plus stables
-    const keepCount = Math.max(4, Math.floor(pool.length * 0.8));
+    const keepCount = Math.max(3, Math.floor(pool.length * 0.8));
     refined = withDist.slice(0, keepCount).map(x => x.r);
   }
 
-  const avgLat = Number((refined.reduce((s, r) => s + r.latitude, 0) / refined.length).toFixed(6));
-  const avgLon = Number((refined.reduce((s, r) => s + r.longitude, 0) / refined.length).toFixed(6));
-  const avgAcc = Number((refined.reduce((s, r) => s + r.accuracyM, 0) / refined.length).toFixed(1));
+  // Moyenne pondérée par variance inverse (1 / σ²) : les fixes ±3 m pèsent bien plus que ±14 m
+  let sumWeight = 0;
+  let weightedLat = 0;
+  let weightedLon = 0;
+  let weightedAcc = 0;
+  for (const r of refined) {
+    const sigma = Math.max(1.5, r.accuracyM);
+    const w = 1 / (sigma * sigma);
+    sumWeight += w;
+    weightedLat += r.latitude * w;
+    weightedLon += r.longitude * w;
+    weightedAcc += r.accuracyM * w;
+  }
+
+  const avgLat = Number((weightedLat / sumWeight).toFixed(6));
+  const avgLon = Number((weightedLon / sumWeight).toFixed(6));
+  const avgAcc = Number((weightedAcc / sumWeight).toFixed(1));
+
   const spreadM = Number(
     Math.max(
       0,
@@ -406,7 +379,14 @@ export async function requestCalibratedStationaryGps(
   );
 
   const altitudes = refined.map(r => r.altitude).filter((a): a is number => a != null);
-  const avgAlt = altitudes.length > 0 ? Number((altitudes.reduce((sum, a) => sum + a, 0) / altitudes.length).toFixed(1)) : null;
+  const avgAlt =
+    altitudes.length > 0
+      ? Number((altitudes.reduce((sum, a) => sum + a, 0) / altitudes.length).toFixed(1))
+      : null;
+
+  const allAccs = allReadings.map(r => r.accuracyM);
+  const bestAccM = allAccs.length > 0 ? Math.min(...allAccs) : avgAcc;
+  const worstAccM = allAccs.length > 0 ? Math.max(...allAccs) : avgAcc;
 
   let quality: 'high' | 'medium' | 'low' = 'high';
   if (avgAcc > 15) quality = 'low';
@@ -419,9 +399,318 @@ export async function requestCalibratedStationaryGps(
     accuracyM: avgAcc,
     accuracyQuality: quality,
     samplesUsed: refined.length,
+    rawSamples: allReadings.length,
     spreadM,
+    bestAccM,
+    worstAccM,
+    durationSec: Number(durationSec.toFixed(1)),
+    trajectoryAcc,
     timestamp: Date.now(),
   };
+}
+
+/**
+ * Moteur de capture GNSS continu (watchPosition + pondération 1/σ² + chauffe iPhone/Android).
+ * Maintient la puce GPS active en continu pour laisser le temps au fix satellites de converger
+ * (évite le piège iOS du fix Wi-Fi/4G à ~40 m renvoyé par getCurrentPosition à froid).
+ */
+export function acquireContinuousWeightedGps(
+  options: ContinuousGpsOptions = {}
+): Promise<GpsCaptureResult> {
+  const {
+    targetValidCount = 4,
+    maxDurationMs = 15000,
+    minDurationMs = 3500,
+    warmupMs = 1800,
+    maxAccuracyM = 15,
+    fallbackMaxAccuracyM,
+    allowLowAccuracy = false,
+    signal,
+    onLiveProgress,
+    onSampleProgress,
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error("La géolocalisation GPS n'est pas supportée par ce navigateur."));
+      return;
+    }
+
+    if (signal?.aborted) {
+      reject(new Error('Mesure GPS annulée.'));
+      return;
+    }
+
+    const startTime = Date.now();
+    const maxDurationSec = Math.round(maxDurationMs / 1000);
+    const allReadings: RawFix[] = [];
+    const validReadings: RawFix[] = [];
+    const trajectoryAcc: number[] = [];
+
+    let watchId: number | null = null;
+    let tickTimer: ReturnType<typeof setInterval> | null = null;
+    let hardTimeout: ReturnType<typeof setTimeout> | null = null;
+    let finished = false;
+    let lastSig = '';
+    let lastAccM: number | null = null;
+    let bestAccM: number | null = null;
+
+    const cleanup = () => {
+      if (watchId !== null) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch {
+          // ignore
+        }
+        watchId = null;
+      }
+      if (tickTimer !== null) {
+        clearInterval(tickTimer);
+        tickTimer = null;
+      }
+      if (hardTimeout !== null) {
+        clearTimeout(hardTimeout);
+        hardTimeout = null;
+      }
+      if (signal) {
+        signal.removeEventListener('abort', handleAbort);
+      }
+    };
+
+    const emitProgress = (phaseOverride?: GpsLiveProgress['phase']) => {
+      const elapsedSec = Math.min(maxDurationSec, Number(((Date.now() - startTime) / 1000).toFixed(1)));
+      const phase: GpsLiveProgress['phase'] =
+        phaseOverride ??
+        (validReadings.length >= targetValidCount
+          ? 'converged'
+          : Date.now() - startTime < warmupMs && validReadings.length === 0
+          ? 'warming'
+          : 'acquiring');
+
+      onLiveProgress?.({
+        elapsedSec,
+        maxDurationSec,
+        rawCount: allReadings.length,
+        validCount: validReadings.length,
+        targetValidCount,
+        lastAccM,
+        bestAccM,
+        phase,
+        trajectoryAcc: trajectoryAcc.slice(-6),
+      });
+    };
+
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+
+      const durationSec = (Date.now() - startTime) / 1000;
+      let pool = validReadings;
+
+      if (pool.length === 0) {
+        // Repli : vérifier si une lecture valide (<= maxAccuracyM) était arrivée pendant la chauffe
+        pool = allReadings.filter(r => r.accuracyM <= maxAccuracyM);
+      }
+      if (pool.length === 0 && fallbackMaxAccuracyM != null) {
+        pool = allReadings.filter(r => r.accuracyM <= fallbackMaxAccuracyM);
+      }
+      if (pool.length === 0 && allowLowAccuracy && allReadings.length > 0) {
+        // Mode diagnostic : retourner tout de même les meilleures lectures mesurées
+        const sortedByAcc = [...allReadings].sort((a, b) => a.accuracyM - b.accuracyM);
+        pool = sortedByAcc.slice(0, Math.max(1, Math.min(4, sortedByAcc.length)));
+      }
+
+      if (pool.length === 0) {
+        if (allReadings.length === 0) {
+          reject(
+            new Error(
+              "Aucun signal satellite reçu en " +
+                maxDurationSec +
+                " s. Placez-vous à ciel ouvert et vérifiez que la localisation est activée."
+            )
+          );
+          return;
+        }
+        const best = Math.min(...allReadings.map(r => r.accuracyM));
+        const likelyIndoorOrCoarse = best >= 25;
+        reject(
+          new Error(
+            `Signal GPS insuffisant après ${Math.round(durationSec)} s : meilleure précision mesurée ±${best} m (seuil requis ≤ ${maxAccuracyM} m). ` +
+              (likelyIndoorOrCoarse
+                ? 'En intérieur ou avec « Position exacte » désactivée sur iPhone, le téléphone reste bloqué sur un repère Wi-Fi/4G (~30–65 m). Refaites le test à ciel ouvert.'
+                : 'Restez immobile à découvert quelques secondes de plus face à la mer.')
+          )
+        );
+        return;
+      }
+
+      emitProgress('converged');
+      resolve(buildWeightedResult(pool, allReadings, durationSec, trajectoryAcc));
+    };
+
+    const handleAbort = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      reject(new Error('Mesure GPS annulée.'));
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', handleAbort, { once: true });
+    }
+
+    emitProgress('warming');
+
+    tickTimer = setInterval(() => {
+      if (finished) return;
+      emitProgress();
+      const elapsedMs = Date.now() - startTime;
+      if (validReadings.length >= targetValidCount && elapsedMs >= minDurationMs) {
+        finalize();
+      }
+    }, 500);
+
+    hardTimeout = setTimeout(() => {
+      finalize();
+    }, maxDurationMs);
+
+    watchId = navigator.geolocation.watchPosition(
+      pos => {
+        if (finished) return;
+        const now = Date.now();
+        const elapsedMs = now - startTime;
+        const acc = Math.round(pos.coords.accuracy * 10) / 10;
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lon = Number(pos.coords.longitude.toFixed(6));
+        const alt = pos.coords.altitude != null ? Number(pos.coords.altitude.toFixed(1)) : null;
+
+        // Ignorer les doublons strictement identiques mis en cache par iOS
+        const sig = `${lat}_${lon}_${acc}_${pos.timestamp}`;
+        if (sig === lastSig && allReadings.length > 0) return;
+        lastSig = sig;
+
+        const fix: RawFix = {
+          latitude: lat,
+          longitude: lon,
+          altitude: alt,
+          accuracyM: acc,
+          timestamp: pos.timestamp || now,
+          elapsedMs,
+        };
+
+        allReadings.push(fix);
+        lastAccM = acc;
+        bestAccM = bestAccM == null ? acc : Math.min(bestAccM, acc);
+        if (trajectoryAcc.length === 0 || trajectoryAcc[trajectoryAcc.length - 1] !== acc) {
+          trajectoryAcc.push(acc);
+        }
+
+        // Pendant la chauffe initiale, accepter uniquement les fixes déjà très propres (<= 8 m)
+        const isWarmup = elapsedMs < warmupMs;
+        if (acc <= maxAccuracyM && (!isWarmup || acc <= 8)) {
+          validReadings.push(fix);
+          onSampleProgress?.(Math.min(validReadings.length, targetValidCount), targetValidCount, acc);
+        } else if (validReadings.length === 0) {
+          onSampleProgress?.(0, targetValidCount, acc);
+        }
+
+        emitProgress();
+
+        // Arrêt anticipé dès que la cible de lectures stables est atteinte après le temps mini
+        if (validReadings.length >= targetValidCount && elapsedMs >= minDurationMs) {
+          finalize();
+        }
+      },
+      err => {
+        if (finished) return;
+        // Sur erreur permission (1), arrêter immédiatement ; sur timeout temporaire (3), laisser le watch tourner
+        if (err.code === 1) {
+          finished = true;
+          cleanup();
+          reject(
+            new Error(
+              "Autorisation GPS refusée. Activez la localisation (et « Position exacte » sur iPhone) dans les réglages de votre navigateur."
+            )
+          );
+        } else if (err.code === 2 && allReadings.length === 0 && Date.now() - startTime > 5000) {
+          finished = true;
+          cleanup();
+          reject(new Error('Signal GPS indisponible. Vérifiez que la localisation est activée sur votre smartphone.'));
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: maxDurationMs,
+        maximumAge: 0,
+      }
+    );
+  });
+}
+
+/**
+ * Capture bord de l'eau (Modèle Empirique) : flux continu watchPosition pondéré 1/σ²
+ * (jusqu'à 15 s max pour laisser chauffer la puce GPS iPhone/Android, arrêt dès 4 mesures stables ≤ 15 m).
+ */
+export function requestSmoothedHighAccuracyGps(
+  samplesCount: number = 4,
+  _sampleDelayMs: number = 600,
+  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void,
+  extraOptions?: Pick<ContinuousGpsOptions, 'onLiveProgress' | 'signal' | 'maxDurationMs'>
+): Promise<GpsCaptureResult> {
+  return acquireContinuousWeightedGps({
+    targetValidCount: samplesCount,
+    maxDurationMs: extraOptions?.maxDurationMs ?? 15000,
+    minDurationMs: 3500,
+    warmupMs: 1800,
+    maxAccuracyM: 15,
+    onSampleProgress,
+    onLiveProgress: extraOptions?.onLiveProgress,
+    signal: extraOptions?.signal,
+  });
+}
+
+/**
+ * Étalonnage statique haute précision pour les points fixes du Cadre Terrain (Dune, Gauche, Droite) :
+ * flux continu watchPosition sur 18 s max, pondération 1/σ² et élagage des 20 % extrêmes.
+ */
+export function requestCalibratedStationaryGps(
+  samplesCount: number = 8,
+  _sampleDelayMs: number = 1600,
+  onSampleProgress?: (sampleIndex: number, total: number, lastAcc: number) => void,
+  extraOptions?: Pick<ContinuousGpsOptions, 'onLiveProgress' | 'signal' | 'maxDurationMs'>
+): Promise<GpsCaptureResult> {
+  return acquireContinuousWeightedGps({
+    targetValidCount: samplesCount,
+    maxDurationMs: extraOptions?.maxDurationMs ?? 20000,
+    minDurationMs: 6000,
+    warmupMs: 2500,
+    maxAccuracyM: 15,
+    fallbackMaxAccuracyM: 25,
+    onSampleProgress,
+    onLiveProgress: extraOptions?.onLiveProgress,
+    signal: extraOptions?.signal,
+  });
+}
+
+/**
+ * Test de précision GPS sans aucune écriture en base :
+ * retourne toujours un diagnostic complet (même si la précision reste > 15 m) pour vérifier son smartphone.
+ */
+export function runGpsPrecisionDiagnostic(
+  onLiveProgress?: (progress: GpsLiveProgress) => void,
+  signal?: AbortSignal
+): Promise<GpsCaptureResult> {
+  return acquireContinuousWeightedGps({
+    targetValidCount: 5,
+    maxDurationMs: 15000,
+    minDurationMs: 4500,
+    warmupMs: 1800,
+    maxAccuracyM: 15,
+    allowLowAccuracy: true,
+    onLiveProgress,
+    signal,
+  });
 }
 
 /**
@@ -668,3 +957,255 @@ export function findRecentDuplicateGpsLog(
   }
   return null;
 }
+
+export const GPS_DIAGNOSTIC_THRESHOLD = 20;
+
+export interface GpsZoneDiagnostic {
+  zoneId: 'lestrevet' | 'lieue_de_greve' | 'pentrez';
+  label: string;
+  count: number;
+  avgUsableWidthM: number | null;
+  avgCorrDeltaCm: number | null;
+}
+
+export interface GpsDiagnosticSummary {
+  totalCount: number;
+  threshold: number;
+  isReady: boolean;
+  progressPct: number;
+  remaining: number;
+  consolidatedCount: number;
+  avgTheoreticalWaterM: number | null;
+  avgCorrectedWaterM: number | null;
+  avgShomBrestWaterM: number | null;
+  avgRawSurcoteCm: number | null;
+  avgCorrSurcoteCm: number | null;
+  suggestedThresholdM: number | null;
+  deltaFromCurrentCm: number | null;
+  verdictLevel: 'empty' | 'preliminary' | 'aligned' | 'higher' | 'lower';
+  verdictText: string;
+  lowPressureCount: number;
+  lowPressureAvgRawCm: number | null;
+  normalHighPressureCount: number;
+  normalHighPressureAvgRawCm: number | null;
+  seaWindCount: number;
+  seaWindAvgRawCm: number | null;
+  bachesCount: number;
+  bachesPct: number;
+  zones: GpsZoneDiagnostic[];
+}
+
+/**
+ * Synthèse diagnostique des relevés GPS bord de l'eau (palier utile dès 20 mesures).
+ * Confronte la hauteur d'eau réelle au moment des relevés au seuil configuré de l'école (settings.L).
+ */
+export function computeGpsDiagnosticSummary(
+  logs: GpsWaterlineLog[],
+  currentThresholdM: number,
+  activeCadre?: BeachCadreProfile | null
+): GpsDiagnosticSummary {
+  const totalCount = logs.length;
+  const threshold = GPS_DIAGNOSTIC_THRESHOLD;
+  const isReady = totalCount >= threshold;
+  const progressPct = Math.min(100, Math.round((totalCount / threshold) * 100));
+  const remaining = Math.max(0, threshold - totalCount);
+
+  const zoneMeta: Array<{ id: 'lestrevet' | 'lieue_de_greve' | 'pentrez'; label: string }> = [
+    { id: 'lestrevet', label: 'Lestrevet (Sud)' },
+    { id: 'lieue_de_greve', label: 'Lieue de Grève' },
+    { id: 'pentrez', label: 'Pentrez (Nord)' },
+  ];
+
+  if (totalCount === 0) {
+    return {
+      totalCount: 0,
+      threshold,
+      isReady: false,
+      progressPct: 0,
+      remaining: threshold,
+      consolidatedCount: 0,
+      avgTheoreticalWaterM: null,
+      avgCorrectedWaterM: null,
+      avgShomBrestWaterM: null,
+      avgRawSurcoteCm: null,
+      avgCorrSurcoteCm: null,
+      suggestedThresholdM: null,
+      deltaFromCurrentCm: null,
+      verdictLevel: 'empty',
+      verdictText:
+        'Enregistrez vos 20 premiers relevés bord de l’eau (sur plusieurs coefficients et météos) pour obtenir un premier diagnostic chiffré du seuil réel de Lestrevet.',
+      lowPressureCount: 0,
+      lowPressureAvgRawCm: null,
+      normalHighPressureCount: 0,
+      normalHighPressureAvgRawCm: null,
+      seaWindCount: 0,
+      seaWindAvgRawCm: null,
+      bachesCount: 0,
+      bachesPct: 0,
+      zones: zoneMeta.map(z => ({
+        zoneId: z.id,
+        label: z.label,
+        count: 0,
+        avgUsableWidthM: null,
+        avgCorrDeltaCm: null,
+      })),
+    };
+  }
+
+  const softMarginM = activeCadre?.softSandMarginM ?? 50;
+  let sumTheo = 0;
+  let sumCorr = 0;
+  let sumRawCm = 0;
+  let sumCorrCm = 0;
+
+  let sumShomBrest = 0;
+  let shomBrestCount = 0;
+  let consolidatedCount = 0;
+
+  let lowPCount = 0;
+  let lowPSumRaw = 0;
+  let normPCount = 0;
+  let normPSumRaw = 0;
+
+  let seaWindCount = 0;
+  let seaWindSumRaw = 0;
+
+  let bachesCount = 0;
+
+  const zoneBuckets: Record<
+    'lestrevet' | 'lieue_de_greve' | 'pentrez',
+    { count: number; sumW: number; wCount: number; sumCorrCm: number }
+  > = {
+    lestrevet: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
+    lieue_de_greve: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
+    pentrez: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
+  };
+
+  for (const l of logs) {
+    sumTheo += l.theoreticalWaterHeightM;
+    sumCorr += l.correctedWaterHeightM;
+    sumRawCm += l.rawSurcoteCm;
+    sumCorrCm += l.correctedSurcoteCm;
+
+    if (l.consolidationStatus === 'consolidated') {
+      consolidatedCount += 1;
+    }
+    if (l.realWeatherSnapshot?.shomBrestHeightM != null) {
+      sumShomBrest += l.realWeatherSnapshot.shomBrestHeightM;
+      shomBrestCount += 1;
+    }
+
+    const pressure = l.realWeatherSnapshot?.pressureHpa ?? l.weatherSnapshot.pressureHpa;
+    if (pressure != null) {
+      if (pressure < 1005) {
+        lowPCount += 1;
+        lowPSumRaw += l.rawSurcoteCm;
+      } else {
+        normPCount += 1;
+        normPSumRaw += l.rawSurcoteCm;
+      }
+    }
+
+    const windDeg = l.realWeatherSnapshot?.windDirectionDeg ?? l.weatherSnapshot.windDirectionDeg;
+    // Secteur mer / baie Ouest (SO à NO : 200° à 320°)
+    if (windDeg != null && windDeg >= 200 && windDeg <= 320) {
+      seaWindCount += 1;
+      seaWindSumRaw += l.rawSurcoteCm;
+    }
+
+    if (l.beachState === 'baches_faibles' || l.beachState === 'baches_fortes') {
+      bachesCount += 1;
+    }
+
+    const dynEval = activeCadre ? evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadre) : null;
+    const bayZone = classifyBayZone(l.latitude, l.longitude, dynEval?.lateralPosPct ?? l.lateralPosPct);
+    const bucket = zoneBuckets[bayZone.zoneId];
+    bucket.count += 1;
+    bucket.sumCorrCm += l.correctedSurcoteCm;
+    const widthFromDune = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM;
+    const usableW =
+      widthFromDune != null
+        ? Math.max(0, widthFromDune - softMarginM)
+        : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
+    if (usableW != null) {
+      bucket.sumW += usableW;
+      bucket.wCount += 1;
+    }
+  }
+
+  const avgTheoreticalWaterM = Number((sumTheo / totalCount).toFixed(2));
+  const avgCorrectedWaterM = Number((sumCorr / totalCount).toFixed(2));
+  const avgShomBrestWaterM =
+    shomBrestCount > 0 ? Number((sumShomBrest / shomBrestCount).toFixed(2)) : null;
+  const avgRawSurcoteCm = Math.round(sumRawCm / totalCount);
+  const avgCorrSurcoteCm = Math.round(sumCorrCm / totalCount);
+
+  // Hauteur corrigée moyenne constatée quand le moniteur se tient à la limite basse de roulage
+  const suggestedThresholdM = avgCorrectedWaterM;
+  const deltaFromCurrentCm = Math.round((suggestedThresholdM - currentThresholdM) * 100);
+
+  let verdictLevel: GpsDiagnosticSummary['verdictLevel'] = 'preliminary';
+  let verdictText = '';
+  if (!isReady) {
+    verdictLevel = 'preliminary';
+    verdictText = `Tendance préliminaire (${totalCount}/${threshold} mesures) : hauteur corrigée moyenne constatée à la limite basse = ${avgCorrectedWaterM.toFixed(
+      2
+    )} m (vs seuil actuel ${currentThresholdM.toFixed(2)} m, soit ${
+      deltaFromCurrentCm > 0 ? `+${deltaFromCurrentCm}` : deltaFromCurrentCm
+    } cm). Encore ${remaining} relevé${remaining > 1 ? 's' : ''} pour fiabiliser le diagnostic.`;
+  } else if (Math.abs(deltaFromCurrentCm) <= 10) {
+    verdictLevel = 'aligned';
+    verdictText = `Seuil actuel (${currentThresholdM.toFixed(
+      2
+    )} m) confirmé par le terrain : hauteur corrigée moyenne mesurée = ${avgCorrectedWaterM.toFixed(
+      2
+    )} m (écart de ${deltaFromCurrentCm > 0 ? `+${deltaFromCurrentCm}` : deltaFromCurrentCm} cm, dans la marge normale ±10 cm).`;
+  } else if (deltaFromCurrentCm > 10) {
+    verdictLevel = 'higher';
+    verdictText = `La plage reste roulable plus haut que prévu (+${deltaFromCurrentCm} cm en moyenne) : seuil mesuré autour de ${suggestedThresholdM.toFixed(
+      2
+    )} m contre ${currentThresholdM.toFixed(2)} m actuellement. À valider avec Jérôme avant d’ajuster le curseur.`;
+  } else {
+    verdictLevel = 'lower';
+    verdictText = `La mer limite le roulage plus tôt que prévu (${deltaFromCurrentCm} cm en moyenne) : seuil mesuré autour de ${suggestedThresholdM.toFixed(
+      2
+    )} m contre ${currentThresholdM.toFixed(2)} m actuellement. Envisager un réglage plus prudent avec Jérôme.`;
+  }
+
+  return {
+    totalCount,
+    threshold,
+    isReady,
+    progressPct,
+    remaining,
+    consolidatedCount,
+    avgTheoreticalWaterM,
+    avgCorrectedWaterM,
+    avgShomBrestWaterM,
+    avgRawSurcoteCm,
+    avgCorrSurcoteCm,
+    suggestedThresholdM,
+    deltaFromCurrentCm,
+    verdictLevel,
+    verdictText,
+    lowPressureCount: lowPCount,
+    lowPressureAvgRawCm: lowPCount > 0 ? Math.round(lowPSumRaw / lowPCount) : null,
+    normalHighPressureCount: normPCount,
+    normalHighPressureAvgRawCm: normPCount > 0 ? Math.round(normPSumRaw / normPCount) : null,
+    seaWindCount,
+    seaWindAvgRawCm: seaWindCount > 0 ? Math.round(seaWindSumRaw / seaWindCount) : null,
+    bachesCount,
+    bachesPct: Math.round((bachesCount / totalCount) * 100),
+    zones: zoneMeta.map(z => {
+      const b = zoneBuckets[z.id];
+      return {
+        zoneId: z.id,
+        label: z.label,
+        count: b.count,
+        avgUsableWidthM: b.wCount > 0 ? Math.round(b.sumW / b.wCount) : null,
+        avgCorrDeltaCm: b.count > 0 ? Math.round(b.sumCorrCm / b.count) : null,
+      };
+    }),
+  };
+}
+

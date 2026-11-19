@@ -2,56 +2,312 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Décisions et validations de créneaux par date
+    // =========================================================================
+    // 0. FILET DE SÉCURITÉ GLOBAL (DEFAULT-DENY)
+    // Toute collection non explicitement autorisée ci-dessous est bloquée.
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // HELPERS DE VALIDATION STRUCTURELLE ET ANTI-INJECTION
+    // Note d'architecture : l'application utilise actuellement une session
+    // applicative par profil SHA-256 (Jérôme / Benoît / Moniteur) sans compte
+    // Google Firebase Auth obligatoire sur le terrain. Ces règles garantissent
+    // le rejet par défaut, la validation stricte des identifiants, des types,
+    // des tailles et l'intégrité des comptes administrateurs. Une fois la
+    // migration vers Firebase Auth activée (Guide de Sécurisation §3 & §4),
+    // ajouter `request.auth != null` en garde d'entrée.
+    // =========================================================================
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidSlotDocId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-:.]+$');
+    }
+
+    function isValidDateId(dateStr) {
+      return dateStr is string && dateStr.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalNumber(data, field) {
+      return !(field in data) || data[field] == null || data[field] is number;
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    function isValidSha256(hash) {
+      return hash is string && hash.size() == 64 && hash.matches('^[a-fA-F0-9]{64}$');
+    }
+
+    function isAdminAuthorName(name) {
+      return name is string && name in ['Jérôme', 'Benoît', 'Admin', 'Jerome', 'Benoit'];
+    }
+
+    // --- ValidationDoc (/validations/{dateStr}) ---
+    function isValidValidation(data) {
+      return data is map
+        && data.size() <= 25
+        && (!('items' in data) || (data.items is list && data.items.size() <= 60))
+        && isOptionalNumber(data, 'ts')
+        && isOptionalNumber(data, 'updatedAt')
+        && isOptionalString(data, 'k', 240)
+        && isOptionalString(data, 'author', 80);
+    }
+
+    // --- CustomSlotDoc (/custom_slots/{dateStr}) ---
+    function isValidCustomSlots(data) {
+      return data is map
+        && data.size() <= 12
+        && 'replaceDefault' in data && data.replaceDefault is bool
+        && 'slots' in data && data.slots is list && data.slots.size() <= 40
+        && isOptionalString(data, 'updatedBy', 80)
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // --- SlotObservation (/observations/{obsId}) ---
+    function isValidObservation(data) {
+      return data is map
+        && data.size() <= 55
+        && 'ds' in data && isValidDateId(data.ds)
+        && 'slotKey' in data && data.slotKey is string && data.slotKey.size() >= 1 && data.slotKey.size() <= 64
+        && 'status' in data && data.status in ['realized', 'cancelled']
+        && isOptionalString(data, 'id', 128)
+        && isOptionalString(data, 'slotStart', 16)
+        && isOptionalString(data, 'slotEnd', 16)
+        && isOptionalString(data, 'cancellationReason', 120)
+        && isOptionalString(data, 'cancellationNote', 1000)
+        && isOptionalString(data, 'observedWindDir', 32)
+        && isOptionalString(data, 'beachCondition', 80)
+        && isOptionalString(data, 'notes', 2000)
+        && isOptionalString(data, 'author', 80)
+        && isOptionalString(data, 'secondaryInstructor', 80)
+        && isOptionalNumber(data, 'charsCount')
+        && isOptionalNumber(data, 'participantsCount')
+        && isOptionalNumber(data, 'monoCount')
+        && isOptionalNumber(data, 'biCount')
+        && isOptionalNumber(data, 'createdAt')
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // --- ReservationDoc (/reservations/{reservationKey}) ---
+    function isValidReservation(data) {
+      return data is map
+        && data.size() <= 12
+        && 'ds' in data && data.ds is string && data.ds.size() <= 16
+        && 'slotKey' in data && data.slotKey is string && data.slotKey.size() <= 64
+        && 'clients' in data && data.clients is list && data.clients.size() <= 80
+        && isOptionalString(data, 'updatedBy', 80)
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // --- ClientProfile (/clients/{clientId}) ---
+    function isValidClient(data) {
+      return data is map
+        && data.size() <= 35
+        && 'lastName' in data && data.lastName is string && data.lastName.size() <= 120
+        && isOptionalString(data, 'id', 128)
+        && isOptionalString(data, 'firstName', 120)
+        && isOptionalString(data, 'phone', 60)
+        && isOptionalString(data, 'email', 160)
+        && isOptionalString(data, 'city', 120)
+        && isOptionalString(data, 'postalCode', 20)
+        && isOptionalString(data, 'level', 60)
+        && isOptionalString(data, 'preferredGear', 60)
+        && isOptionalString(data, 'lastSessionDate', 32)
+        && isOptionalString(data, 'notes', 3000)
+        && isOptionalString(data, 'author', 80)
+        && (!('tags' in data) || data.tags == null || (data.tags is list && data.tags.size() <= 20))
+        && isOptionalNumber(data, 'totalSessions')
+        && isOptionalNumber(data, 'totalSpent')
+        && isOptionalNumber(data, 'giftVoucherBalance')
+        && isOptionalBool(data, 'hasGiftVoucher')
+        && isOptionalNumber(data, 'createdAt')
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // --- AppConfig (/app_config/{configId}) ---
+    function isValidAppConfig(configId, data) {
+      return configId in ['session_settings', 'beach_cadre_roulage', 'security']
+        && data is map
+        && data.size() <= 50
+        && 'updatedBy' in data && isAdminAuthorName(data.updatedBy)
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // --- AppUser (/app_users/{userId}) ---
+    function isValidAppUser(userId, data) {
+      return data is map
+        && data.size() <= 15
+        && 'username' in data && data.username is string && data.username.size() >= 1 && data.username.size() <= 60
+        && 'role' in data && data.role in ['admin', 'moniteur']
+        && 'passwordHash' in data && isValidSha256(data.passwordHash)
+        && isOptionalString(data, 'id', 128)
+        && isOptionalString(data, 'displayName', 100)
+        && isOptionalBool(data, 'isReadOnly')
+        && isOptionalBool(data, 'isActive')
+        && isOptionalNumber(data, 'createdAt')
+        && isOptionalNumber(data, 'updatedAt')
+        && isOptionalNumber(data, 'lastLoginAt')
+        // Protection d'intégrité des 2 comptes administrateurs principaux
+        && (!(userId in ['usr_jerome', 'usr_benoit']) || (
+          data.role == 'admin' && (!('isReadOnly' in data) || data.isReadOnly == false)
+        ));
+    }
+
+    // --- TeamNote (/team_notes/{noteId}) ---
+    function isSystemTechNoteDoc(noteId) {
+      return noteId in ['status_tech_notes', 'qcm_tech_notes', 'audit_data_c1_c2'];
+    }
+
+    function isValidTeamNote(noteId, data) {
+      return data is map
+        && (
+          (isSystemTechNoteDoc(noteId) && data.size() <= 2000 && isOptionalNumber(data, 'updatedAt'))
+          || (
+            !isSystemTechNoteDoc(noteId)
+            && data.size() <= 15
+            && isOptionalString(data, 'author', 80)
+            && isOptionalString(data, 'category', 60)
+            && isOptionalString(data, 'content', 5000)
+            && isOptionalNumber(data, 'createdAt')
+            && isOptionalBool(data, 'isResolved')
+            && isOptionalNumber(data, 'resolvedAt')
+            && isOptionalString(data, 'resolvedBy', 80)
+          )
+        );
+    }
+
+    // --- WaterlineGpsLog (/waterline_gps_logs/{logId}) ---
+    function isValidWaterlineGpsLog(data) {
+      return data is map
+        && data.size() <= 55
+        && 'timestamp' in data && data.timestamp is number
+        && 'dateStr' in data && isValidDateId(data.dateStr)
+        && 'author' in data && data.author is string && data.author.size() >= 1 && data.author.size() <= 80
+        && 'latitude' in data && data.latitude is number && data.latitude >= 40 && data.latitude <= 55
+        && 'longitude' in data && data.longitude is number && data.longitude >= -10 && data.longitude <= 10
+        && isOptionalNumber(data, 'accuracyM')
+        && (!('accuracyM' in data) || data.accuracyM == null || (data.accuracyM >= 0 && data.accuracyM <= 2000))
+        && isOptionalString(data, 'timeStr', 16)
+        && isOptionalString(data, 'note', 1000)
+        && isOptionalString(data, 'beachZone', 40)
+        && isOptionalString(data, 'beachState', 40)
+        && (!('cadreProfileUsed' in data) || data.cadreProfileUsed == null || data.cadreProfileUsed in ['jerome', 'mairie'])
+        && (!('consolidationStatus' in data) || data.consolidationStatus == null || data.consolidationStatus in ['pending_offline', 'pending_real', 'consolidated'])
+        && isOptionalNumber(data, 'createdAt')
+        && isOptionalNumber(data, 'updatedAt');
+    }
+
+    // =========================================================================
+    // 1. DÉCISIONS ET VALIDATIONS DE CRÉNEAUX PAR DATE (CYCLE 1 / CYCLE 2)
+    // =========================================================================
     match /validations/{dateStr} {
-      allow read, write: if true;
+      allow get: if isValidDateId(dateStr);
+      allow list: if true;
+      allow create, update: if isValidDateId(dateStr) && isValidValidation(incoming());
+      allow delete: if isValidDateId(dateStr);
     }
 
-    // Créneaux sur mesure par date
+    // =========================================================================
+    // 2. CRÉNEAUX SUR MESURE PAR DATE
+    // =========================================================================
     match /custom_slots/{dateStr} {
-      allow read, write: if true;
+      allow get: if isValidDateId(dateStr);
+      allow list: if true;
+      allow create, update: if isValidDateId(dateStr) && isValidCustomSlots(incoming());
+      allow delete: if isValidDateId(dateStr);
     }
 
-    // Relevés terrain et calibration du spot
+    // =========================================================================
+    // 3. RELEVÉS TERRAIN & CALIBRATION (REX)
+    // =========================================================================
     match /observations/{obsId} {
-      allow read, write: if true;
+      allow get: if isValidSlotDocId(obsId);
+      allow list: if true;
+      allow create, update: if isValidSlotDocId(obsId) && isValidObservation(incoming());
+      allow delete: if isValidSlotDocId(obsId);
     }
 
-    // Émargement et inscriptions clients par créneau
+    // =========================================================================
+    // 4. ÉMARGEMENT ET RÉSERVATIONS CLIENTS PAR CRÉNEAU
+    // =========================================================================
     match /reservations/{reservationKey} {
-      allow read, write: if true;
+      allow get: if isValidSlotDocId(reservationKey);
+      allow list: if true;
+      allow create, update: if isValidSlotDocId(reservationKey) && isValidReservation(incoming());
+      allow delete: if isValidSlotDocId(reservationKey);
     }
 
-    // Répertoire centralisé et base de données clients (CRM)
+    // =========================================================================
+    // 5. RÉPERTOIRE CENTRALISÉ CLIENTS (CRM)
+    // =========================================================================
     match /clients/{clientId} {
-      allow read, write: if true;
+      allow get: if isValidId(clientId);
+      allow list: if true;
+      allow create, update: if isValidId(clientId) && isValidClient(incoming());
+      allow delete: if isValidId(clientId);
     }
 
-    // Configuration et sécurité école et moniteurs (Module 3 : Verrouillage admin)
+    // =========================================================================
+    // 6. CONFIGURATION ÉCOLE & CADRE DE ROULAGE (VERROUILLAGE ADMIN)
+    // =========================================================================
     match /app_config/{configId} {
-      allow read: if true;
-      // Seuls les administrateurs habilités (Jérôme, Benoît) peuvent modifier ou réinitialiser la configuration de l'école
-      allow write: if request.resource.data.updatedBy in ['Jérôme', 'Benoît', 'Admin', 'Jerome', 'Benoit'];
+      allow get: if configId in ['session_settings', 'beach_cadre_roulage', 'security'];
+      allow list: if false;
+      allow create, update: if isValidAppConfig(configId, incoming());
+      allow delete: if false;
     }
 
-    // Profils et comptes moniteurs/administrateurs
+    // =========================================================================
+    // 7. PROFILS ET COMPTES ÉQUIPE (EMPREINTES SHA-256 UNIQUEMENT)
+    // =========================================================================
     match /app_users/{userId} {
-      allow read, write: if true;
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create, update: if isValidId(userId) && isValidAppUser(userId, incoming());
+      allow delete: if isValidId(userId) && !(userId in ['usr_jerome', 'usr_benoit']);
     }
 
-    // Espace d'échange et carnet de liaison Ben ↔ Jérôme (Module 7)
+    // =========================================================================
+    // 8. ESPACE D'ÉCHANGE BEN ↔ JÉRÔME & DOCUMENTS DE SUIVI TECHNIQUE
+    // =========================================================================
     match /team_notes/{noteId} {
-      allow read, write: if true;
+      allow get: if isValidId(noteId);
+      allow list: if true;
+      allow create, update: if isValidId(noteId) && isValidTeamNote(noteId, incoming());
+      allow delete: if isValidId(noteId) && !isSystemTechNoteDoc(noteId);
     }
 
-    // Relevés GPS de limite basse de roulage (Étalonnage terrain en direct)
+    // =========================================================================
+    // 9. RELEVÉS GPS LIMITE BASSE DE ROULAGE (ÉTALONNAGE TERRAIN)
+    // =========================================================================
     match /waterline_gps_logs/{logId} {
-      allow read, write: if true;
+      allow get: if isValidId(logId);
+      allow list: if true;
+      allow create, update: if isValidId(logId) && isValidWaterlineGpsLog(incoming());
+      allow delete: if isValidId(logId);
     }
 
-    // Test de connectivité
+    // =========================================================================
+    // 10. SONDE DE CONNECTIVITÉ LECTURE SEULE
+    // =========================================================================
     match /test/{docId} {
-      allow read, write: if true;
+      allow get: if docId == 'connection';
+      allow list, write: if false;
     }
   }
 }

@@ -16,6 +16,8 @@ import {
 import {
   applyRealConditionsToLog,
   buildWaterlineSnapshot,
+  calculateGpsDistanceM,
+  computeGpsDiagnosticSummary,
   consolidateGpsLogWithRealData,
   enqueueOfflineGpsLog,
   exportWaterlineLogsAsCsv,
@@ -23,9 +25,13 @@ import {
   findRecentDuplicateGpsLog,
   getOfflineGpsQueue,
   getStoredWaterlineLogs,
+  GPS_DIAGNOSTIC_THRESHOLD,
+  GpsCaptureResult,
+  GpsLiveProgress,
   mergeOfflineQueueWithLogs,
   removeOfflineGpsLog,
   requestSmoothedHighAccuracyGps,
+  runGpsPrecisionDiagnostic,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
 import {
@@ -64,13 +70,17 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   
   // États de capture & consolidation réel H+2
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
-  const [sampleProgress, setSampleProgress] = useState<{ current: number; total: number; lastAcc: number } | null>(null);
+  const [isTestingGps, setIsTestingGps] = useState<boolean>(false);
+  const [liveProgress, setLiveProgress] = useState<GpsLiveProgress | null>(null);
+  const [gpsTestResult, setGpsTestResult] = useState<GpsCaptureResult | null>(null);
+  const [gpsTestRefPoint, setGpsTestRefPoint] = useState<GpsCaptureResult | null>(null);
   const [captureStatus, setCaptureStatus] = useState<string>('');
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [lastLoggedItem, setLastLoggedItem] = useState<GpsWaterlineLog | null>(null);
   const [isConsolidating, setIsConsolidating] = useState<boolean>(false);
   const [consolidationFeedback, setConsolidationFeedback] = useState<string>('');
   const syncInFlightRef = useRef<boolean>(false);
+  const gpsAbortRef = useRef<AbortController | null>(null);
 
   // Filtre d'affichage
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
@@ -81,19 +91,13 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     [logs, offlineQueue]
   );
 
-  // Gamification Étape 2 : Objectif 300 mesures & Modèle Empirique
+  // Paliers de maturité empirique : Palier 1 (20 relevés = Diagnostic seuil Lestrevet) & Palier 2 (300 relevés = Modèle complet)
   const TARGET_MEASURES = 300;
   const [showCelebrationModal, setShowCelebrationModal] = useState<boolean>(false);
-  const [isDemoUnlocked, setIsDemoUnlocked] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
-    } catch {
-      return false;
-    }
-  });
 
   const totalCount = displayedLogs.length;
-  const isRealModeUnlocked = totalCount >= TARGET_MEASURES || isDemoUnlocked;
+  const isDiagnosticReady = totalCount >= GPS_DIAGNOSTIC_THRESHOLD;
+  const isRealModeUnlocked = totalCount >= TARGET_MEASURES;
   const progressPercent = Math.min(100, Math.round((totalCount / TARGET_MEASURES) * 100));
   const remainingCount = Math.max(0, TARGET_MEASURES - totalCount);
   const pendingRealCount = useMemo(
@@ -123,19 +127,6 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
       localStorage.setItem('cv_300_celebration_shown', 'true');
     } catch {
       // ignore
-    }
-  };
-
-  const handleToggleDemoUnlock = () => {
-    const next = !isDemoUnlocked;
-    setIsDemoUnlocked(next);
-    try {
-      localStorage.setItem('cv_demo_mode_reel_unlocked', String(next));
-    } catch {
-      // ignore
-    }
-    if (next) {
-      setShowCelebrationModal(true);
     }
   };
 
@@ -297,23 +288,83 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     void syncOfflineAndConsolidatePending({ silent: true });
   }, [isOnline, logs.length, syncOfflineAndConsolidatePending]);
 
-  // Déclencheur du relevé terrain avec moyennage GPS 4 mesures, file hors-ligne plage & couche réelle
+  const handleCancelGps = () => {
+    gpsAbortRef.current?.abort();
+    gpsAbortRef.current = null;
+  };
+
+  // Test de précision GPS (100 % local, aucune écriture en base)
+  const handleRunGpsTest = async () => {
+    if (isCapturing || isTestingGps) return;
+    const controller = new AbortController();
+    gpsAbortRef.current = controller;
+    setIsTestingGps(true);
+    setCaptureError(null);
+    setCaptureStatus('');
+    setLiveProgress({
+      elapsedSec: 0,
+      maxDurationSec: 15,
+      rawCount: 0,
+      validCount: 0,
+      targetValidCount: 5,
+      lastAccM: null,
+      bestAccM: null,
+      phase: 'warming',
+      trajectoryAcc: [],
+    });
+
+    try {
+      const result = await runGpsPrecisionDiagnostic(prog => {
+        setLiveProgress(prog);
+      }, controller.signal);
+      setGpsTestResult(result);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Erreur inattendue lors du test GPS.';
+      if (!errMsg.includes('annulée')) {
+        setCaptureError(errMsg);
+      }
+    } finally {
+      gpsAbortRef.current = null;
+      setIsTestingGps(false);
+      setLiveProgress(null);
+    }
+  };
+
+  // Déclencheur du relevé terrain avec flux continu watchPosition pondéré 1/σ², file hors-ligne plage & couche réelle
   const handleCaptureNow = async () => {
     if (isReadOnly) {
-      alert('Mode consultation active : vous ne pouvez pas enregistrer de relevé.');
+      setCaptureError('Mode consultation actif : vous pouvez utiliser « Tester le GPS » mais pas enregistrer de relevé.');
       return;
     }
 
+    const controller = new AbortController();
+    gpsAbortRef.current = controller;
     setIsCapturing(true);
     setCaptureError(null);
-    setSampleProgress({ current: 1, total: 4, lastAcc: 0 });
-    setCaptureStatus('🛰️ Stabilisation & lissage GPS en cours (4 lectures successives)...');
+    setLiveProgress({
+      elapsedSec: 0,
+      maxDurationSec: 15,
+      rawCount: 0,
+      validCount: 0,
+      targetValidCount: 4,
+      lastAccM: null,
+      bestAccM: null,
+      phase: 'warming',
+      trajectoryAcc: [],
+    });
+    setCaptureStatus('🛰️ Chauffe et convergence GPS en cours (flux continu watchPosition 1/σ²)...');
 
     try {
-      // 1. Capture haute précision moyennée sur 4 lectures (filtre < 15m)
-      const gpsResult = await requestSmoothedHighAccuracyGps(4, 600, (curr, tot, acc) => {
-        setSampleProgress({ current: curr, total: tot, lastAcc: acc });
-        setCaptureStatus(`🛰️ Échantillonnage GPS : mesure ${curr} sur ${tot} (précision : ${acc} m)...`);
+      // 1. Capture haute précision continue pondérée 1/σ² (filtre ≤ 15 m)
+      const gpsResult = await requestSmoothedHighAccuracyGps(4, 600, undefined, {
+        signal: controller.signal,
+        onLiveProgress: prog => {
+          setLiveProgress(prog);
+          const accLabel = prog.lastAccM != null ? `±${prog.lastAccM} m` : 'recherche satellites…';
+          setCaptureStatus(
+            `🛰️ Convergence GPS (${prog.elapsedSec.toFixed(0)}s/${prog.maxDurationSec}s) · ${prog.validCount}/${prog.targetValidCount} lectures ≤ 15 m (${accLabel})`
+          );
+        },
       });
 
       setCaptureStatus('⚡ Capture AROME/SHOM & interro capteurs réels...');
@@ -410,11 +461,14 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     } catch (err: unknown) {
       console.error('Erreur capture GPS:', err);
       const errMsg = err instanceof Error ? err.message : 'Erreur inattendue lors de la mesure GPS.';
-      setCaptureError(errMsg);
+      if (!errMsg.includes('annulée')) {
+        setCaptureError(errMsg);
+      }
       setCaptureStatus('');
     } finally {
+      gpsAbortRef.current = null;
       setIsCapturing(false);
-      setSampleProgress(null);
+      setLiveProgress(null);
     }
   };
 
@@ -594,11 +648,15 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             Rends-toi physiquement à la <strong>limite basse de roulage</strong> (front de l'eau). Appuie sur le bouton ci-dessous : ton smartphone fige automatiquement la position GPS haute précision, la météo AROME du moment et l'écart avec les modèles théoriques.
           </p>
 
-          {/* ÉTAPE 2 : JAUGE DE PROGRESSION & GAMIFICATION (OBJECTIF 300 MESURES) */}
+          {/* ÉTAPE 2 : JAUGE DE PROGRESSION À 2 PALIERS (20 MESURES = DIAGNOSTIC · 300 = MODÈLE COMPLET) */}
           <div
             style={{
-              background: isRealModeUnlocked ? '#f0fdf4' : '#f8fafc',
-              border: isRealModeUnlocked ? '1.5px solid #86efac' : '1.5px solid #cbd5e1',
+              background: isRealModeUnlocked ? '#f0fdf4' : isDiagnosticReady ? '#f0f9ff' : '#f8fafc',
+              border: isRealModeUnlocked
+                ? '1.5px solid #86efac'
+                : isDiagnosticReady
+                ? '1.5px solid #7dd3fc'
+                : '1.5px solid #cbd5e1',
               borderRadius: '12px',
               padding: '12px 16px',
               marginBottom: '18px',
@@ -607,36 +665,33 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '1rem' }}>{isRealModeUnlocked ? '🏆' : '🎯'}</span>
+                <span style={{ fontSize: '1rem' }}>{isRealModeUnlocked ? '🏆' : isDiagnosticReady ? '🔬' : '🎯'}</span>
                 <span style={{ fontSize: '0.76rem', fontWeight: 900, textTransform: 'uppercase', color: isRealModeUnlocked ? '#15803d' : '#0369a1', letterSpacing: '0.03em' }}>
-                  Progression vers le Mode Réel (Modèle Empirique)
+                  Avancement de l&apos;Étalonnage Plage (Paliers 20 &amp; 300)
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    padding: '2px 7px',
+                    borderRadius: '10px',
+                    background: isDiagnosticReady ? '#dcfce7' : '#e0f2fe',
+                    color: isDiagnosticReady ? '#166534' : '#0369a1',
+                  }}
+                >
+                  {isDiagnosticReady
+                    ? `✓ Diagnostic 20 actif`
+                    : `Palier 1 : ${totalCount}/${GPS_DIAGNOSTIC_THRESHOLD}`}
+                </span>
                 <span style={{ fontSize: '0.82rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
                   {totalCount} / {TARGET_MEASURES} ({progressPercent}%)
                 </span>
-                <button
-                  type="button"
-                  onClick={handleToggleDemoUnlock}
-                  title="Simuler immédiatement le déblocage des 300 mesures pour tester l'alerte festive"
-                  style={{
-                    background: isDemoUnlocked ? '#fef3c7' : '#f1f5f9',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '4px',
-                    padding: '2px 6px',
-                    fontSize: '0.62rem',
-                    fontWeight: 700,
-                    color: isDemoUnlocked ? '#b45309' : '#64748b',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {isDemoUnlocked ? '✓ Démo 300 active' : '⚡ Tester cap 300'}
-                </button>
               </div>
             </div>
 
-            {/* Barre de jauge horizontale */}
+            {/* Barre de jauge horizontale avec repère palier 20 */}
             <div style={{ width: '100%', height: '10px', background: '#e2e8f0', borderRadius: '5px', overflow: 'hidden', position: 'relative' }}>
               <div
                 style={{
@@ -649,17 +704,33 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   transition: 'width 0.4s ease',
                 }}
               />
+              <div
+                title="Palier 1 : 20 relevés (Diagnostic seuil réel Lestrevet)"
+                style={{
+                  position: 'absolute',
+                  left: `${(GPS_DIAGNOSTIC_THRESHOLD / TARGET_MEASURES) * 100}%`,
+                  top: 0,
+                  bottom: 0,
+                  width: '2px',
+                  background: isDiagnosticReady ? '#16a34a' : '#f59e0b',
+                }}
+              />
             </div>
 
             {/* Légende et statut */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '0.70rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '6px', fontSize: '0.70rem' }}>
               {isRealModeUnlocked ? (
                 <span style={{ color: '#166534', fontWeight: 800 }}>
-                  ✨ <strong>Cap des 300 mesures franchi !</strong> L'option Mode Réel est déverrouillée.
+                  ✨ <strong>Cap des 300 mesures franchi !</strong> Jeu complet disponible pour le calibrage fin.
+                </span>
+              ) : isDiagnosticReady ? (
+                <span style={{ color: '#0369a1', fontWeight: 700 }}>
+                  🔬 <strong>Diagnostic 20 mesures actif ci-dessous</strong> · Encore <strong>{remainingCount}</strong> relevés pour le jeu complet (300).
                 </span>
               ) : (
                 <span style={{ color: '#64748b' }}>
-                  🔒 <strong>Mode Théorique actif</strong> (seuil fixe ex: {settings.L} m) · Encore <strong>{remainingCount}</strong> relevés pour débloquer le Mode Réel.
+                  🔒 <strong>Mode Théorique actif</strong> (seuil {settings.L.toFixed(2)} m) · Encore{' '}
+                  <strong>{Math.max(0, GPS_DIAGNOSTIC_THRESHOLD - totalCount)}</strong> relevé{GPS_DIAGNOSTIC_THRESHOLD - totalCount > 1 ? 's' : ''} pour le <strong>Diagnostic seuil réel (20)</strong>.
                 </span>
               )}
               <span style={{ color: '#0369a1', fontWeight: 700 }}>
@@ -710,46 +781,73 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           </div>
 
           {/* GROS BOUTON MOBILE */}
-          <button
-            type="button"
-            disabled={isCapturing || isReadOnly}
-            onClick={handleCaptureNow}
-            style={{
-              width: '100%',
-              maxWidth: '480px',
-              padding: '16px 24px',
-              background: isCapturing ? '#94a3b8' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '1.05rem',
-              fontWeight: 900,
-              letterSpacing: '0.02em',
-              cursor: isCapturing || isReadOnly ? 'not-allowed' : 'pointer',
-              boxShadow: '0 6px 18px rgba(2, 132, 199, 0.35)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-              transition: 'all 0.15s ease-in-out',
-            }}
-          >
-            {isCapturing ? (
-              <>
-                <span className="spinner" style={{ width: '18px', height: '18px', border: '3px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
-                <span>Acquisition satellites GPS en cours...</span>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize: '1.3rem' }}>📍</span>
-                <span>TOP RELEVÉ LIMITE BASSE (EN DIRECT)</span>
-              </>
-            )}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              disabled={isCapturing || isTestingGps || isReadOnly}
+              onClick={handleCaptureNow}
+              style={{
+                width: '100%',
+                maxWidth: '480px',
+                padding: '16px 24px',
+                background: isCapturing || isTestingGps ? '#94a3b8' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '1.05rem',
+                fontWeight: 900,
+                letterSpacing: '0.02em',
+                cursor: isCapturing || isTestingGps || isReadOnly ? 'not-allowed' : 'pointer',
+                boxShadow: '0 6px 18px rgba(2, 132, 199, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                transition: 'all 0.15s ease-in-out',
+              }}
+            >
+              {isCapturing ? (
+                <>
+                  <span className="spinner" style={{ width: '18px', height: '18px', border: '3px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                  <span>Convergence satellites GPS en cours...</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: '1.3rem' }}>📍</span>
+                  <span>TOP RELEVÉ LIMITE BASSE (EN DIRECT)</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={isCapturing || isTestingGps}
+              onClick={handleRunGpsTest}
+              style={{
+                padding: '7px 14px',
+                background: '#f8fafc',
+                color: '#0369a1',
+                border: '1.5px solid #bae6fd',
+                borderRadius: '8px',
+                fontSize: '0.76rem',
+                fontWeight: 800,
+                cursor: isCapturing || isTestingGps ? 'not-allowed' : 'pointer',
+                opacity: isCapturing || isTestingGps ? 0.6 : 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>🧪</span>
+              <span>{isTestingGps ? 'Test de précision GPS en cours...' : 'Tester mon GPS (sans enregistrer)'}</span>
+            </button>
+          </div>
 
           {/* Badge de réassurance anti-doublon + statut réseau & file plage */}
           <div style={{ marginTop: '10px', fontSize: '0.68rem', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '8px' }}>
             <span>🛡️ Anti-doublon 60s</span>
+            <span>·</span>
+            <span>🛰️ Flux continu 1/σ²</span>
             <span>·</span>
             <span style={{ color: isOnline ? '#15803d' : '#b45309', fontWeight: 700 }}>
               {isOnline ? '📶 Réseau actif' : '📴 Mode hors-ligne plage (file locale garantie)'}
@@ -770,65 +868,233 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             )}
           </div>
 
-          {/* Jauge d'échantillonnage multi-mesures (Étape 1 Modèle Empirique) */}
-          {sampleProgress && (
+          {/* Jauge de convergence GNSS continue (watchPosition 1/σ²) */}
+          {liveProgress && (
             <div
               style={{
-                marginTop: '14px',
                 background: '#f0f9ff',
                 border: '1.5px solid #bae6fd',
                 borderRadius: '10px',
                 padding: '12px 14px',
                 maxWidth: '480px',
                 margin: '14px auto 0',
+                textAlign: 'left',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1' }}>
-                  📡 Moyennage anti-flottement : {sampleProgress.current} / {sampleProgress.total}
+                  📡 {isTestingGps ? 'Test GPS' : 'Acquisition GPS'} · {liveProgress.validCount}/{liveProgress.targetValidCount} mesures ≤ 15 m ({Math.floor(liveProgress.elapsedSec)}s / {liveProgress.maxDurationSec}s)
                 </span>
-                {sampleProgress.lastAcc > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCancelGps}
+                  style={{
+                    background: '#ffffff',
+                    color: '#64748b',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '2px 8px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+
+              {/* Barre temps + lectures valides */}
+              <div style={{ height: '8px', borderRadius: '4px', background: '#e2e8f0', overflow: 'hidden', marginBottom: '8px' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${Math.min(
+                      100,
+                      Math.max(
+                        (liveProgress.elapsedSec / Math.max(1, liveProgress.maxDurationSec)) * 100,
+                        (liveProgress.validCount / Math.max(1, liveProgress.targetValidCount)) * 100
+                      )
+                    )}%`,
+                    background: liveProgress.bestAccM != null && liveProgress.bestAccM <= 15 ? '#0284c7' : '#f59e0b',
+                    transition: 'width 0.35s ease',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', fontSize: '0.7rem' }}>
+                <span style={{ color: '#334155', fontWeight: 700 }}>
+                  {liveProgress.trajectoryAcc.length > 0
+                    ? `Convergence : ${liveProgress.trajectoryAcc.map(a => `±${a}m`).join(' → ')}`
+                    : 'Chauffe puce GPS / accrochage satellites...'}
+                </span>
+                {liveProgress.bestAccM != null && (
                   <span
                     style={{
-                      fontSize: '0.68rem',
                       fontWeight: 800,
-                      background: sampleProgress.lastAcc <= 5 ? '#dcfce7' : sampleProgress.lastAcc <= 15 ? '#fef3c7' : '#fee2e2',
-                      color: sampleProgress.lastAcc <= 5 ? '#15803d' : sampleProgress.lastAcc <= 15 ? '#b45309' : '#b91c1c',
+                      background: liveProgress.bestAccM <= 5 ? '#dcfce7' : liveProgress.bestAccM <= 15 ? '#fef3c7' : '#fee2e2',
+                      color: liveProgress.bestAccM <= 5 ? '#15803d' : liveProgress.bestAccM <= 15 ? '#b45309' : '#b91c1c',
                       padding: '2px 8px',
                       borderRadius: '12px',
                     }}
                   >
-                    Précision : ±{sampleProgress.lastAcc} m {sampleProgress.lastAcc <= 15 ? '✓' : '⚠️ >15m'}
+                    Meilleure : ±{liveProgress.bestAccM} m {liveProgress.bestAccM <= 15 ? '✓' : '(attente < 15 m)'}
                   </span>
                 )}
               </div>
-
-              {/* Barres d'échantillons */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                {[1, 2, 3, 4].map(idx => {
-                  const isDone = sampleProgress.current > idx || (sampleProgress.current === idx && sampleProgress.lastAcc > 0);
-                  const isCurrent = sampleProgress.current === idx;
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        height: '8px',
-                        borderRadius: '4px',
-                        background: isDone ? '#0284c7' : isCurrent ? '#7dd3fc' : '#e2e8f0',
-                        transition: 'all 0.3s ease',
-                      }}
-                    />
-                  );
-                })}
-              </div>
-              <div style={{ marginTop: '6px', fontSize: '0.66rem', color: '#64748b', textAlign: 'left' }}>
-                3 à 5 lectures successives pour filtrer les décalages de satellites avant validation finale.
+              <div style={{ marginTop: '6px', fontSize: '0.66rem', color: '#64748b' }}>
+                Restez immobile 5 à 12 s à ciel ouvert : la puce GPS affine le signal et pondère automatiquement les mesures les plus précises (1/σ²).
               </div>
             </div>
           )}
 
+          {/* Carte de résultat du Test de précision GPS (100 % local, aucune écriture en base) */}
+          {gpsTestResult && !liveProgress && (() => {
+            const isGood = gpsTestResult.accuracyM <= 8;
+            const isOk = gpsTestResult.accuracyM <= 15;
+            const waterEquivCm = Number(((gpsTestResult.spreadM ?? gpsTestResult.accuracyM) * 1.15).toFixed(1));
+            const repeatDistM = gpsTestRefPoint
+              ? Number(
+                  calculateGpsDistanceM(
+                    gpsTestRefPoint.latitude,
+                    gpsTestRefPoint.longitude,
+                    gpsTestResult.latitude,
+                    gpsTestResult.longitude
+                  ).toFixed(1)
+                )
+              : null;
+            return (
+              <div
+                style={{
+                  maxWidth: '520px',
+                  margin: '14px auto 0',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  textAlign: 'left',
+                  background: isGood ? '#f0fdf4' : isOk ? '#fffbeb' : '#fef2f2',
+                  border: `1.5px solid ${isGood ? '#86efac' : isOk ? '#fcd34d' : '#fca5a5'}`,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                  <strong style={{ fontSize: '0.82rem', color: isGood ? '#166534' : isOk ? '#92400e' : '#991b1b' }}>
+                    {isGood
+                      ? `✅ Test GPS excellent : ±${gpsTestResult.accuracyM} m (prêt pour la plage)`
+                      : isOk
+                      ? `⚠️ Test GPS exploitable : ±${gpsTestResult.accuracyM} m (seuil ≤ 15 m atteint)`
+                      : `❌ Test GPS insuffisant : ±${gpsTestResult.accuracyM} m (seuil plage ≤ 15 m)`}
+                  </strong>
+                  <button
+                    type="button"
+                    onClick={() => setGpsTestResult(null)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#64748b',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                    }}
+                    title="Fermer le résultat du test"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '6px', fontSize: '0.72rem', color: '#334155', marginBottom: '8px' }}>
+                  <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.64rem', color: '#64748b', fontWeight: 700 }}>PRÉCISION PONDÉRÉE</div>
+                    <strong style={{ fontSize: '0.82rem' }}>±{gpsTestResult.accuracyM} m</strong>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.64rem', color: '#64748b', fontWeight: 700 }}>DISPERSION RÉELLE</div>
+                    <strong style={{ fontSize: '0.82rem' }}>{gpsTestResult.spreadM ?? 0} m</strong>
+                    <span style={{ color: '#64748b' }}> (~{waterEquivCm} cm eau)</span>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.64rem', color: '#64748b', fontWeight: 700 }}>MESURES / DURÉE</div>
+                    <strong style={{ fontSize: '0.82rem' }}>
+                      {gpsTestResult.samplesUsed ?? 1}/{gpsTestResult.rawSamples ?? 1} · {gpsTestResult.durationSec ?? 0}s
+                    </strong>
+                  </div>
+                </div>
+
+                {gpsTestResult.trajectoryAcc && gpsTestResult.trajectoryAcc.length > 0 && (
+                  <div style={{ fontSize: '0.7rem', color: '#475569', marginBottom: '6px' }}>
+                    <strong>Convergence observée :</strong> {gpsTestResult.trajectoryAcc.map(a => `±${a} m`).join(' → ')}
+                  </div>
+                )}
+
+                {repeatDistM !== null && (
+                  <div
+                    style={{
+                      background: '#eff6ff',
+                      border: '1px solid #93c5fd',
+                      borderRadius: '6px',
+                      padding: '6px 8px',
+                      fontSize: '0.72rem',
+                      color: '#1e3a8a',
+                      fontWeight: 700,
+                      marginBottom: '6px',
+                    }}
+                  >
+                    📐 Comparaison avec Repère A : <strong>{repeatDistM} m d&apos;écart réel</strong> (≈ {(repeatDistM * 1.15).toFixed(1)} cm de hauteur d&apos;eau à pente 1,15 %).
+                  </div>
+                )}
+
+                {!isOk && (
+                  <div style={{ fontSize: '0.7rem', color: '#991b1b', marginBottom: '6px' }}>
+                    Vérifiez que vous êtes bien <strong>à ciel ouvert</strong> (pas en intérieur) et sur iPhone que <strong>Réglages → Confidentialité → Service de localisation → Safari → Position exacte</strong> est activée.
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setGpsTestRefPoint(gpsTestResult)}
+                    style={{
+                      background: '#ffffff',
+                      color: '#0369a1',
+                      border: '1px solid #7dd3fc',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {gpsTestRefPoint ? '📍 Remplacer Repère A' : '📍 Mémoriser comme Repère A (test 2 passages)'}
+                  </button>
+                  {gpsTestRefPoint && (
+                    <button
+                      type="button"
+                      onClick={() => setGpsTestRefPoint(null)}
+                      style={{
+                        background: 'transparent',
+                        color: '#64748b',
+                        border: 'none',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Effacer Repère A
+                    </button>
+                  )}
+                  <a
+                    href={`https://www.google.com/maps?q=${gpsTestResult.latitude},${gpsTestResult.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontSize: '0.7rem', fontWeight: 800, color: '#0284c7', marginLeft: 'auto' }}
+                  >
+                    🗺️ Vérifier sur Maps
+                  </a>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Retour de statut */}
-          {captureStatus && !sampleProgress && (
+          {captureStatus && !liveProgress && (
             <div style={{ marginTop: '12px', fontSize: '0.82rem', fontWeight: 800, color: captureStatus.startsWith('✓') ? '#166534' : '#0284c7' }}>
               {captureStatus}
             </div>
@@ -838,7 +1104,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <div style={{ marginTop: '12px', padding: '10px 14px', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px', color: '#991b1b', fontSize: '0.80rem', textAlign: 'left' }}>
               ⚠️ <strong>Erreur GPS :</strong> {captureError}
               <div style={{ marginTop: '4px', fontSize: '0.72rem', color: '#b91c1c' }}>
-                Astuce : Assurez-vous d'avoir accordé l'autorisation de géolocalisation dans le navigateur de votre smartphone et que le service GPS est bien activé face à la mer.
+                Astuce iPhone / Android : faites le test <strong>à ciel ouvert</strong> (hors bâtiment) et vérifiez que <strong>Position exacte</strong> est activée pour votre navigateur dans les réglages de localisation.
               </div>
             </div>
           )}
@@ -1059,6 +1325,205 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* BLOC DIAGNOSTIC MESURÉ — PALIER 20 RELEVÉS GPS */}
+      {(() => {
+        const diag = computeGpsDiagnosticSummary(displayedLogs, settings.L, activeCadreProfile);
+        const verdictBg =
+          diag.verdictLevel === 'aligned'
+            ? '#f0fdf4'
+            : diag.verdictLevel === 'higher'
+            ? '#eff6ff'
+            : diag.verdictLevel === 'lower'
+            ? '#fff7ed'
+            : '#f8fafc';
+        const verdictBorder =
+          diag.verdictLevel === 'aligned'
+            ? '#86efac'
+            : diag.verdictLevel === 'higher'
+            ? '#93c5fd'
+            : diag.verdictLevel === 'lower'
+            ? '#fdba74'
+            : '#cbd5e1';
+        const verdictColor =
+          diag.verdictLevel === 'aligned'
+            ? '#166534'
+            : diag.verdictLevel === 'higher'
+            ? '#1e40af'
+            : diag.verdictLevel === 'lower'
+            ? '#9a3412'
+            : '#334155';
+
+        return (
+          <div
+            className="card"
+            style={{
+              background: '#ffffff',
+              border: diag.isReady ? '2px solid #0284c7' : '1.5px solid #cbd5e1',
+              borderRadius: '12px',
+              padding: '16px 18px',
+              marginBottom: '20px',
+              boxShadow: '0 2px 10px rgba(15, 23, 42, 0.04)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+              <div>
+                <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1', letterSpacing: '0.04em' }}>
+                  🔬 Diagnostic Mesuré · Palier 20 Relevés GPS
+                </div>
+                <h3 style={{ margin: '2px 0 0', fontSize: '1.0rem', fontWeight: 900, color: '#0f172a' }}>
+                  Vérification du Seuil Réel de Lestrevet ({settings.L.toFixed(2)} m)
+                </h3>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  background: diag.isReady ? '#dcfce7' : diag.totalCount > 0 ? '#fef3c7' : '#f1f5f9',
+                  color: diag.isReady ? '#166534' : diag.totalCount > 0 ? '#92400e' : '#475569',
+                  border: `1px solid ${diag.isReady ? '#86efac' : diag.totalCount > 0 ? '#fcd34d' : '#cbd5e1'}`,
+                }}
+              >
+                {diag.isReady
+                  ? `✅ Palier atteint (${diag.totalCount} relevés · diagnostic exploitable)`
+                  : diag.totalCount > 0
+                  ? `⏳ Tendance préliminaire (${diag.totalCount} / ${diag.threshold})`
+                  : `🔒 En attente (${diag.totalCount} / ${diag.threshold} relevés)`}
+              </span>
+            </div>
+
+            {/* Barre de progression dédiée au palier 20 */}
+            <div style={{ height: '7px', borderRadius: '4px', background: '#e2e8f0', overflow: 'hidden', marginBottom: '10px' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${diag.progressPct}%`,
+                  background: diag.isReady ? '#16a34a' : '#0284c7',
+                  transition: 'width 0.35s ease',
+                }}
+              />
+            </div>
+
+            {/* Bandeau conclusion / verdict */}
+            <div
+              style={{
+                background: verdictBg,
+                border: `1px solid ${verdictBorder}`,
+                borderRadius: '8px',
+                padding: '9px 12px',
+                fontSize: '0.78rem',
+                color: verdictColor,
+                fontWeight: 700,
+                lineHeight: 1.45,
+                marginBottom: diag.totalCount > 0 ? '12px' : '0',
+              }}
+            >
+              {diag.verdictText}
+            </div>
+
+            {diag.totalCount === 0 ? (
+              <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px', fontSize: '0.72rem', color: '#475569' }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                  <strong>1. Seuil mesuré vs {settings.L.toFixed(2)} m</strong>
+                  <div style={{ marginTop: '2px' }}>Calcule automatiquement la hauteur d&apos;eau réelle constatée à la limite basse de roulage.</div>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                  <strong>2. Effet dépression &amp; vent de mer</strong>
+                  <div style={{ marginTop: '2px' }}>Compare la surcote mesurée en dépression (&lt; 1005 hPa) vs temps calme et par vent d&apos;Ouest.</div>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                  <strong>3. Zones de baie &amp; Bâches</strong>
+                  <div style={{ marginTop: '2px' }}>Ventile largeur utile et écarts entre Lestrevet, Lieue de Grève et Pentrez + suivi des bâches.</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* 4 chiffres clés du diagnostic */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      Hauteur corrigée moy.
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+                      {diag.avgCorrectedWaterM?.toFixed(2)} m
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
+                      vs seuil {settings.L.toFixed(2)} m ({diag.deltaFromCurrentCm != null && diag.deltaFromCurrentCm > 0 ? `+${diag.deltaFromCurrentCm}` : diag.deltaFromCurrentCm} cm)
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      SHOM pur vs Brest réel
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+                      {diag.avgTheoreticalWaterM?.toFixed(2)} m
+                      {diag.avgShomBrestWaterM != null ? ` · ${diag.avgShomBrestWaterM.toFixed(2)} m` : ''}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
+                      {diag.consolidatedCount}/{diag.totalCount} consolidé{diag.consolidatedCount > 1 ? 's' : ''} H+2
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      Dépression &amp; Vent Ouest
+                    </div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
+                      &lt;1005 hPa : {diag.lowPressureAvgRawCm != null ? `${diag.lowPressureAvgRawCm > 0 ? '+' : ''}${diag.lowPressureAvgRawCm} cm` : '—'} ({diag.lowPressureCount})
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 700, marginTop: '2px' }}>
+                      Secteur mer : {diag.seaWindAvgRawCm != null ? `${diag.seaWindAvgRawCm > 0 ? '+' : ''}${diag.seaWindAvgRawCm} cm` : '—'} ({diag.seaWindCount})
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      Bâches signalées
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: diag.bachesCount > 0 ? '#b45309' : '#166534', marginTop: '2px' }}>
+                      {diag.bachesCount} ({diag.bachesPct}%)
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
+                      sur {diag.totalCount} relevé{diag.totalCount > 1 ? 's' : ''} plage
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ventilation par zone de la baie */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '8px' }}>
+                  {diag.zones.map(z => (
+                    <div
+                      key={z.zoneId}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        padding: '7px 10px',
+                        fontSize: '0.72rem',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: '#0f172a', display: 'flex', justifyContent: 'space-between', gap: '6px' }}>
+                        <span>📍 {z.label}</span>
+                        <span style={{ color: '#0369a1' }}>{z.count} pt{z.count > 1 ? 's' : ''}</span>
+                      </div>
+                      <div style={{ color: '#475569', marginTop: '3px' }}>
+                        {z.count > 0
+                          ? `Largeur utile moy. : ${z.avgUsableWidthM != null ? `${z.avgUsableWidthM} m` : '—'} · Écart : ${
+                              z.avgCorrDeltaCm != null ? `${z.avgCorrDeltaCm > 0 ? '+' : ''}${z.avgCorrDeltaCm} cm` : '—'
+                            }`
+                          : 'Aucun relevé sur cette zone'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* RÉFÉRENTIEL CADRE TERRAIN FIXE (DUNE + CÔTÉS GAUCHE/DROITE MAIRIE & JÉRÔME) */}
       <BeachCadrePanel

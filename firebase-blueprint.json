@@ -2,15 +2,16 @@
   "entities": {
     "ValidationDoc": {
       "title": "ValidationDoc",
-      "description": "Validation et décisions de créneaux pour une date donnée.",
+      "description": "Validation et décisions de créneaux (Cycle 1 / Cycle 2) pour une date donnée.",
       "type": "object",
       "properties": {
-        "ts": { "type": "number", "description": "Timestamp de dernière mise à jour." },
-        "k": { "type": "string", "description": "Code météo global ou verdict du jour." },
-        "author": { "type": "string", "description": "Nom de la personne ayant validé (ex: Jérôme, Benoît)." },
-        "items": { "type": "array", "description": "Liste des décisions par créneau." }
+        "ts": { "type": "number", "description": "Timestamp de validation." },
+        "k": { "type": "string", "maxLength": 120, "description": "Signature ou code global du jour." },
+        "author": { "type": "string", "maxLength": 80, "description": "Nom de la personne ayant validé (ex: Jérôme, Benoît)." },
+        "items": { "type": "array", "description": "Liste des décisions par créneau." },
+        "updatedAt": { "type": "number", "description": "Timestamp de dernière mise à jour." }
       },
-      "required": ["ts"]
+      "required": ["items"]
     },
     "CustomSlotDoc": {
       "title": "CustomSlotDoc",
@@ -19,38 +20,38 @@
       "properties": {
         "replaceDefault": { "type": "boolean", "description": "Si vrai, remplace les créneaux automatiques calculés." },
         "slots": { "type": "array", "description": "Liste des créneaux sur-mesure." },
-        "updatedBy": { "type": "string", "description": "Dernier moniteur ayant modifié (ex: Jérôme)." },
+        "updatedBy": { "type": "string", "maxLength": 80, "description": "Dernier moniteur ayant modifié." },
         "updatedAt": { "type": "number", "description": "Timestamp de modification." }
       },
       "required": ["replaceDefault", "slots"]
     },
     "SlotObservation": {
       "title": "SlotObservation",
-      "description": "Relevé terrain, écart de marée/surcote ou motif d'annulation.",
+      "description": "Relevé terrain (REX), écart de marée/surcote ou motif d'annulation.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Identifiant unique du relevé." },
-        "ds": { "type": "string", "description": "Date YYYY-MM-DD." },
-        "slotKey": { "type": "string", "description": "Clé du créneau horaire." },
-        "slotStart": { "type": "string", "description": "Heure de début (ex: 10:00)." },
-        "slotEnd": { "type": "string", "description": "Heure de fin (ex: 11:30)." },
+        "id": { "type": "string", "maxLength": 128, "description": "Identifiant unique du relevé." },
+        "ds": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Date YYYY-MM-DD." },
+        "slotKey": { "type": "string", "maxLength": 64, "description": "Clé du créneau horaire." },
+        "slotStart": { "type": "string", "maxLength": 16, "description": "Heure de début." },
+        "slotEnd": { "type": "string", "maxLength": 16, "description": "Heure de fin." },
         "status": { "type": "string", "enum": ["realized", "cancelled"] },
-        "cancellationReason": { "type": "string" },
-        "cancellationNote": { "type": "string" },
+        "cancellationReason": { "type": "string", "maxLength": 120 },
+        "cancellationNote": { "type": "string", "maxLength": 1000 },
         "timeDeltaMin": { "type": "number" },
         "waterDeltaCm": { "type": "number" },
         "observedWaterH": { "type": "number" },
         "observedPressure": { "type": "number" },
         "observedWindKts": { "type": "number" },
         "observedGustKts": { "type": "number" },
-        "observedWindDir": { "type": "string" },
+        "observedWindDir": { "type": "string", "maxLength": 32 },
         "observedWaveH": { "type": "number" },
-        "beachCondition": { "type": "string" },
+        "beachCondition": { "type": "string", "maxLength": 80 },
         "participantsCount": { "type": "number" },
         "monoCount": { "type": "number" },
         "biCount": { "type": "number" },
-        "notes": { "type": "string" },
-        "author": { "type": "string", "description": "Moniteur ayant saisi le relevé." },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "author": { "type": "string", "maxLength": 80, "description": "Moniteur ayant saisi le relevé." },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
       },
@@ -61,61 +62,61 @@
       "description": "Feuille d'émargement et réservations clients pour une date et un créneau.",
       "type": "object",
       "properties": {
-        "ds": { "type": "string", "description": "Date YYYY-MM-DD." },
-        "slotKey": { "type": "string", "description": "Clé du créneau." },
+        "ds": { "type": "string", "maxLength": 16, "description": "Date YYYY-MM-DD." },
+        "slotKey": { "type": "string", "maxLength": 64, "description": "Clé du créneau." },
         "clients": { "type": "array", "description": "Liste des clients inscrits." },
-        "updatedBy": { "type": "string", "description": "Moniteur ayant inscrit ou modifié." },
+        "updatedBy": { "type": "string", "maxLength": 80, "description": "Moniteur ayant inscrit ou modifié." },
         "updatedAt": { "type": "number", "description": "Timestamp de mise à jour." }
       },
       "required": ["ds", "slotKey", "clients"]
     },
-    "SecurityConfig": {
-      "title": "SecurityConfig",
-      "description": "Configuration du mot de passe d'accès pour les moniteurs.",
+    "AppConfigDoc": {
+      "title": "AppConfigDoc",
+      "description": "Configuration globale de l'école (session_settings, beach_cadre_roulage).",
       "type": "object",
       "properties": {
-        "schoolPassword": { "type": "string", "description": "Mot de passe partagé de l'école." },
-        "clubPassword": { "type": "string", "description": "Mot de passe partagé (rétrocompatibilité)." },
-        "updatedAt": { "type": "number", "description": "Timestamp de modification." }
-      }
+        "updatedBy": { "type": "string", "enum": ["Jérôme", "Benoît", "Admin", "Jerome", "Benoit"] },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["updatedBy"]
     },
     "ClientProfile": {
       "title": "ClientProfile",
       "description": "Fiche client centralisée (CRM) avec coordonnées, historique de séances et préférences.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Identifiant unique du client." },
-        "firstName": { "type": "string" },
-        "lastName": { "type": "string" },
-        "phone": { "type": "string" },
-        "email": { "type": "string" },
-        "city": { "type": "string" },
-        "postalCode": { "type": "string" },
-        "level": { "type": "string" },
-        "preferredGear": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "firstName": { "type": "string", "maxLength": 120 },
+        "lastName": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 160 },
+        "city": { "type": "string", "maxLength": 120 },
+        "postalCode": { "type": "string", "maxLength": 20 },
+        "level": { "type": "string", "maxLength": 60 },
+        "preferredGear": { "type": "string", "maxLength": 60 },
         "totalSessions": { "type": "number" },
-        "lastSessionDate": { "type": "string" },
+        "lastSessionDate": { "type": "string", "maxLength": 32 },
         "totalSpent": { "type": "number" },
         "hasGiftVoucher": { "type": "boolean" },
         "giftVoucherBalance": { "type": "number" },
-        "notes": { "type": "string" },
+        "notes": { "type": "string", "maxLength": 3000 },
         "tags": { "type": "array" },
-        "author": { "type": "string" },
+        "author": { "type": "string", "maxLength": 80 },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
       },
-      "required": ["lastName", "phone"]
+      "required": ["lastName"]
     },
     "AppUser": {
       "title": "AppUser",
-      "description": "Profil utilisateur avec rôle, mot de passe haché et permissions.",
+      "description": "Profil utilisateur avec rôle, mot de passe haché SHA-256 et permissions.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "username": { "type": "string" },
-        "displayName": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 60 },
+        "displayName": { "type": "string", "maxLength": 100 },
         "role": { "type": "string", "enum": ["admin", "moniteur"] },
-        "passwordHash": { "type": "string" },
+        "passwordHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "minLength": 64, "maxLength": 64 },
         "isReadOnly": { "type": "boolean" },
         "isActive": { "type": "boolean" },
         "createdAt": { "type": "number" },
@@ -124,17 +125,20 @@
       },
       "required": ["username", "role", "passwordHash"]
     },
-    "BeachCadreConfig": {
-      "title": "BeachCadreConfig",
-      "description": "Référentiel fixe du cadre de roulage (ligne de dune, côtés gauche/droite Mairie et Jérôme) stocké dans app_config/beach_cadre_roulage.",
+    "TeamNoteDoc": {
+      "title": "TeamNoteDoc",
+      "description": "Notes d'échange Ben ↔ Jérôme ainsi que les documents techniques d'état (status_tech_notes, qcm_tech_notes, audit_data_c1_c2).",
       "type": "object",
       "properties": {
-        "activeProfile": { "type": "string", "enum": ["jerome", "mairie"] },
-        "profiles": { "type": "object" },
-        "updatedBy": { "type": "string" },
-        "updatedAt": { "type": "number" }
-      },
-      "required": ["activeProfile", "profiles", "updatedBy"]
+        "author": { "type": "string", "maxLength": 80 },
+        "category": { "type": "string", "maxLength": 60 },
+        "content": { "type": "string", "maxLength": 5000 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "isResolved": { "type": "boolean" },
+        "resolvedAt": { "type": "number" },
+        "resolvedBy": { "type": "string", "maxLength": 80 }
+      }
     },
     "WaterlineGpsLog": {
       "title": "WaterlineGpsLog",
@@ -142,9 +146,9 @@
       "type": "object",
       "properties": {
         "timestamp": { "type": "number" },
-        "dateStr": { "type": "string" },
-        "timeStr": { "type": "string" },
-        "author": { "type": "string" },
+        "dateStr": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "timeStr": { "type": "string", "maxLength": 16 },
+        "author": { "type": "string", "maxLength": 80 },
         "latitude": { "type": "number" },
         "longitude": { "type": "number" },
         "accuracyM": { "type": "number" },
@@ -155,7 +159,8 @@
         "cadreProfileUsed": { "type": "string", "enum": ["jerome", "mairie"] },
         "realWeatherSnapshot": { "type": "object" },
         "consolidationStatus": { "type": "string", "enum": ["pending_offline", "pending_real", "consolidated"] },
-        "offlineQueued": { "type": "boolean" }
+        "offlineQueued": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 1000 }
       },
       "required": ["timestamp", "dateStr", "author", "latitude", "longitude"]
     }
@@ -171,7 +176,7 @@
     },
     "/observations/{obsId}": {
       "schema": "SlotObservation",
-      "description": "Relevés terrain et observations pour les statistiques et la calibration."
+      "description": "Relevés terrain (REX) et observations pour les statistiques et la calibration."
     },
     "/reservations/{reservationKey}": {
       "schema": "ReservationDoc",
@@ -182,12 +187,16 @@
       "description": "Fiches clients centralisées de l'école (CRM)."
     },
     "/app_config/{configId}": {
-      "schema": "SecurityConfig",
-      "description": "Paramètres globaux de l'école, mot de passe d'accès et référentiel cadre terrain (beach_cadre_roulage)."
+      "schema": "AppConfigDoc",
+      "description": "Paramètres globaux de l'école (session_settings, beach_cadre_roulage) réservés aux administrateurs."
     },
     "/app_users/{userId}": {
       "schema": "AppUser",
-      "description": "Comptes utilisateurs avec rôle et mot de passe individuel."
+      "description": "Comptes utilisateurs avec rôle et empreinte SHA-256."
+    },
+    "/team_notes/{noteId}": {
+      "schema": "TeamNoteDoc",
+      "description": "Espace d'échange Ben ↔ Jérôme et documents de suivi technique (QCM, statuts, visas d'audit)."
     },
     "/waterline_gps_logs/{logId}": {
       "schema": "WaterlineGpsLog",

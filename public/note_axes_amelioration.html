@@ -350,14 +350,22 @@
 
     <!-- AXE 5 : HEURES MONITEUR & STATISTIQUES AVANCEES (ISSUS DE EVOLUTION MAJEURE) -->
     <div class="block">
-      <h2><span class="step-num">5</span> Pilotage École · Heures Moniteur &amp; Statistiques Complémentaires</h2>
+      <h2><span class="step-num">5</span> Pilotage École · Heures Moniteur (Q9 Jérôme) &amp; Statistiques Complémentaires</h2>
       <div class="axe-card" style="margin-bottom:0;">
         <div class="axe-head">
-          <span>Suivi horaire Jérôme et indicateurs analytiques avancés</span>
-          <span class="tag tag-amber">Transféré depuis Évolution Majeure</span>
+          <span>Suivi horaire moniteurs (Jérôme, Youenn, Katleen) et indicateurs analytiques avancés</span>
+          <span class="tag tag-amber">Question ouverte · QCM Jérôme (Q9)</span>
         </div>
         <ul>
-          <li><strong>Gestion des heures moniteur (Jérôme) :</strong> comptabilisation automatique du volume horaire effectif (heures face aux stagiaires sur l’estran + heures de préparation, réglage du parc et convoyage), avec export hebdomadaire ou mensuel selon le besoin administratif.</li>
+          <li><strong>Ce qui est déjà disponible sans double saisie :</strong> horaires réels de chaque séance effectuée, moniteur principal et 2<sup>e</sup> moniteur (avec sa propre heure de fin si différente).</li>
+          <li><strong>4 points à trancher par Jérôme (Q9 du QCM) avant développement :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Périmètre des heures :</strong> heures face stagiaires uniquement (auto), ou ajout d’un forfait prépa / rangement / convoyage et saisie libre d’heures atelier ?</li>
+              <li><strong>Moniteurs concernés :</strong> renforts &amp; saisonniers (Youenn, Katleen) uniquement, ou aussi suivi personnel de Jérôme ?</li>
+              <li><strong>Annulation météo sur place :</strong> case dédiée « Déplacement / présence à compter » si un moniteur s’est déplacé avant annulation ?</li>
+              <li><strong>Format souhaité :</strong> simple tableau hebdo/mensuel à l’écran, export Excel/PDF pour la paie/comptable, ou pas prioritaire ?</li>
+            </ol>
+          </li>
           <li><strong>Statistiques complémentaires :</strong> suivi détaillé des pertes de roulage par secteur de vent défavorable, analyse de fréquentation par coefficient de marée et ratio détaillé monoplace / biplace par séance en complément des tableaux de bord actuels.</li>
         </ul>
       </div>
@@ -442,9 +450,30 @@
       </div>
     </div>
 
+    <!-- AXE 9 : PARC MATERIEL (CHARS MONO / BIPLACES & LIMITE DE BLOCAGE) -->
+    <div class="block block-amber">
+      <h2><span class="step-num">9</span> Parc Matériel · Nombre de Chars Mono / Biplaces &amp; Limite de Blocage</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Inventaire du parc roulant et pertinence d’un blocage matériel dans l’application</span>
+          <span class="tag tag-amber">Question ouverte · QCM Jérôme (Q8)</span>
+        </div>
+        <ul>
+          <li><strong>État actuel :</strong> l’application ne gère pas encore le parc matériel du club — elle applique uniquement le plafond d’encadrement réglementaire (12 chars / moniteur, 20 avec CQP, 24 avec 2ᵉ diplômé) et le blocage strict à 0 char sur une séance effectuée.</li>
+          <li><strong>Questions posées à Jérôme (Q8 du QCM) :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Composition exacte du parc roulant :</strong> combien as-tu de chars <strong>monoplaces</strong> et combien de chars <strong>biplaces (doubles)</strong> opérationnels au club ?</li>
+              <li><strong>Pertinence d’une limite de blocage :</strong> est-il utile de bloquer ou d’alerter dans l’application au-delà de ce parc réel (en total simultané et/ou en nombre de biplaces), ou préfères-tu ne pas complexifier et rester uniquement sur le plafond d’encadrement (12 / 20 / 24 chars) ?</li>
+            </ol>
+          </li>
+          <li><strong>Suivi des chars en maintenance / hors service :</strong> mis volontairement en attente — on n’en tient pas compte tant que Jérôme n’a pas arbitré le point ci-dessus.</li>
+        </ul>
+      </div>
+    </div>
+
     <!-- TABLEAU VIVANT POUR COMPLETER AU FIL DE L'EAU -->
     <div class="block">
-      <h2><span class="step-num">9</span> Tableau de suivi &amp; ajouts ultérieurs</h2>
+      <h2><span class="step-num">10</span> Tableau de suivi &amp; ajouts ultérieurs</h2>
       <table class="ref-table">
         <thead>
           <tr>
@@ -455,6 +484,12 @@
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>Parc chars (mono &amp; biplaces) &amp; limite de blocage</strong></td>
+            <td>Consignes encadrement / parc</td>
+            <td>En attente retour Jérôme (Q8)</td>
+            <td>Nombre exact de monoplaces et biplaces du club + avis sur l’intérêt (ou non) d’un blocage parc (maintenance en attente)</td>
+          </tr>
           <tr>
             <td><strong>Ajustement horaire Cycle 1 jusqu’à H−48h</strong></td>
             <td>Revue cohérence (Point 3)</td>
@@ -493,9 +528,9 @@
           </tr>
           <tr>
             <td><strong>Heures moniteur (estran + prépa) &amp; Stats avancées</strong></td>
-            <td>Évolution Majeure (1 &amp; 2)</td>
-            <td>Phase 2 (après rodage)</td>
-            <td>Format de relevé souhaité par Jérôme + historique REX suffisant</td>
+            <td>Évolution Majeure &amp; Cadrage</td>
+            <td>En attente retour Jérôme (Q9)</td>
+            <td>Périmètre (estran vs prépa), saisonniers vs Jérôme, cas annulation sur place et format d’export souhaité</td>
           </tr>
           <tr>
             <td><em>Nouvel axe à ajouter :</em></td>

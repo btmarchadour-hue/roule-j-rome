@@ -16,13 +16,14 @@ export async function verifyPassword(plainText: string, expectedHash: string): P
 }
 
 // Profils par défaut de l'école de char à voile (Jérôme, Benoît, et Moniteur d'été)
+// Les mots de passe sont uniquement stockés sous forme d'empreintes SHA-256 (jamais en clair).
 export const DEFAULT_USERS: AppUser[] = [
   {
     id: 'usr_jerome',
     username: 'Jérôme',
     displayName: 'Jérôme (Moniteur Responsable)',
     role: 'admin',
-    passwordHash: '792cb90173e78db50f68a37d16a46fdbea1c59518078ef5a41d3485a5628e402', // mdp: lestrevet
+    passwordHash: '792cb90173e78db50f68a37d16a46fdbea1c59518078ef5a41d3485a5628e402',
     isReadOnly: false,
     isActive: true,
     createdAt: 1730000000000,
@@ -33,7 +34,7 @@ export const DEFAULT_USERS: AppUser[] = [
     username: 'Benoît',
     displayName: 'Benoît (Concepteur)',
     role: 'admin',
-    passwordHash: 'adce9053b3b6b52dc4a7bb0b963351c77cb09477d1ee87bdc4fdd8ff8c3d04d3', // mdp: Maya2103
+    passwordHash: 'adce9053b3b6b52dc4a7bb0b963351c77cb09477d1ee87bdc4fdd8ff8c3d04d3',
     isReadOnly: false,
     isActive: true,
     createdAt: 1730000000000,
@@ -44,7 +45,7 @@ export const DEFAULT_USERS: AppUser[] = [
     username: 'Moniteur',
     displayName: 'Moniteur École (Saison)',
     role: 'moniteur',
-    passwordHash: '96f82c7d491f5cce1185b7ac8c3bdfbeb2267c3fa6236136975617c383e17c24', // mdp: moniteur
+    passwordHash: '96f82c7d491f5cce1185b7ac8c3bdfbeb2267c3fa6236136975617c383e17c24',
     isReadOnly: true,
     isActive: true,
     createdAt: 1730000000000,

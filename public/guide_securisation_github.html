@@ -3,265 +3,541 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Guide de Régularisation & Sécurisation GitHub — Char à Voile Lestrevet</title>
+  <title>Guide Complet de Sécurisation, Exploitation &amp; Base de Test — Char à Voile Lestrevet</title>
   <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #475569;
+      --border: #cbd5e1;
+      --surface: #f8fafc;
+      --accent: #0369a1;
+      --accent-soft: #e0f2fe;
+      --ok-bg: #f0fdf4;
+      --ok-border: #16a34a;
+      --ok-ink: #166534;
+      --warn-bg: #fffbeb;
+      --warn-border: #d97706;
+      --warn-ink: #92400e;
+      --danger-bg: #fef2f2;
+      --danger-border: #dc2626;
+      --danger-ink: #991b1b;
+    }
+    * { box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #0f172a;
-      background: #f8fafc;
-      line-height: 1.6;
+      color: var(--ink);
+      background: #f1f5f9;
+      line-height: 1.58;
       margin: 0;
-      padding: 30px 20px;
+      padding: 24px 16px 48px;
     }
     .container {
-      max-width: 820px;
+      max-width: 880px;
       margin: 0 auto;
       background: #ffffff;
-      padding: 40px;
-      border-radius: 12px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+      padding: 36px 42px;
+      border-radius: 14px;
+      box-shadow: 0 6px 24px rgba(15, 23, 42, 0.08);
       border: 1px solid #e2e8f0;
-    }
-    h1 {
-      font-size: 1.6rem;
-      color: #0369a1;
-      border-bottom: 2px solid #0284c7;
-      padding-bottom: 12px;
-      margin-top: 0;
-    }
-    h2 {
-      font-size: 1.2rem;
-      color: #0f172a;
-      margin-top: 28px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .badge {
-      display: inline-block;
-      background: #e0f2fe;
-      color: #0369a1;
-      font-size: 0.75rem;
-      font-weight: 800;
-      padding: 3px 8px;
-      border-radius: 4px;
-      text-transform: uppercase;
-    }
-    .step-box {
-      background: #f8fafc;
-      border-left: 4px solid #0284c7;
-      padding: 16px 20px;
-      border-radius: 0 8px 8px 0;
-      margin: 16px 0;
-    }
-    .step-title {
-      font-weight: 800;
-      color: #0f172a;
-      font-size: 1rem;
-      margin-bottom: 8px;
-    }
-    ol {
-      margin: 8px 0 8px 20px;
-      padding: 0;
-    }
-    li {
-      margin-bottom: 8px;
-    }
-    code {
-      background: #e2e8f0;
-      color: #0f172a;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-weight: 700;
-      font-size: 0.9em;
-    }
-    .alert-box {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      border-left: 4px solid #dc2626;
-      padding: 14px 18px;
-      border-radius: 4px;
-      margin: 16px 0;
-      font-size: 0.9rem;
-      color: #991b1b;
-    }
-    .success-box {
-      background: #f0fdf4;
-      border: 1px solid #bbf7d0;
-      border-left: 4px solid #16a34a;
-      padding: 14px 18px;
-      border-radius: 4px;
-      margin: 16px 0;
-      font-size: 0.9rem;
-      color: #166534;
     }
     .actions {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       margin-bottom: 24px;
       flex-wrap: wrap;
+      align-items: center;
     }
     button.btn {
       background: #0284c7;
       color: #ffffff;
       border: none;
-      padding: 10px 18px;
+      padding: 9px 16px;
       border-radius: 8px;
       font-weight: 700;
       cursor: pointer;
-      font-size: 0.88rem;
+      font-size: 0.85rem;
     }
     button.btn-sec {
       background: #ffffff;
       color: #0f172a;
-      border: 1px solid #cbd5e1;
-      padding: 10px 18px;
+      border: 1px solid var(--border);
+      padding: 9px 16px;
       border-radius: 8px;
       font-weight: 700;
       cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .feedback {
+      display: none;
+      color: var(--ok-ink);
+      background: var(--ok-bg);
+      border: 1px solid #bbf7d0;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+    header.doc-head {
+      border-bottom: 2.5px solid var(--accent);
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      font-size: 0.74rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    h1 {
+      font-size: 1.55rem;
+      color: var(--ink);
+      margin: 0 0 8px;
+      line-height: 1.25;
+    }
+    .meta {
+      font-size: 0.84rem;
+      color: var(--muted);
+    }
+    .toc {
+      background: var(--surface);
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 18px 0 24px;
       font-size: 0.88rem;
     }
+    .toc strong { color: var(--accent); display: block; margin-bottom: 6px; }
+    .toc ol { margin: 0 0 0 18px; padding: 0; }
+    .toc li { margin-bottom: 4px; }
+    .toc a { color: var(--ink); text-decoration: none; font-weight: 600; }
+    .toc a:hover { text-decoration: underline; color: var(--accent); }
+    h2 {
+      font-size: 1.18rem;
+      color: var(--accent);
+      margin: 30px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    h3 {
+      font-size: 0.98rem;
+      color: var(--ink);
+      margin: 18px 0 8px;
+    }
+    p { margin: 8px 0 12px; font-size: 0.92rem; }
+    ul, ol { margin: 8px 0 12px 22px; padding: 0; font-size: 0.91rem; }
+    li { margin-bottom: 6px; }
+    code {
+      background: #e2e8f0;
+      color: #0f172a;
+      padding: 1.5px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 700;
+      font-size: 0.86em;
+    }
+    .step-box {
+      background: var(--surface);
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #0284c7;
+      padding: 14px 18px;
+      border-radius: 0 10px 10px 0;
+      margin: 14px 0;
+    }
+    .step-title {
+      font-weight: 800;
+      color: var(--ink);
+      font-size: 0.96rem;
+      margin-bottom: 8px;
+    }
+    .ok-box {
+      background: var(--ok-bg);
+      border: 1px solid #bbf7d0;
+      border-left: 4px solid var(--ok-border);
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 12px 0;
+      font-size: 0.88rem;
+      color: var(--ok-ink);
+    }
+    .warn-box {
+      background: var(--warn-bg);
+      border: 1px solid #fde68a;
+      border-left: 4px solid var(--warn-border);
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 12px 0;
+      font-size: 0.88rem;
+      color: var(--warn-ink);
+    }
+    .danger-box {
+      background: var(--danger-bg);
+      border: 1px solid #fecaca;
+      border-left: 4px solid var(--danger-border);
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 12px 0;
+      font-size: 0.88rem;
+      color: var(--danger-ink);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      font-size: 0.86rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 9px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    thead tr {
+      background: #f1f5f9;
+      border-bottom: 2px solid var(--border);
+    }
+    .checklist {
+      list-style: none;
+      margin-left: 0;
+      padding-left: 0;
+    }
+    .checklist li {
+      padding: 6px 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-info { background: #e0f2fe; color: #0369a1; }
+    @media (max-width: 640px) {
+      .container { padding: 22px 18px; }
+    }
     @media print {
-      body {
-        background: #ffffff;
-        padding: 0;
-      }
-      .container {
-        box-shadow: none;
-        border: none;
-        padding: 0;
-        max-width: 100%;
-      }
-      .actions {
-        display: none;
-      }
+      body { background: #ffffff; padding: 0; }
+      .container { box-shadow: none; border: none; padding: 0; max-width: 100%; }
+      .actions { display: none; }
+      h2 { page-break-after: avoid; }
+      .step-box, .ok-box, .warn-box, .danger-box, table { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
 
-  <div class="container">
+  <div class="container" id="docContent">
     <div class="actions">
-      <button class="btn" onclick="window.print()">🖨️ Imprimer ou Enregistrer en PDF (Ctrl+P)</button>
-      <button class="btn-sec" onclick="copyDocumentText()">📋 Copier pour coller dans Word</button>
-      <span id="copyFeedback" style="display:none; color:#16a34a; font-weight:700; font-size:0.85rem; align-self:center;">✓ Texte copié dans le presse-papier !</span>
+      <button class="btn" onclick="window.print()">🖨️ Imprimer / Enregistrer en PDF</button>
+      <button class="btn-sec" onclick="downloadWordDoc()">📄 Télécharger en Word (.doc)</button>
+      <button class="btn-sec" onclick="copyDocumentText()">📋 Copier le texte</button>
+      <span id="copyFeedback" class="feedback">✓ Texte copié dans le presse-papier</span>
     </div>
 
-    <h1>Guide de Régularisation & Sécurisation GitHub</h1>
-    <div style="font-size: 0.85rem; color: #64748b; margin-top: -8px; margin-bottom: 20px;">
-      Projet : <strong>Char à Voile du Bout du Monde</strong> — Application « Ça roule ? » (Lestrevet / Pentrez)<br>
-      Auteur : Sheldon (DevOps) · Document de procédure d'étanchéité Dev / Production
+    <header class="doc-head">
+      <div class="eyebrow">Sécurité · Exploitation · Environnement de Test</div>
+      <h1>Guide Complet de Sécurisation &amp; Base de Test Isolée</h1>
+      <div class="meta">
+        Application <strong>« Ça roule ? – Horaires de roulage »</strong> · Char à Voile du Bout du Monde (Plage de Lestrevet)<br>
+        Référents : <strong>Benoît Marchadour</strong> (Concepteur) &amp; <strong>Jérôme</strong> (Responsable École)
+      </div>
+    </header>
+
+    <div class="toc">
+      <strong>Sommaire opérationnel</strong>
+      <ol>
+        <li><a href="#sec-1">Workflow GitHub &amp; Étanchéité Dev / Production</a></li>
+        <li><a href="#sec-2">Secrets, Clés API &amp; Hygiène du Code</a></li>
+        <li><a href="#sec-3">Comptes, Rôles &amp; Accès dans l’application</a></li>
+        <li><a href="#sec-4">Sécurité Firebase Firestore &amp; Plan de Sauvegarde</a></li>
+        <li><a href="#sec-5">Procédure Base de Test Isolée (sans jamais toucher la Prod)</a></li>
+      </ol>
     </div>
 
-    <div class="alert-box">
-      <strong>Constat initial :</strong> Lors d'une synchronisation automatique depuis Google AI Studio, le code a été poussé directement sur la branche de production <code>principal</code> au lieu de la branche de développement <code>dev</code>.
-    </div>
-
-    <h2>1. La Cause Technique</h2>
+    <!-- ===================================================================== -->
+    <!-- SECTION 1 : GITHUB & WORKFLOW DEV / PROD                              -->
+    <!-- ===================================================================== -->
+    <h2 id="sec-1">1. Workflow GitHub &amp; Étanchéité Dev / Production</h2>
     <p>
-      Sur GitHub.com, chaque dépôt a une <strong>« Default branch »</strong> (branche par défaut).
-      Si cette branche par défaut est définie sur <code>principal</code>, toute interface externe (comme AI Studio) synchronise par défaut sur celle-ci.<br>
-      Pour rétablir une étanchéité absolue, nous devons inverser cette configuration : faire de <code>dev</code> la branche de travail par défaut et cadenasser <code>principal</code> avec une règle d'écluse.
+      L’objectif est simple : <strong>aucune modification en cours de travail ne doit arriver par surprise sur la version utilisée par Jérôme sur la plage</strong>.
+      Tout développement arrive d’abord sur la branche <code>dev</code>, est testé, puis livré consciemment vers la branche de production (<code>main</code> ou <code>principal</code> selon le nom configuré sur votre dépôt GitHub).
     </p>
 
-    <h2>2. Procédure de Régularisation en 4 Étapes</h2>
-
     <div class="step-box">
-      <div class="step-title">Étape 1 : Passer la branche « dev » en branche par défaut</div>
+      <div class="step-title">Étape A — Mettre <code>dev</code> en branche par défaut (valable pour tous les dépôts)</div>
       <ol>
-        <li>Connectez-vous sur votre compte sur <a href="https://github.com" target="_blank">github.com</a>.</li>
-        <li>Ouvrez votre dépôt de char à voile (ex: <code>char-a-voile-lestrevet</code>).</li>
-        <li>Cliquez sur l'onglet <strong>Settings</strong> (la roue crantée tout à droite dans les menus du haut).</li>
-        <li>Dans la colonne de gauche, cliquez sur <strong>Branches</strong>.</li>
-        <li>Sous la section <strong>Default branch</strong>, cliquez sur l'icône de double-flèche (<strong>Switch to another branch</strong>).</li>
-        <li>Sélectionnez <code>dev</code> dans la liste déroulante, puis cliquez sur <strong>Update</strong> et confirmez (<em>I understand, update the default branch</em>).</li>
+        <li>Ouvrez votre dépôt sur <strong>github.com</strong> → onglet <strong>Settings</strong> → menu gauche <strong>Branches</strong>.</li>
+        <li>Dans <strong>Default branch</strong>, cliquez sur l’icône d’échange (<em>Switch to another branch</em>).</li>
+        <li>Sélectionnez <code>dev</code> (créez-la d’abord depuis la branche de prod si elle n’existe pas encore), puis validez <strong>Update</strong>.</li>
       </ol>
-      <div class="success-box" style="margin: 8px 0 0;">
-        ✓ <strong>Résultat :</strong> À partir de maintenant, toute synchronisation venant d'AI Studio atterrira à 100 % sur <code>dev</code>.
+      <div class="ok-box" style="margin:8px 0 0;">
+        ✓ Résultat : toute synchronisation automatique arrive sur <code>dev</code> et ne touche jamais directement la production.
       </div>
     </div>
 
     <div class="step-box">
-      <div class="step-title">Étape 2 : Cadenasser la branche « principal » (Règle d'Écluse)</div>
-      <ol>
-        <li>Toujours sur GitHub dans <strong>Settings > Branches</strong>.</li>
-        <li>Dans la section <strong>Branch protection rules</strong>, cliquez sur <strong>Add branch protection rule</strong> (ou <em>Add rule</em>).</li>
-        <li>Dans le champ <strong>Branch name pattern</strong>, écrivez exactement : <code>principal</code></li>
-        <li>Cochez les deux protections indispensables :
-          <ul>
-            <li>[x] <strong>Require a pull request before merging</strong> (interdit tout push direct, force la validation par revue).</li>
-            <li>[x] <strong>Do not allow bypassing the above settings</strong> (même vous en tant qu'administrateur ne pouvez pas écraser la prod par erreur).</li>
-          </ul>
-        </li>
-        <li>Descendez tout en bas de la page et cliquez sur <strong>Create</strong> (ou <em>Save changes</em>).</li>
-      </ol>
-      <div class="success-box" style="margin: 8px 0 0;">
-        ✓ <strong>Résultat :</strong> La branche de production <code>principal</code> est blindée. Tout envoi direct sera automatiquement rejeté par GitHub.
-      </div>
-    </div>
-
-    <div class="step-box">
-      <div class="step-title">Étape 3 : Aligner les deux branches</div>
-      <p style="margin: 4px 0 8px;">Si du code a été envoyé sur <code>principal</code> ou si <code>dev</code> a de l'avance, nous alignons les deux branches au même niveau :</p>
-      <ol>
-        <li>Allez dans l'onglet <strong>Pull requests</strong> de votre dépôt.</li>
-        <li>Cliquez sur le bouton vert <strong>New pull request</strong>.</li>
-        <li>Configurez les deux branches :
-          <ul>
-            <li><strong>base :</strong> <code>principal</code></li>
-            <li><strong>compare :</strong> <code>dev</code></li>
-          </ul>
-        </li>
-        <li>Cliquez sur <strong>Create pull request</strong>, donnez le titre <em>« Alignement et validation des modules 1 à 7 »</em>, puis cliquez sur le bouton vert <strong>Merge pull request</strong>.</li>
-      </ol>
-    </div>
-
-    <div class="step-box">
-      <div class="step-title">Étape 4 : La règle d'or pour vos prochains développements</div>
+      <div class="step-title">Étape B — Protéger la branche de production (<code>main</code> ou <code>principal</code>)</div>
       <ul>
-        <li><strong>Pendant le travail :</strong> Vous travaillez et synchronisez avec AI Studio ➔ tout arrive en toute sécurité sur <code>dev</code>.</li>
-        <li><strong>Pour tester :</strong> Vous testez sur l'adresse URL de Dev / Preview avec la base de test.</li>
-        <li><strong>Pour livrer à Jérôme en Production :</strong> Quand tout est 100 % validé, vous ouvrez GitHub et vous fusionnez <code>dev</code> vers <code>principal</code> via la Pull Request.</li>
+        <li><strong>Si votre dépôt est Public (ou compte GitHub Pro) :</strong> dans <strong>Settings &gt; Branches &gt; Add branch protection rule</strong>, indiquez le nom exact de la branche de prod (<code>main</code> ou <code>principal</code>) et cochez :
+          <ul>
+            <li><strong>Require a pull request before merging</strong> (interdit tout push direct).</li>
+            <li><strong>Do not allow bypassing the above settings</strong> (évite toute erreur de manipulation).</li>
+          </ul>
+        </li>
+        <li><strong>Si votre dépôt est Privé sur un compte GitHub Gratuit :</strong> les règles de verrouillage automatiques ne sont pas incluses dans l’offre gratuite. Appliquez la discipline équivalente (100 % gratuite et efficace) :
+          <ul>
+            <li>Gardez <code>dev</code> en branche par défaut.</li>
+            <li>Livrez toujours vers <code>main</code> / <code>principal</code> via une <strong>Pull Request</strong> (onglet <em>Pull requests → New pull request → base: prod ← compare: dev</em>) afin de relire la liste des fichiers modifiés avant de fusionner.</li>
+            <li>Créez un <strong>Tag / Release</strong> daté après chaque livraison stable (ex. <code>v2026.04-prod</code>) pour pouvoir restaurer la version précédente en 2 minutes en cas d’imprévu.</li>
+          </ul>
+        </li>
       </ul>
     </div>
 
-    <h2>3. Synthèse de l'Architecture Sécurisée</h2>
-    <table style="width:100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88rem;">
+    <h3>Check-list avant chaque livraison à Jérôme</h3>
+    <ul class="checklist">
+      <li>☐ <strong>Build &amp; vérification technique OK</strong> : aucune erreur de compilation ni de lint.</li>
+      <li>☐ <strong>Parcours rapide validé</strong> : onglet Aujourd’hui (C2), Calendrier (C1), Statistiques, GPS et Clients ouverts sans erreur console.</li>
+      <li>☐ <strong>Zéro secret dans le diff GitHub</strong> : vérifier qu’aucun fichier <code>.env</code> ni mot de passe en clair n’apparaît dans la Pull Request.</li>
+      <li>☐ <strong>Base Firestore vérifiée</strong> : vérifier que <code>firebase-applet-config.json</code> pointe bien sur la base de <strong>Production</strong> (et pas sur une base de test !).</li>
+    </ul>
+
+    <!-- ===================================================================== -->
+    <!-- SECTION 2 : SECRETS & CLÉS API                                        -->
+    <!-- ===================================================================== -->
+    <h2 id="sec-2">2. Secrets, Clés API &amp; Hygiène du Code</h2>
+    <p>
+      Il faut distinguer les <strong>secrets véritables</strong> (qui ne doivent jamais quitter le serveur ni apparaître dans le dépôt Git) des <strong>identifiants publics d’adressage</strong> (normaux côté navigateur).
+    </p>
+
+    <table>
       <thead>
-        <tr style="background: #f1f5f9; text-align: left; border-bottom: 2px solid #cbd5e1;">
-          <th style="padding: 10px;">Branche</th>
-          <th style="padding: 10px;">Rôle</th>
-          <th style="padding: 10px;">Accès</th>
-          <th style="padding: 10px;">Base de données</th>
+        <tr>
+          <th>Élément</th>
+          <th>Niveau</th>
+          <th>Où il doit vivre</th>
+          <th>Règle de sécurité</th>
         </tr>
       </thead>
       <tbody>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 10px;"><code>dev</code> (Par défaut)</td>
-          <td style="padding: 10px;">Atelier de travail / tests</td>
-          <td style="padding: 10px;">Push direct depuis AI Studio autorisé</td>
-          <td style="padding: 10px;">Base de test isolée</td>
+        <tr>
+          <td><code>WINDSUP_USERNAME</code> / <code>WINDSUP_PASSWORD</code></td>
+          <td><span class="badge badge-warn">Secret serveur</span></td>
+          <td>Variables d’environnement serveur uniquement (<code>.env</code> local ou hébergeur)</td>
+          <td>Jamais dans le code source, jamais dans Git (<code>.env</code> bloqué par <code>.gitignore</code>). Utilisé uniquement par le relais serveur <code>/api/*</code>.</td>
         </tr>
         <tr>
-          <td style="padding: 10px;"><code>principal</code> (Protégée)</td>
-          <td style="padding: 10px;">Version officielle club</td>
-          <td style="padding: 10px;"><strong>Écluse verrouillée</strong> (Pull Request obligatoire)</td>
-          <td style="padding: 10px;">Base officielle de l'école</td>
+          <td><code>CANDHIS_API_TOKEN</code></td>
+          <td><span class="badge badge-warn">Secret serveur</span></td>
+          <td>Variables d’environnement serveur</td>
+          <td>Idem : uniquement côté serveur, modèle vide dans <code>.env.example</code>.</td>
+        </tr>
+        <tr>
+          <td>Mots de passe équipe (Jérôme, Benoît, Moniteur)</td>
+          <td><span class="badge badge-warn">Confidentiel</span></td>
+          <td>Empreintes <strong>SHA-256 uniquement</strong> (collection <code>app_users</code>)</td>
+          <td>Aucun mot de passe en clair dans le code, les commentaires ou l’interface. Changer le mot de passe d’un compte depuis les réglages Admin met à jour uniquement son empreinte SHA-256.</td>
+        </tr>
+        <tr>
+          <td><code>firebase-applet-config.json</code> (apiKey, projectId, databaseId)</td>
+          <td><span class="badge badge-info">Public navigateur</span></td>
+          <td>Configuration front-end normale</td>
+          <td>Par conception Firebase, cette clé sert à identifier le projet depuis le navigateur. <strong>Elle ne protège pas la base : ce sont les règles <code>firestore.rules</code> qui protègent les données.</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="ok-box">
+      <strong>Audit effectué dans le code :</strong> tous les mots de passe en clair, commentaires contenant des mots de passe et anciens codes de secours historiques ont été retirés de l’écran de connexion et des utilitaires d’authentification. La vérification repose exclusivement sur les empreintes SHA-256.
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- SECTION 3 : COMPTES, RÔLES & ACCÈS                                    -->
+    <!-- ===================================================================== -->
+    <h2 id="sec-3">3. Comptes, Rôles &amp; Accès dans l’application</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Profil</th>
+          <th>Rôle</th>
+          <th>Droits dans l’application</th>
+          <th>Verrous spécifiques</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Jérôme</strong> (<code>usr_jerome</code>)</td>
+          <td><span class="badge badge-ok">Admin</span></td>
+          <td>Accès complet : Cycle 1, Cycle 2, Bilan Express, Statistiques, GPS, Clients, Réglages, Notes &amp; Hypothèses.</td>
+          <td>Compte protégé contre la suppression et le passage en lecture seule côté Firestore.</td>
+        </tr>
+        <tr>
+          <td><strong>Benoît</strong> (<code>usr_benoit</code>)</td>
+          <td><span class="badge badge-ok">Admin</span></td>
+          <td>Accès complet (conception, suivi technique, audit de cohérence, Notes &amp; Hypothèses).</td>
+          <td>Compte protégé contre la suppression et le passage en lecture seule côté Firestore.</td>
+        </tr>
+        <tr>
+          <td><strong>Moniteur</strong> (<code>usr_moniteur</code>)</td>
+          <td><span class="badge badge-info">Saison · Lecture seule</span></td>
+          <td>Consultation du planning, de la météo et des créneaux validés.</td>
+          <td>Modification des réglages bloquée, onglet <em>Notes &amp; Hypothèses</em> masqué et inaccessible.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="warn-box">
+      <strong>Évolution recommandée avant tout partage élargi :</strong> le mode de connexion actuel par profil SHA-256 est idéal pour une équipe restreinte (Jérôme + Benoît) car il fonctionne vite sur smartphone face à la mer sans exiger de compte Google. Toutefois, une authentification purement applicative ne fournit pas de jeton cryptographique au serveur Firestore. <strong>Si l’application doit être partagée à d’autres personnes ou exposée largement, il faudra activer Firebase Authentication (Connexion Google)</strong> afin que les règles serveur vérifient directement <code>request.auth != null</code>.
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- SECTION 4 : SÉCURITÉ FIRESTORE & SAUVEGARDES                          -->
+    <!-- ===================================================================== -->
+    <h2 id="sec-4">4. Sécurité Firebase Firestore &amp; Plan de Sauvegarde</h2>
+    <p>
+      Les règles de sécurité Firestore (<code>firestore.rules</code>) ont été durcies pour remplacer les anciens accès ouverts sans contrôle par des garde-fous structurels vérifiés automatiquement.
+    </p>
+
+    <h3>Ce que les règles Firestore imposent aujourd’hui</h3>
+    <ul>
+      <li><strong>Rejet par défaut (Default-Deny) :</strong> toute collection non déclarée explicitement est bloquée en lecture et en écriture.</li>
+      <li><strong>Contrôle strict des identifiants de documents :</strong> dates au format exact <code>AAAA-MM-JJ</code> sur <code>validations</code> et <code>custom_slots</code>, caractères et longueurs plafonnés (128 car. max) sur toutes les autres collections.</li>
+      <li><strong>Validation des schémas, types et tailles :</strong> chaque écriture vérifie les champs obligatoires, leurs types, les bornes géographiques des points GPS (secteur France/Bretagne) et la taille maximale des textes/listes (protection anti-injection et anti-explosion de quota).</li>
+      <li><strong>Protection des réglages &amp; comptes clés :</strong>
+        <ul>
+          <li><code>app_config</code> : lecture listée interdite, suppression interdite, écriture limitée aux documents autorisés (<code>session_settings</code>, <code>beach_cadre_roulage</code>) par un auteur admin reconnu.</li>
+          <li><code>app_users</code> : empreinte SHA-256 (64 caractères hexadécimaux) obligatoire ; suppression et déclassement de <code>usr_jerome</code> et <code>usr_benoit</code> impossibles.</li>
+          <li><code>team_notes</code> : les 3 documents techniques de suivi (<code>status_tech_notes</code>, <code>qcm_tech_notes</code>, <code>audit_data_c1_c2</code>) ne peuvent pas être supprimés.</li>
+          <li><code>test/connection</code> : lecture unitaire uniquement (aucune écriture possible).</li>
+        </ul>
+      </li>
+    </ul>
+
+    <div class="danger-box">
+      <strong>Point de vigilance à relire avant tout partage :</strong> tant que la connexion Google Firebase Auth n’est pas activée sur l’écran de verrouillage, l’URL de l’application doit rester <strong>strictement privée entre Benoît et Jérôme</strong> (ne pas la publier sur un site public ou un réseau social). Pensez à relire et renforcer les règles Firestore avant d’élargir l’accès.
+    </div>
+
+    <h3>Routine de sauvegarde (2 minutes, 1 fois par mois en saison)</h3>
+    <p>Même si Firebase réplique automatiquement les données dans le cloud, garder une copie locale protège contre toute fausse manipulation humaine :</p>
+    <ol>
+      <li>Onglet <strong>Clients</strong> → cliquer <strong>Exporter CSV</strong> (sauvegarde du répertoire complet).</li>
+      <li>Onglet <strong>GPS / Limite basse</strong> → cliquer <strong>Exporter CSV</strong> (sauvegarde de tous les relevés d’étalonnage plage).</li>
+      <li>Onglet <strong>Statistiques</strong> → exporter le bilan de la période en CSV (sauvegarde des séances réalisées / annulées).</li>
+      <li>Classer ces 3 fichiers dans un dossier daté (ex. <code>Sauvegardes_CaRoule/2026-07/</code> sur Google Drive ou disque local).</li>
+    </ol>
+
+    <!-- ===================================================================== -->
+    <!-- SECTION 5 : BASE DE TEST ISOLÉE (POINT 13)                            -->
+    <!-- ===================================================================== -->
+    <h2 id="sec-5">5. Procédure Base de Test Isolée (Zéro risque sur la Prod)</h2>
+    <p>
+      Pour tester de nouvelles fonctionnalités, essayer des imports Excel/CSV ou simuler des saisies de planning <strong>sans jamais polluer les vraies données de Jérôme</strong>, il faut isoler complètement les tests dans une base Firestore dédiée.
+    </p>
+
+    <div class="step-box">
+      <div class="step-title">Option recommandée — Créer une 2<sup>e</sup> base Firestore dédiée (<code>test-lestrevet</code>)</div>
+      <ol>
+        <li>Ouvrez la <strong>Console Firebase</strong> sur votre projet actuel (<code>genuine-shard-n01dl</code>).</li>
+        <li>Dans le menu de gauche, allez dans <strong>Build → Firestore Database</strong>.</li>
+        <li>Cliquez sur le bouton <strong>Créer une base de données</strong> (en haut ou via le sélecteur de base existant).</li>
+        <li>Saisissez l’identifiant : <code>test-lestrevet</code>, choisissez la région Europe (ex. <code>europe-west1</code> ou <code>eur3</code>) et démarrez en <strong>Mode Production</strong>.</li>
+        <li>Une fois créée, ouvrez l’onglet <strong>Règles</strong> de cette nouvelle base <code>test-lestrevet</code>, copiez-collez le contenu exact de <code>firestore.rules</code> et cliquez sur <strong>Publier</strong>.</li>
+        <li>Dans votre environnement de développement / branche <code>dev</code> <strong>uniquement</strong>, modifiez le champ <code>firestoreDatabaseId</code> dans <code>firebase-applet-config.json</code> pour mettre <code>"test-lestrevet"</code> à la place de l’ID de production.</li>
+      </ol>
+      <div class="warn-box" style="margin:10px 0 0;">
+        ⚠️ <strong>Règle d’or anti-mélange :</strong> avant de fusionner <code>dev</code> vers <code>main</code> / <code>principal</code>, vérifiez toujours dans la Pull Request que le fichier <code>firebase-applet-config.json</code> n’a <strong>pas</strong> été modifié pour pointer vers <code>test-lestrevet</code> ! La production doit toujours conserver son identifiant officiel.
+      </div>
+    </div>
+
+    <div class="step-box">
+      <div class="step-title">Astuces rapides au quotidien (sans changer de base)</div>
+      <ul>
+        <li><strong>Tests GPS sur la plage :</strong> utilisez toujours la carte intégrée <strong>« 🧪 Tester mon GPS (sans enregistrer) »</strong> dans l’onglet GPS — elle mesure la précision et la répétabilité en 2 passages avec <strong>zéro écriture en base</strong>.</li>
+        <li><strong>Alternative projet séparé :</strong> si votre quota de bases par projet est atteint, vous pouvez aussi créer un 2<sup>e</sup> projet Firebase gratuit (ex. <code>char-a-voile-dev</code>) utilisé uniquement sur une copie locale ou la branche <code>dev</code>.</li>
+      </ul>
+    </div>
+
+    <h3>Synthèse de l’architecture sécurisée</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Environnement</th>
+          <th>Branche GitHub</th>
+          <th>Base Firestore</th>
+          <th>Usage autorisé</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Développement / Essais</strong></td>
+          <td><code>dev</code> (par défaut)</td>
+          <td><code>test-lestrevet</code> (isolée)</td>
+          <td>Nouveaux écrans, essais d’import CSV, simulations C1/C2, tests de règles.</td>
+        </tr>
+        <tr>
+          <td><strong>Production École</strong></td>
+          <td><code>main</code> / <code>principal</code> (écluse PR)</td>
+          <td>Base officielle du club</td>
+          <td>Exploitation réelle par Jérôme &amp; Benoît uniquement.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <script>
+    function showFeedback(message) {
+      const fb = document.getElementById('copyFeedback');
+      if (!fb) return;
+      fb.textContent = message;
+      fb.style.display = 'inline-block';
+      setTimeout(() => { fb.style.display = 'none'; }, 3200);
+    }
+
     function copyDocumentText() {
-      const container = document.querySelector('.container');
-      const text = container.innerText;
-      navigator.clipboard.writeText(text).then(() => {
-        const feedback = document.getElementById('copyFeedback');
-        feedback.style.display = 'inline';
-        setTimeout(() => { feedback.style.display = 'none'; }, 3000);
-      });
+      const container = document.getElementById('docContent');
+      if (!container) return;
+      const clone = container.cloneNode(true);
+      const actions = clone.querySelector('.actions');
+      if (actions) actions.remove();
+      const text = clone.innerText.trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showFeedback('✓ Texte copié dans le presse-papier');
+        }).catch(() => {
+          showFeedback('Sélectionnez le texte (Ctrl+A puis Ctrl+C)');
+        });
+      }
+    }
+
+    function downloadWordDoc() {
+      const container = document.getElementById('docContent');
+      if (!container) return;
+      const clone = container.cloneNode(true);
+      const actions = clone.querySelector('.actions');
+      if (actions) actions.remove();
+      const html =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="utf-8"><title>Guide de Sécurisation &amp; Base de Test — Lestrevet</title>' +
+        '<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#0f172a;line-height:1.45;}h1{color:#0369a1;font-size:17pt;}h2{color:#0369a1;font-size:13pt;border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin-top:16pt;}table{border-collapse:collapse;width:100%;margin:8pt 0;}th,td{border:1px solid #cbd5e1;padding:5pt;font-size:9.5pt;}th{background:#f1f5f9;}code{font-family:Consolas,monospace;background:#f1f5f9;padding:1px 4px;}</style>' +
+        '</head><body>' + clone.innerHTML + '</body></html>';
+      const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'guide_securisation_et_base_test_lestrevet.doc';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showFeedback('✓ Fichier Word téléchargé');
     }
   </script>
 </body>

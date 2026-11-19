@@ -884,6 +884,67 @@ export const TECH_NOTE_QCMS: Record<string, TechNoteQcmDefinition> = {
           },
         ],
       },
+      {
+        id: 'q8',
+        title: 'Question 8 (Parc Matériel) · Nombre de chars monoplaces / biplaces & pertinence d’une limite de blocage',
+        tag: 'Parc Chars · Blocage',
+        description: 'Aujourd’hui, l’appli applique uniquement le plafond d’encadrement (12 chars/moniteur, 20 avec CQP, 24 avec 2e diplômé) sans gérer le parc matériel. Combien as-tu de chars monoplaces et biplaces (doubles) au club, et est-il pertinent d’ajouter une limite de blocage parc dans l’appli ?',
+        type: 'radio',
+        placeholder: 'Indique ici ton nombre exact de chars monoplaces et de chars biplaces (doubles) disponibles au club…',
+        options: [
+          {
+            id: 'opt_a',
+            label: 'Non nécessaire · Garder uniquement la limite d’encadrement (12 / 20 / 24 chars)',
+            detail: 'Pas besoin de blocage sur le parc matériel (ni de gestion des chars en panne) dans l’application.',
+          },
+          {
+            id: 'opt_b',
+            label: 'Oui · Alerte visuelle simple si le parc mono ou biplace est dépassé (sans bloquer)',
+            detail: 'Prévient Jérôme en cas de dépassement du parc réel tout en laissant la main sur la saisie.',
+          },
+          {
+            id: 'opt_c',
+            label: 'Oui · Blocage strict sur le parc réel (plafond total et/ou limite biplaces)',
+            detail: 'Interdit d’engager plus de monoplaces ou de biplaces que le parc effectivement disponible au club.',
+          },
+        ],
+      },
+      {
+        id: 'q9',
+        title: 'Question 9 (Heures Moniteur) · Besoin réel, périmètre des heures & format souhaité',
+        tag: 'Heures Moniteur · Saison',
+        description: 'L’appli enregistre déjà les horaires réels de chaque séance effectuée et les moniteurs (Jérôme + 2e moniteur Youenn/Katleen). Qu’est-ce qui te serait vraiment utile pour suivre les heures moniteur ?',
+        type: 'checkbox',
+        placeholder: 'Précise si besoin : durée du forfait prépa/rangement, saisonniers concernés (Youenn, Katleen…), période (semaine/mois) ou besoin comptable…',
+        options: [
+          {
+            id: 'opt_1',
+            recommended: true,
+            label: 'Comptage automatique des heures estran (face stagiaires) par moniteur',
+            detail: 'Calculé directement depuis les séances marquées « Effectuée » (Jérôme, Youenn, Katleen) sans aucune ressaisie.',
+          },
+          {
+            id: 'opt_2',
+            label: 'Ajouter un forfait préparation / rangement / convoyage (ou saisie libre atelier)',
+            detail: 'Ex. +30 min par séance ou par journée roulée, et/ou possibilité d’ajouter des heures d’entretien matériel.',
+          },
+          {
+            id: 'opt_3',
+            label: 'Option « Présence / déplacement maintenu » en cas d’annulation météo sur place',
+            detail: 'Permet de compter quand même les heures d’un moniteur renfort s’il s’est déplacé sur la plage avant annulation.',
+          },
+          {
+            id: 'opt_4',
+            label: 'Export mensuel / hebdomadaire prêt pour la paie ou le comptable (Excel / PDF)',
+            detail: 'En plus du récapitulatif affiché à l’écran dans les statistiques.',
+          },
+          {
+            id: 'opt_5',
+            label: 'Pas prioritaire / pas besoin dans l’appli pour l’instant',
+            detail: 'Tu gères déjà les heures autrement et préfères garder l’application concentrée sur la planification et les marées.',
+          },
+        ],
+      },
     ],
   },
 };
