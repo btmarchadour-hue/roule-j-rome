@@ -86,11 +86,13 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
     const holiday = getFrenchHolidayInfo(ds);
 
     if (inRange) {
-      const dw = dayWind(year, month, d, settings, tideW, first, last, windList);
-      if (dw.lvl === 2 || dw.lvl === -1) {
-        dotClass = 'ok';
-      } else if (dw.lvl === 1) {
-        dotClass = 'mid';
+      if (!isPast) {
+        const dw = dayWind(year, month, d, settings, tideW, first, last, windList);
+        if (dw.lvl === 2 || dw.lvl === -1) {
+          dotClass = 'ok';
+        } else if (dw.lvl === 1) {
+          dotClass = 'mid';
+        }
       }
 
       const pl = plan(year, month, d, settings, tideW, first, last);
@@ -230,7 +232,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
           </span>
         )}
         <span style={{ lineHeight: 1 }}>{d}</span>
-        <i />
+        {!isPast && <i />}
         {badgeText && <small>{badgeText}</small>}
         {keyTideLabel && (
           <span

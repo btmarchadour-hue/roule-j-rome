@@ -31,16 +31,19 @@ import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
   buildReservationKey,
   Cycle1SlotAction,
+  Cycle2ActionPayload,
   DEFAULT_NON_PUBLISH_REASONS,
   findMatchingValidationItem,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
   getMonitorBadgeStyle,
   getSlotBookingsSummary,
-  getSlotFleetAlerts,
   getSlotMaxCapacity,
   getValidationItemChars,
+  hasCycle2Activity,
   hasCycle2Trigger,
+  hasRecordedShift,
+  normalizeSlotTimeHHhMM,
   stripReasonAccents,
 } from '../utils/cycleHelpers';
 import { CurveChart } from './CurveChart';
@@ -82,6 +85,7 @@ interface DayDetailPanelProps {
     reason?: string
   ) => void;
   onExcludeRemainingCycle1Slots?: (record: DayFocusData) => void;
+  onCycle2Action?: (record: DayFocusData, slot: SessionItem, payload: Cycle2ActionPayload) => void;
   onAddCustomNonPublishReason?: (reason: string) => void;
   onNavigateDay?: (deltaDays: number) => void;
   canPrevDay?: boolean;
@@ -127,6 +131,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   onValidateDay: rawOnValidateDay,
   onSetSlotCycle1Action: rawOnSetSlotCycle1Action,
   onExcludeRemainingCycle1Slots: rawOnExcludeRemainingCycle1Slots,
+  onCycle2Action: rawOnCycle2Action,
   onAddCustomNonPublishReason,
   onNavigateDay,
   canPrevDay = false,
@@ -140,6 +145,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const onValidateDay = isReadOnly ? undefined : rawOnValidateDay;
   const onSetSlotCycle1Action = isReadOnly ? undefined : rawOnSetSlotCycle1Action;
   const onExcludeRemainingCycle1Slots = isReadOnly ? undefined : rawOnExcludeRemainingCycle1Slots;
+  const onCycle2Action = isReadOnly ? undefined : rawOnCycle2Action;
   const onSaveSlotBookings = isReadOnly ? undefined : rawOnSaveSlotBookings;
   const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
     if (isReadOnly) return;
@@ -175,6 +181,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   } | null>(null);
   const [activeSlotReasonIdx, setActiveSlotReasonIdx] = useState<number | null>(null);
   const [customSlotReasonInput, setCustomSlotReasonInput] = useState('');
+  const [confirmResetSlot, setConfirmResetSlot] = useState<{ date: string; idx: number } | null>(null);
+  const [slotAdjustError, setSlotAdjustError] = useState<{ date: string; idx: number; message: string } | null>(null);
 
   const availableNonPublishReasons = React.useMemo(() => {
     const base = [...DEFAULT_NON_PUBLISH_REASONS];
@@ -219,6 +227,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     b: number;
     isOpt: boolean;
     isCustom?: boolean;
+    isAdapted?: boolean;
+    isUnchangedTide?: boolean;
     title?: string;
     lim: string;
     over: number;
@@ -226,22 +236,83 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   };
 
   let allSlots: SlotItem[] = [];
-
-  if (replaceDefault) {
-    allSlots = customCfg.slots.map(cs => {
-      const [sh, sm] = cs.start.split(':').map(Number);
-      const [eh, em] = cs.end.split(':').map(Number);
+  const normHHMMColon = (v: string) => v.trim().replace('h', ':');
+  const mapCustomSlotToItem = (cs: CustomSlot): SlotItem => {
+    const [sh, sm] = cs.start.split(':').map(Number);
+    const [eh, em] = cs.end.split(':').map(Number);
+    const aVal = toU(y, m, d, sh * 60 + sm);
+    const bVal = toU(y, m, d, eh * 60 + em);
+    const isAdaptedRecord = Boolean(cs.isAdapted) || cs.id.startsWith('c1-');
+    if (isAdaptedRecord) {
+      const csStartNorm = normHHMMColon(cs.start);
+      const csEndNorm = normHHMMColon(cs.end);
+      const matchesSS = SS.some(
+        p =>
+          normHHMMColon(lc(p[0], y, m, d)) === csStartNorm &&
+          normHHMMColon(lc(p[1], y, m, d)) === csEndNorm
+      );
+      if (matchesSS) {
+        return {
+          a: aVal,
+          b: bVal,
+          isOpt: false,
+          isCustom: true,
+          isAdapted: false,
+          isUnchangedTide: true,
+          title: cs.title,
+          lim: '',
+          over: 0,
+          side: '',
+        };
+      }
+      const matchedXS = XS.find(
+        p =>
+          normHHMMColon(lc(p[0], y, m, d)) === csStartNorm &&
+          normHHMMColon(lc(p[1], y, m, d)) === csEndNorm
+      );
+      if (matchedXS) {
+        return {
+          a: aVal,
+          b: bVal,
+          isOpt: true,
+          isCustom: true,
+          isAdapted: false,
+          isUnchangedTide: true,
+          title: cs.title,
+          lim: matchedXS[2],
+          over: matchedXS[3],
+          side: matchedXS[4],
+        };
+      }
       return {
-        a: toU(y, m, d, sh * 60 + sm),
-        b: toU(y, m, d, eh * 60 + em),
+        a: aVal,
+        b: bVal,
         isOpt: false,
         isCustom: true,
+        isAdapted: true,
+        isUnchangedTide: false,
         title: cs.title,
         lim: '',
         over: 0,
         side: '',
       };
-    });
+    }
+    return {
+      a: aVal,
+      b: bVal,
+      isOpt: false,
+      isCustom: true,
+      isAdapted: false,
+      isUnchangedTide: false,
+      title: cs.title,
+      lim: '',
+      over: 0,
+      side: '',
+    };
+  };
+
+  if (replaceDefault) {
+    allSlots = customCfg.slots.map(mapCustomSlotToItem);
   } else {
     const defaultSlots: SlotItem[] = (
       SS.map(x => ({
@@ -264,20 +335,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     );
 
     if (hasCustom) {
-      const customItems: SlotItem[] = customCfg.slots.map(cs => {
-        const [sh, sm] = cs.start.split(':').map(Number);
-        const [eh, em] = cs.end.split(':').map(Number);
-        return {
-          a: toU(y, m, d, sh * 60 + sm),
-          b: toU(y, m, d, eh * 60 + em),
-          isOpt: false,
-          isCustom: true,
-          title: cs.title,
-          lim: '',
-          over: 0,
-          side: '',
-        };
-      });
+      const customItems: SlotItem[] = customCfg.slots.map(mapCustomSlotToItem);
       allSlots = defaultSlots.concat(customItems).sort((p, q) => p.a - q.a);
     } else {
       allSlots = defaultSlots.sort((p, q) => p.a - q.a);
@@ -302,19 +360,164 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
 
   const buildEditableSlotsList = (): CustomSlot[] => {
     if (replaceDefault && customCfg) {
-      return customCfg.slots.map(cs => ({ ...cs }));
+      return customCfg.slots.map(cs => ({
+        ...cs,
+        isAdapted: Boolean(cs.isAdapted) || cs.id.startsWith('c1-'),
+      }));
     }
-    return allSlots.map((s, i) => ({
-      id: `c1-${selectedDate}-${i}-${Math.round(s.a)}`,
-      start: lc(s.a, y, m, d).replace('h', ':'),
-      end: lc(s.b, y, m, d).replace('h', ':'),
-      title: s.title || (s.isOpt ? `Optionnel (+${s.over} min)` : `Séance ${i + 1}`),
-      places: MAX_CHARS_PER_INSTRUCTOR,
-    }));
+    return allSlots.map((s, i) => {
+      const startStr = lc(s.a, y, m, d).replace('h', ':');
+      const endStr = lc(s.b, y, m, d).replace('h', ':');
+      const existingCustom =
+        s.isCustom && !s.isAdapted && !s.isUnchangedTide && customCfg
+          ? customCfg.slots.find(
+              cs => normHHMMColon(cs.start) === startStr && normHHMMColon(cs.end) === endStr
+            )
+          : undefined;
+      if (existingCustom) {
+        return { ...existingCustom, isAdapted: false };
+      }
+      return {
+        id: `c1-${selectedDate}-${i}-${Math.round(s.a)}`,
+        start: startStr,
+        end: endStr,
+        title: s.title || (s.isOpt ? `Optionnel (+${s.over} min)` : `Séance ${i + 1}`),
+        places: MAX_CHARS_PER_INSTRUCTOR,
+        isAdapted: true,
+      };
+    });
+  };
+
+  const resolveSlotCycle2Context = (idx: number) => {
+    const slot = allSlots[idx];
+    if (!slot) return null;
+    const slotKey = Math.round(slot.a) + (slot.isOpt ? 'o' : '') + (slot.isCustom ? 'c' : '');
+    const startTimeStr = lc(slot.a, y, m, d);
+    const endTimeStr = lc(slot.b, y, m, d);
+    const valItem = findMatchingValidationItem(validations[selectedDate], slotKey, startTimeStr, endTimeStr);
+    const displayStart = normalizeSlotTimeHHhMM(valItem?.actualStart || startTimeStr);
+    const displayEnd = normalizeSlotTimeHHhMM(valItem?.actualEnd || endTimeStr);
+    const normT = (v?: string) => (v || '').replace('h', ':');
+    const slotObs = observations
+      .filter(
+        o =>
+          o.ds === selectedDate &&
+          (o.slotKey === slotKey ||
+            (Boolean(o.slotStart) &&
+              Boolean(o.slotEnd) &&
+              (normT(o.slotStart) === normT(startTimeStr) || normT(o.slotStart) === normT(displayStart)) &&
+              (normT(o.slotEnd) === normT(endTimeStr) || normT(o.slotEnd) === normT(displayEnd))))
+      )
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
+    const effectiveBookingKey =
+      valItem && (bookingsMap[buildReservationKey(selectedDate, valItem.k)]?.length ?? 0) > 0
+        ? valItem.k
+        : slotKey;
+    const bChars = getSlotBookingsSummary(
+      bookingsMap[buildReservationKey(selectedDate, effectiveBookingKey)] || []
+    ).totalChars;
+    const itemChars = getValidationItemChars(valItem).totalChars;
+    const effectiveChars = bChars > 0 ? bChars : itemChars;
+    let c1Status = getEffectiveCycle1Status(valItem);
+    let inC2 = hasCycle2Trigger(valItem, bChars, slotObs);
+    let c2Status = getEffectiveCycle2Status(valItem, effectiveChars, slotObs);
+    if (slotObs?.status === 'cancelled') {
+      const obsHasBookedClients =
+        bChars > 0 || (slotObs.bookedParticipantsCount ?? 0) > 0;
+      if (slotObs.cancellationReason === 'no_clients') {
+        c1Status = 'closed_no_bookings';
+        inC2 = false;
+        c2Status = 'none';
+      } else if (slotObs.cancellationReason === 'instructor' && !obsHasBookedClients) {
+        c1Status = 'not_published';
+        inC2 = false;
+        c2Status = 'none';
+      } else {
+        c1Status = 'published';
+        inC2 = true;
+        c2Status = 'cancelled_weather';
+      }
+    } else if (slotObs?.status === 'realized') {
+      c1Status = 'published';
+      inC2 = true;
+      c2Status = 'realized';
+    }
+    const hasC2Act = hasCycle2Activity(valItem, effectiveChars, slotObs);
+    const isWithin48h = slot.a - Date.now() / 60000 < 48 * 60;
+    const isClosedOrExcluded =
+      c1Status === 'closed_no_bookings' ||
+      c1Status === 'not_published' ||
+      c1Status === 'excluded' ||
+      c2Status === 'cancelled_weather' ||
+      c2Status === 'merged' ||
+      c2Status === 'realized';
+    const focusSess: SessionItem =
+      focusData.list.find(
+        s =>
+          Math.round(s.a) === Math.round(slot.a) &&
+          Boolean(s.opt) === Boolean(slot.isOpt) &&
+          Boolean(s.isCustom) === Boolean(slot.isCustom)
+      ) || {
+        a: slot.a,
+        b: slot.b,
+        opt: Boolean(slot.isOpt),
+        isCustom: Boolean(slot.isCustom),
+        customTitle: slot.title,
+        ok: sw(slot.a, slot.b, settings, windList),
+        st: null,
+        txt: '',
+        over: slot.over || 0,
+        lim: slot.lim || '',
+        side: slot.side || '',
+        past: isPast,
+      };
+    return {
+      slot,
+      startTimeStr,
+      endTimeStr,
+      valItem,
+      slotObs,
+      effectiveChars,
+      c1Status,
+      inC2,
+      c2Status,
+      hasC2Act,
+      isWithin48h,
+      isClosedOrExcluded,
+      focusSess,
+    };
+  };
+
+  const findOverlappingSlot = (
+    idx: number,
+    nextStartMin: number,
+    nextEndMin: number,
+    editableList: CustomSlot[]
+  ): { start: string; end: string } | null => {
+    for (let i = 0; i < editableList.length; i++) {
+      if (i === idx) continue;
+      const otherCtx = resolveSlotCycle2Context(i);
+      if (otherCtx?.isClosedOrExcluded) continue;
+      const other = editableList[i];
+      const oStart = parseHHMM(other.start);
+      const oEnd = parseHHMM(other.end);
+      if (nextStartMin < oEnd && nextEndMin > oStart) {
+        return {
+          start: normalizeSlotTimeHHhMM(other.start),
+          end: normalizeSlotTimeHHhMM(other.end),
+        };
+      }
+    }
+    return null;
   };
 
   const handleShiftSlotTime = (idx: number, deltaMinutes: number) => {
-    if (isReadOnly) return;
+    if (isReadOnly || isPastLocked) return;
+    const ctx = resolveSlotCycle2Context(idx);
+    if (!ctx || ctx.isClosedOrExcluded || ctx.hasC2Act || ctx.isWithin48h) {
+      return;
+    }
+
     const nextList = buildEditableSlotsList();
     const target = nextList[idx];
     if (!target) return;
@@ -330,6 +533,17 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     }
     const nextEnd = nextStart + duration;
 
+    const overlap = findOverlappingSlot(idx, nextStart, nextEnd, nextList);
+    if (overlap) {
+      setSlotAdjustError({
+        date: selectedDate,
+        idx,
+        message: `Chevauchement avec le créneau ${overlap.start} - ${overlap.end}`,
+      });
+      return;
+    }
+
+    setSlotAdjustError(null);
     nextList[idx] = {
       ...target,
       start: formatHHMM(nextStart),
@@ -339,15 +553,40 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   };
 
   const handleSaveInlineSlotEdit = (idx: number) => {
-    if (isReadOnly || !inlineEdit || inlineEdit.date !== selectedDate || inlineEdit.idx !== idx) {
+    if (isReadOnly || isPastLocked || !inlineEdit || inlineEdit.date !== selectedDate || inlineEdit.idx !== idx) {
       return;
     }
     const sMin = parseHHMM(inlineEdit.start);
     const eMin = parseHHMM(inlineEdit.end);
-    if (eMin <= sMin) return;
+    if (eMin <= sMin) {
+      setSlotAdjustError({
+        date: selectedDate,
+        idx,
+        message: 'L’heure de fin doit être postérieure au début',
+      });
+      return;
+    }
+
+    const ctx = resolveSlotCycle2Context(idx);
+    if (!ctx || ctx.isClosedOrExcluded || ctx.hasC2Act || ctx.isWithin48h) {
+      setInlineEdit(null);
+      return;
+    }
 
     const nextList = buildEditableSlotsList();
     if (!nextList[idx]) return;
+
+    const overlap = findOverlappingSlot(idx, sMin, eMin, nextList);
+    if (overlap) {
+      setSlotAdjustError({
+        date: selectedDate,
+        idx,
+        message: `Chevauchement avec le créneau ${overlap.start} - ${overlap.end}`,
+      });
+      return;
+    }
+
+    setSlotAdjustError(null);
     nextList[idx] = {
       ...nextList[idx],
       start: inlineEdit.start,
@@ -666,11 +905,28 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             }}
           >
             <span>
-              {replaceDefault
-                ? `Séances sur mesure (${allSlots.length})`
-                : `Séances proposées (${SS.length}${
-                    XS.length ? ` + ${XS.length} optionnel${XS.length > 1 ? 's' : ''}` : ''
-                  }${hasCustom ? ` + ${customCfg.slots.length} sur-mesure` : ''})`}
+              {(() => {
+                const trueCustomCount = allSlots.filter(
+                  s => s.isCustom && !s.isAdapted && !s.isUnchangedTide
+                ).length;
+                const adaptedCount = allSlots.filter(s => s.isAdapted).length;
+                if (replaceDefault) {
+                  if (trueCustomCount > 0) {
+                    return `Séances (${allSlots.length} · dont ${trueCustomCount} sur mesure${
+                      adaptedCount > 0 ? `, ${adaptedCount} adapté${adaptedCount > 1 ? 's' : ''}` : ''
+                    })`;
+                  }
+                  if (adaptedCount > 0) {
+                    return `Séances (${allSlots.length} · dont ${adaptedCount} horaire${
+                      adaptedCount > 1 ? 's' : ''
+                    } adapté${adaptedCount > 1 ? 's' : ''})`;
+                  }
+                  return `Séances proposées (${allSlots.length})`;
+                }
+                return `Séances proposées (${SS.length}${
+                  XS.length ? ` + ${XS.length} optionnel${XS.length > 1 ? 's' : ''}` : ''
+                }${trueCustomCount > 0 ? ` + ${trueCustomCount} sur-mesure` : ''})`;
+              })()}
               {` · jauge max ${MAX_CHARS_PER_INSTRUCTOR} chars / moniteur (Mono + Bi)`}
             </span>
 
@@ -767,12 +1023,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           const effectivePeople =
             bookingSummary.totalChars > 0 ? bookingSummary.totalPeople : itemChars.people;
           const isOverCapacity = effectiveChars > slotMaxChars;
-          const fleetAlerts = getSlotFleetAlerts(
-            effectiveMono,
-            effectiveBi,
-            settings.parkMaxMono,
-            settings.parkMaxBi
-          );
 
           const sessItem: SessionItem =
             focusData.list.find(
@@ -795,8 +1045,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               past: isPast,
             };
 
-          const displayStart = valItem?.actualStart || startTimeStr;
-          const displayEnd = valItem?.actualEnd || endTimeStr;
+          const displayStart = normalizeSlotTimeHHhMM(valItem?.actualStart || startTimeStr);
+          const displayEnd = normalizeSlotTimeHHhMM(valItem?.actualEnd || endTimeStr);
+          const pubDisplayStart = normalizeSlotTimeHHhMM(valItem?.publishedStart || startTimeStr);
+          const pubDisplayEnd = normalizeSlotTimeHHhMM(valItem?.publishedEnd || endTimeStr);
           const normT = (v?: string) => (v || '').replace('h', ':');
           const slotObs = observations
             .filter(
@@ -819,11 +1071,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
           let c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
 
           if (slotObs?.status === 'cancelled') {
+            const obsHasBookedClients =
+              bookingSummary.totalChars > 0 || (slotObs.bookedParticipantsCount ?? 0) > 0;
             if (slotObs.cancellationReason === 'no_clients') {
               c1Status = 'closed_no_bookings';
               inCycle2 = false;
               c2Status = 'none';
-            } else if (slotObs.cancellationReason === 'instructor') {
+            } else if (slotObs.cancellationReason === 'instructor' && !obsHasBookedClients) {
               c1Status = 'not_published';
               inCycle2 = false;
               c2Status = 'none';
@@ -832,16 +1086,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               inCycle2 = true;
               c2Status = 'cancelled_weather';
             }
-          } else if (slotObs?.status === 'realized' && (c2Status === 'none' || c2Status === 'awaiting_booking')) {
+          } else if (slotObs?.status === 'realized') {
             c1Status = 'published';
             inCycle2 = true;
             c2Status = 'realized';
           }
 
-          const isShifted =
-            c2Status === 'shifted' &&
-            Boolean(valItem?.actualStart) &&
-            (valItem?.actualStart !== startTimeStr || valItem?.actualEnd !== endTimeStr);
+          const isShifted = hasRecordedShift(valItem);
 
           const cardBg =
             c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
@@ -882,7 +1133,8 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               ? '#0284c7'
               : '#94a3b8';
 
-          const isPickingReason = activeSlotReasonIdx === idx && !isReadOnly && !isPastLocked && !inCycle2;
+          const hasC2Activity = hasCycle2Activity(valItem, bookingSummary.totalChars, slotObs);
+          const isPickingReason = activeSlotReasonIdx === idx && !isReadOnly && !isPastLocked && !hasC2Activity;
 
           return (
             <div
@@ -957,7 +1209,13 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           : c2Status === 'shifted'
                           ? `CYCLE 2 · DÉCALÉ ${valItem?.shiftMinutes ? (valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes) + ' MIN' : ''}`
                           : c2Status === 'realized'
-                          ? 'CYCLE 2 · RÉALISÉ'
+                          ? isShifted && valItem?.shiftMinutes
+                            ? `CYCLE 2 · RÉALISÉ (DÉCALÉ ${valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes} MIN)`
+                            : isShifted
+                            ? 'CYCLE 2 · RÉALISÉ (DÉCALÉ)'
+                            : 'CYCLE 2 · RÉALISÉ'
+                          : isShifted && valItem?.shiftMinutes
+                          ? `CYCLE 2 · ACTIF (DÉCALÉ ${valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes} MIN)`
                           : 'CYCLE 2 · ACTIF'}
                       </span>
                     </span>
@@ -986,27 +1244,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         </span>
                       )}
                     </span>
-
-                    {(fleetAlerts.monoOver || fleetAlerts.biOver) && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          background: '#fef2f2',
-                          border: '1px solid #ef4444',
-                          color: '#991b1b',
-                          padding: '2px 7px',
-                          borderRadius: '5px',
-                          fontSize: '0.68rem',
-                          fontWeight: 800,
-                        }}
-                      >
-                        ⚠️ {fleetAlerts.monoOver ? `Mono ${effectiveMono}/${fleetAlerts.parkMaxMono}` : ''}
-                        {fleetAlerts.monoOver && fleetAlerts.biOver ? ' · ' : ''}
-                        {fleetAlerts.biOver ? `Bi ${effectiveBi}/${fleetAlerts.parkMaxBi}` : ''}
-                      </span>
-                    )}
 
                     {(() => {
                       const pStyle = getMonitorBadgeStyle(primaryInstructor);
@@ -1093,7 +1330,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         fontWeight: 800,
                       }}
                     >
-                      <span>🚗 0 / {slotMaxChars} chars · En attente 1ère résa</span>
+                      <span>🚗 0 / {slotMaxChars} chars</span>
                     </span>
                   </>
                 ) : c1Status === 'excluded' ? (
@@ -1206,22 +1443,48 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                   </span>
                 )}
 
-                {x.isCustom ? (
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontWeight: 800, fontSize: '0.72rem' }}>
+                {x.isCustom && !x.isAdapted && !x.isUnchangedTide ? (
+                  <span
+                    style={{
+                      background: isPast ? '#f1f5f9' : '#e0f2fe',
+                      color: isPast ? '#475569' : '#0369a1',
+                      border: isPast ? '1px solid #cbd5e1' : 'none',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 800,
+                      fontSize: '0.72rem',
+                    }}
+                  >
                     ● SUR MESURE · {x.title}
                   </span>
-                ) : x.isOpt ? (
+                ) : x.isAdapted ? (
+                  <span
+                    style={{
+                      background: isPast ? '#f1f5f9' : '#eef2ff',
+                      color: isPast ? '#475569' : '#4338ca',
+                      border: isPast ? '1px solid #cbd5e1' : '1px solid #c7d2fe',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 800,
+                      fontSize: '0.72rem',
+                    }}
+                  >
+                    🕒 ADAPTÉ
+                  </span>
+                ) : x.isOpt && !isPast ? (
                   <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 8px', borderRadius: '4px', fontWeight: 800, fontSize: '0.72rem' }}>
                     ● OPTIONNEL (+{x.over} MIN)
                   </span>
                 ) : null}
 
-                <span
-                  className={ok === true ? 'chip fg' : ok === false ? 'chip fr' : 'chip k'}
-                  style={{ margin: 0 }}
-                >
-                  {ok === true ? '● VENT OK' : ok === false ? 'VENT HORS PLAGE' : '🌊 Marée seule'}
-                </span>
+                {!isPast && (
+                  <span
+                    className={ok === true ? 'chip fg' : ok === false ? 'chip fr' : 'chip k'}
+                    style={{ margin: 0 }}
+                  >
+                    {ok === true ? '● VENT OK' : ok === false ? 'VENT HORS PLAGE' : '🌊 Marée seule'}
+                  </span>
+                )}
 
                 {slotObs && (
                   <span
@@ -1260,40 +1523,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
               {/* SECTION DROITE : ACTIONS NUMÉRIQUES + REPOSITIONNEMENT C1 + HORAIRE */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      padding: '5px 10px',
-                      fontSize: '0.72rem',
-                      fontWeight: 800,
-                      color: effectiveChars > 0 ? '#166534' : '#0369a1',
-                      background: effectiveChars > 0 ? '#dcfce7' : '#e0f2fe',
-                      border: effectiveChars > 0 ? '1px solid #86efac' : '1px solid #7dd3fc',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() =>
-                      setActiveBookingSlot({
-                        slotKey: effectiveBookingKey,
-                        slotStart: startTimeStr,
-                        slotEnd: endTimeStr,
-                        slotTitle: x.title,
-                        maxChars: slotMaxChars,
-                        primaryInstructor,
-                        secondaryInstructor,
-                        secondaryQualification: valItem?.secondaryQualification,
-                        secondaryActualEnd: valItem?.secondaryActualEnd,
-                        secondaryFormula: valItem?.secondaryFormula,
-                      })
-                    }
-                    title="Gérer les réservations et chars sur ce créneau (déclenche Cycle 2 dès 1 char)"
-                  >
-                    👥 Inscriptions ({effectiveChars}/{slotMaxChars})
-                  </button>
-
-                  {!isReadOnly && !isPastLocked && onSetSlotCycle1Action && !inCycle2 && (
+                  {c1Status === 'unpublished' && !isReadOnly && !isPastLocked && onSetSlotCycle1Action && !hasC2Activity && (
                     <>
                       <button
                         type="button"
@@ -1303,14 +1533,15 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           padding: '5px 10px',
                           fontSize: '0.72rem',
                           fontWeight: 800,
-                          color: c1Status === 'published' ? '#fff' : '#0369a1',
-                          background: c1Status === 'published' ? '#16a34a' : '#fff',
-                          border: c1Status === 'published' ? '1px solid #16a34a' : '1.5px solid #0284c7',
+                          color: '#0369a1',
+                          background: '#fff',
+                          border: '1.5px solid #0284c7',
                           borderRadius: '6px',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
                           if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                          setConfirmResetSlot(null);
                           onSetSlotCycle1Action(focusData, sessItem, 'publish');
                         }}
                         title="Valider ce créneau « À publier » en Cycle 1"
@@ -1326,14 +1557,15 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           padding: '5px 10px',
                           fontSize: '0.72rem',
                           fontWeight: 800,
-                          color: c1Status === 'excluded' ? '#fff' : '#475569',
-                          background: c1Status === 'excluded' ? '#64748b' : '#f8fafc',
-                          border: c1Status === 'excluded' ? '1.5px solid #475569' : '1.5px dashed #94a3b8',
+                          color: '#475569',
+                          background: '#f8fafc',
+                          border: '1.5px dashed #94a3b8',
                           borderRadius: '6px',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
                           if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                          setConfirmResetSlot(null);
                           onSetSlotCycle1Action(focusData, sessItem, 'excluded');
                         }}
                         title="Écarter ce créneau non retenu (exclu de l'absentéisme et du taux de concrétisation)"
@@ -1349,13 +1581,14 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           padding: '5px 10px',
                           fontSize: '0.72rem',
                           fontWeight: 800,
-                          color: c1Status === 'not_published' || isPickingReason ? '#fff' : '#334155',
-                          background: c1Status === 'not_published' || isPickingReason ? '#334155' : '#fff',
+                          color: isPickingReason ? '#fff' : '#334155',
+                          background: isPickingReason ? '#334155' : '#fff',
                           border: '1.5px solid #475569',
                           borderRadius: '6px',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
+                          setConfirmResetSlot(null);
                           setActiveSlotReasonIdx(prev => (prev === idx ? null : idx));
                           setCustomSlotReasonInput('');
                         }}
@@ -1372,14 +1605,15 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                           padding: '5px 9px',
                           fontSize: '0.72rem',
                           fontWeight: 800,
-                          color: c1Status === 'closed_no_bookings' ? '#fff' : '#b91c1c',
-                          background: c1Status === 'closed_no_bookings' ? '#dc2626' : '#fef2f2',
+                          color: '#b91c1c',
+                          background: '#fef2f2',
                           border: '1.5px solid #fca5a5',
                           borderRadius: '6px',
                           cursor: 'pointer',
                         }}
                         onClick={() => {
                           if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                          setConfirmResetSlot(null);
                           if (onOpenObservationModal) {
                             onOpenObservationModal({
                               dateStr: selectedDate,
@@ -1403,53 +1637,185 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       >
                         👥 Pas d&apos;inscrit
                       </button>
+                    </>
+                  )}
 
-                      {c1Status !== 'unpublished' && (
+                  {(c1Status === 'published' || inCycle2) && (
+                    <>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '5px 10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: '#fff',
+                          background: '#16a34a',
+                          border: '1px solid #16a34a',
+                          borderRadius: '6px',
+                        }}
+                        title="Option retenue en Cycle 1 : créneau validé À publier"
+                      >
+                        ✅ À publier
+                      </span>
+
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: effectiveChars > 0 ? '#166534' : '#0369a1',
+                          background: effectiveChars > 0 ? '#dcfce7' : '#e0f2fe',
+                          border: effectiveChars > 0 ? '1px solid #86efac' : '1px solid #7dd3fc',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setConfirmResetSlot(null);
+                          const bookingTitle = isShifted
+                            ? `${x.title ? `${x.title} · ` : ''}C1 : ${pubDisplayStart}–${pubDisplayEnd}`
+                            : x.title;
+                          setActiveBookingSlot({
+                            slotKey: effectiveBookingKey,
+                            slotStart: displayStart,
+                            slotEnd: displayEnd,
+                            slotTitle: bookingTitle,
+                            maxChars: slotMaxChars,
+                            primaryInstructor,
+                            secondaryInstructor,
+                            secondaryQualification: valItem?.secondaryQualification,
+                            secondaryActualEnd: valItem?.secondaryActualEnd,
+                            secondaryFormula: valItem?.secondaryFormula,
+                          });
+                        }}
+                        title="Gérer les inscriptions et chars sur ce créneau (saisie facultative)"
+                      >
+                        👥 Inscriptions ({effectiveChars}/{slotMaxChars})
+                      </button>
+
+                      {onOpenCycle2 && (
                         <button
                           type="button"
                           className="fbtn"
                           style={{
                             margin: 0,
-                            padding: '5px 7px',
-                            fontSize: '0.70rem',
-                            fontWeight: 700,
-                            color: '#64748b',
-                            background: '#fff',
-                            border: '1px solid #cbd5e1',
+                            padding: '5px 9px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            color: '#6d28d9',
+                            background: '#f3e8ff',
+                            border: '1px solid #d8b4fe',
                             borderRadius: '6px',
                             cursor: 'pointer',
                           }}
                           onClick={() => {
-                            if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
-                            onSetSlotCycle1Action(focusData, sessItem, 'reset');
+                            setConfirmResetSlot(null);
+                            onOpenCycle2(selectedDate);
                           }}
-                          title="Remettre ce créneau en attente de décision"
+                          title="Gérer les décisions terrain (météo, REX, 2e moniteur) dans Cycle 2"
                         >
-                          ↩
+                          ⚡ Gérer Cycle 2
                         </button>
                       )}
                     </>
                   )}
 
-                  {inCycle2 && onOpenCycle2 && (
+                  {c1Status === 'excluded' && !inCycle2 && (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: '#fff',
+                        background: '#64748b',
+                        border: '1.5px solid #475569',
+                        borderRadius: '6px',
+                      }}
+                      title="Option retenue : Hors offre (exclu des statistiques)"
+                    >
+                      ➖ Hors offre
+                    </span>
+                  )}
+
+                  {c1Status === 'not_published' && !inCycle2 && (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: '#fff',
+                        background: '#334155',
+                        border: '1.5px solid #334155',
+                        borderRadius: '6px',
+                      }}
+                      title="Option retenue : À ne pas publier"
+                    >
+                      🚫 À ne pas publier{valItem?.nonPublishReason ? ` · ${valItem.nonPublishReason}` : ''}
+                    </span>
+                  )}
+
+                  {c1Status === 'closed_no_bookings' && !inCycle2 && (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 9px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        color: '#fff',
+                        background: '#dc2626',
+                        border: '1.5px solid #dc2626',
+                        borderRadius: '6px',
+                      }}
+                      title="Option retenue : Pas d'inscrit"
+                    >
+                      👥 Pas d&apos;inscrit
+                    </span>
+                  )}
+
+                  {c1Status !== 'unpublished' && !isReadOnly && !isPastLocked && onSetSlotCycle1Action && (
                     <button
                       type="button"
                       className="fbtn"
                       style={{
                         margin: 0,
-                        padding: '5px 9px',
+                        padding: '5px 8px',
                         fontSize: '0.72rem',
                         fontWeight: 800,
-                        color: '#6d28d9',
-                        background: '#f3e8ff',
-                        border: '1px solid #d8b4fe',
+                        color:
+                          confirmResetSlot?.date === selectedDate && confirmResetSlot.idx === idx
+                            ? '#fff'
+                            : '#475569',
+                        background:
+                          confirmResetSlot?.date === selectedDate && confirmResetSlot.idx === idx
+                            ? '#475569'
+                            : '#fff',
+                        border: '1.5px solid #94a3b8',
                         borderRadius: '6px',
                         cursor: 'pointer',
                       }}
-                      onClick={() => onOpenCycle2(selectedDate)}
-                      title="Gérer décalage, regroupement ou météo dans Cycle 2"
+                      onClick={() => {
+                        if (activeSlotReasonIdx === idx) setActiveSlotReasonIdx(null);
+                        setConfirmResetSlot(prev =>
+                          prev?.date === selectedDate && prev.idx === idx
+                            ? null
+                            : { date: selectedDate, idx }
+                        );
+                      }}
+                      title="Annuler le choix actuel et remettre ce créneau en attente (confirmation demandée)"
                     >
-                      ⚡ Gérer Cycle 2
+                      ↩
                     </button>
                   )}
 
@@ -1526,11 +1892,11 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                   )}
                 </div>
 
-                {/* Horaire Cycle 1 / Cycle 2 + Repositionnement direct pendant la vie du Cycle 1 */}
+                {/* Horaire Cycle 1 / Cycle 2 + Repositionnement direct */}
                 <div style={{ minWidth: '145px', textAlign: 'right' }}>
                   {isShifted && (
                     <div style={{ fontSize: '0.72rem', color: '#64748b', textDecoration: 'line-through', fontWeight: 700 }}>
-                      C1 : {startTimeStr} - {endTimeStr}
+                      C1 : {pubDisplayStart} - {pubDisplayEnd}
                     </div>
                   )}
 
@@ -1578,7 +1944,10 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setInlineEdit(null)}
+                        onClick={() => {
+                          setInlineEdit(null);
+                          setSlotAdjustError(null);
+                        }}
                         style={{
                           background: '#f1f5f9',
                           color: '#475569',
@@ -1625,78 +1994,241 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                         {displayStart} - {displayEnd}
                       </div>
 
-                      {!isReadOnly &&
-                        !inCycle2 &&
-                        !isPastLocked &&
-                        c1Status !== 'closed_no_bookings' &&
-                        c1Status !== 'not_published' &&
-                        c1Status !== 'excluded' && (
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleShiftSlotTime(idx, -15)}
+                      {(() => {
+                        const hasC2Act = hasCycle2Activity(valItem, effectiveChars, slotObs);
+                        const isWithin48h = x.a - Date.now() / 60000 < 48 * 60;
+                        const isClosedOrExcluded =
+                          c1Status === 'closed_no_bookings' ||
+                          c1Status === 'not_published' ||
+                          c1Status === 'excluded' ||
+                          c2Status === 'cancelled_weather' ||
+                          c2Status === 'merged' ||
+                          c2Status === 'realized';
+                        if (isReadOnly || isPastLocked || isClosedOrExcluded) return null;
+                        const canAdjust = !hasC2Act && !isWithin48h;
+                        if (canAdjust) {
+                          return (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleShiftSlotTime(idx, -15)}
+                                style={{
+                                  background: '#fff',
+                                  color: '#334155',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '5px',
+                                  padding: '2px 6px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                                title="Avancer le créneau de 15 minutes (autorisé jusqu’à H−48h si 0 inscrit)"
+                              >
+                                −15m
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleShiftSlotTime(idx, 15)}
+                                style={{
+                                  background: '#fff',
+                                  color: '#334155',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '5px',
+                                  padding: '2px 6px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                                title="Décaler le créneau de 15 minutes (autorisé jusqu’à H−48h si 0 inscrit)"
+                              >
+                                +15m
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSlotAdjustError(null);
+                                  setInlineEdit({
+                                    date: selectedDate,
+                                    idx,
+                                    start: displayStart.replace('h', ':'),
+                                    end: displayEnd.replace('h', ':'),
+                                  });
+                                }}
+                                style={{
+                                  background: '#f8fafc',
+                                  color: '#0369a1',
+                                  border: '1px solid #bae6fd',
+                                  borderRadius: '5px',
+                                  padding: '2px 7px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                                title="Saisir l'heure exacte début/fin (autorisé jusqu’à H−48h si 0 inscrit)"
+                              >
+                                🕒 Ajuster
+                              </button>
+                            </div>
+                          );
+                        }
+                        const lockLabel =
+                          effectiveChars > 0
+                            ? `🔒 ≥ 1 inscrit (${effectiveChars})`
+                            : hasC2Act
+                            ? '🔒 Activité Cycle 2'
+                            : '🔒 Verrouillé < 48h';
+                        const lockTitle =
+                          effectiveChars > 0
+                            ? 'Ajustement horaire Cycle 1 bloqué : au moins 1 char est déjà inscrit sur ce créneau'
+                            : hasC2Act
+                            ? 'Ajustement horaire Cycle 1 bloqué : activité Cycle 2 enregistrée'
+                            : 'Ajustement horaire Cycle 1 autorisé uniquement jusqu’à 48h avant le début de la séance';
+                        return (
+                          <div
                             style={{
-                              background: '#fff',
-                              color: '#334155',
-                              border: '1px solid #cbd5e1',
-                              borderRadius: '5px',
-                              padding: '2px 6px',
-                              fontSize: '0.68rem',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                            }}
-                            title="Avancer le créneau de 15 minutes (Cycle 1, 0 inscrit)"
-                          >
-                            −15m
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleShiftSlotTime(idx, 15)}
-                            style={{
-                              background: '#fff',
-                              color: '#334155',
-                              border: '1px solid #cbd5e1',
-                              borderRadius: '5px',
-                              padding: '2px 6px',
-                              fontSize: '0.68rem',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                            }}
-                            title="Décaler le créneau de 15 minutes (Cycle 1, 0 inscrit)"
-                          >
-                            +15m
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setInlineEdit({
-                                date: selectedDate,
-                                idx,
-                                start: startTimeStr.replace('h', ':'),
-                                end: endTimeStr.replace('h', ':'),
-                              })
-                            }
-                            style={{
-                              background: '#f8fafc',
-                              color: '#0369a1',
-                              border: '1px solid #bae6fd',
-                              borderRadius: '5px',
+                              marginTop: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
                               padding: '2px 7px',
-                              fontSize: '0.68rem',
+                              borderRadius: '5px',
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              color: '#64748b',
+                              fontSize: '0.66rem',
                               fontWeight: 800,
-                              cursor: 'pointer',
                             }}
-                            title="Saisir l'heure exacte début/fin directement sur ce créneau"
+                            title={lockTitle}
                           >
-                            🕒 Ajuster
-                          </button>
-                        </div>
-                      )}
+                            {lockLabel}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
+                  {slotAdjustError &&
+                    slotAdjustError.date === selectedDate &&
+                    slotAdjustError.idx === idx && (
+                      <div
+                        style={{
+                          marginTop: '4px',
+                          padding: '3px 7px',
+                          borderRadius: '5px',
+                          background: '#fef2f2',
+                          border: '1px solid #fca5a5',
+                          color: '#b91c1c',
+                          fontSize: '0.68rem',
+                          fontWeight: 800,
+                          textAlign: 'left',
+                        }}
+                      >
+                        ⛔ {slotAdjustError.message}
+                      </div>
+                    )}
                 </div>
               </div>
             </div>
+
+              {confirmResetSlot?.date === selectedDate &&
+                confirmResetSlot.idx === idx &&
+                !isReadOnly &&
+                !isPastLocked &&
+                onSetSlotCycle1Action && (
+                  <div
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: hasC2Activity ? '#fef2f2' : '#fffbeb',
+                      border: hasC2Activity ? '1.5px solid #fca5a5' : '1.5px solid #fcd34d',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '8px',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    {hasC2Activity ? (
+                      <>
+                        <span style={{ color: '#991b1b', fontWeight: 800 }}>
+                          ⛔ Retour en attente impossible directement : ce créneau a déjà{' '}
+                          {effectiveChars > 0
+                            ? `${effectiveChars} char(s) inscrit(s)`
+                            : slotObs
+                            ? 'un REX enregistré'
+                            : 'une décision Cycle 2 ou un 2ᵉ moniteur'}
+                          . Modifiez ou annulez d’abord depuis Cycle 2.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmResetSlot(null)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #fca5a5',
+                            background: '#fff',
+                            color: '#991b1b',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Compris
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ color: '#92400e', fontWeight: 800 }}>
+                          ⚠️ Confirmer l’annulation de la décision «{' '}
+                          {c1Status === 'published'
+                            ? 'À publier'
+                            : c1Status === 'excluded'
+                            ? 'Hors offre'
+                            : c1Status === 'not_published'
+                            ? 'À ne pas publier'
+                            : "Pas d'inscrit"}
+                          {' » et remettre ce créneau en attente ?'}
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmResetSlot(null);
+                              onSetSlotCycle1Action(focusData, sessItem, 'reset');
+                            }}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              background: '#d97706',
+                              color: '#fff',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✓ Confirmer le retour
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmResetSlot(null)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #cbd5e1',
+                              background: '#fff',
+                              color: '#475569',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✕ Garder
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
 
               {isPickingReason && onSetSlotCycle1Action && (
                 <div
@@ -1946,8 +2478,6 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                 }}
                 isReadOnly={isReadOnly || isPastLocked}
                 maxChars={activeBookingSlot.maxChars}
-                parkMaxMono={settings.parkMaxMono}
-                parkMaxBi={settings.parkMaxBi}
                 primaryInstructor={activeBookingSlot.primaryInstructor}
                 secondaryInstructor={activeBookingSlot.secondaryInstructor}
                 secondaryQualification={activeBookingSlot.secondaryQualification}
@@ -1964,17 +2494,44 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
       )}
 
       {/* Custom slots manager */}
-      <CustomSlotsManager
-        dateStr={selectedDate}
-        settings={settings}
-        windList={windList}
-        customSlotsMap={customSlotsMap}
-        onUpdateCustomSlots={onUpdateCustomSlots}
-        defaultSlots={calculatedDefaultSlots}
-        isOpenControlled={isCustomSlotsOpen}
-        onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
-        isReadOnly={isReadOnly || isPastLocked}
-      />
+      {(() => {
+        const protectedSlotReasons: Array<{ start: string; end: string; reason: string }> = [];
+        let hasAnyLockedSlot = false;
+        allSlots.forEach((_, idx) => {
+          const ctx = resolveSlotCycle2Context(idx);
+          if (!ctx) return;
+          const sHHMM = ctx.startTimeStr.replace('h', ':');
+          const eHHMM = ctx.endTimeStr.replace('h', ':');
+          if (ctx.effectiveChars > 0) {
+            protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: `≥ 1 inscrit (${ctx.effectiveChars})` });
+            hasAnyLockedSlot = true;
+          } else if (ctx.slotObs) {
+            protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: 'REX enregistré' });
+            hasAnyLockedSlot = true;
+          } else if (ctx.hasC2Act || ctx.isClosedOrExcluded) {
+            protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: 'Décision C1/C2 enregistrée' });
+            hasAnyLockedSlot = true;
+          } else if (ctx.isWithin48h) {
+            protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: '< 48h avant début' });
+            hasAnyLockedSlot = true;
+          }
+        });
+        return (
+          <CustomSlotsManager
+            dateStr={selectedDate}
+            settings={settings}
+            windList={windList}
+            customSlotsMap={customSlotsMap}
+            onUpdateCustomSlots={onUpdateCustomSlots}
+            defaultSlots={calculatedDefaultSlots}
+            isOpenControlled={isCustomSlotsOpen}
+            onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
+            isReadOnly={isReadOnly || isPastLocked}
+            protectedSlotReasons={protectedSlotReasons}
+            dayResetLockReason={hasAnyLockedSlot ? 'créneaux < 48h ou avec activité/décision' : null}
+          />
+        );
+      })()}
 
       <div className="m" style={{ marginTop: '12px' }}>
         ☀ Lever {R.lev} · Coucher {R.cou} · lumière retenue {R.lum}

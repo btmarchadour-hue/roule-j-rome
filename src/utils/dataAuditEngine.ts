@@ -17,6 +17,7 @@ import {
   getSlotBookingsSummary,
   getSlotMaxCapacity,
   getValidationItemChars,
+  hasRecordedShift,
   isNoBookingsReason,
   isNotPublishedCycle1,
   normalizeClosureReason,
@@ -258,13 +259,17 @@ export const buildDataAuditReport = ({
       const endTime = valEnd || obs?.slotEnd || '??h??';
       const displayTime = `${startTime} – ${endTime}`;
 
-      // Recherche d'une correspondance dans les créneaux calculés du jour
+      // Recherche d'une correspondance dans les créneaux calculés du jour (horaire publié OU horaire réel ajusté)
       const exactComp = computedSlots.find(c => c.slotKey === slotKey);
       const timeComp = !exactComp
         ? computedSlots.find(
             c =>
-              normT(c.startTime) === normT(valItem?.publishedStart || valItem?.s || obs?.slotStart) &&
-              normT(c.endTime) === normT(valItem?.publishedEnd || valItem?.e || obs?.slotEnd)
+              (normT(c.startTime) === normT(valItem?.publishedStart || valItem?.s || obs?.slotStart) &&
+                normT(c.endTime) === normT(valItem?.publishedEnd || valItem?.e || obs?.slotEnd)) ||
+              (Boolean(valItem?.actualStart) &&
+                Boolean(valItem?.actualEnd) &&
+                normT(c.startTime) === normT(valItem?.actualStart) &&
+                normT(c.endTime) === normT(valItem?.actualEnd))
           )
         : undefined;
       const computedMatch = exactComp
@@ -331,7 +336,13 @@ export const buildDataAuditReport = ({
           });
         }
 
-        // 4. Motif de fermeture générique ("Fermé", "Ferme", etc.)
+        const isLegacyGenericRejection =
+          valItem.status === 'rejected' &&
+          !valItem.cycle1Status &&
+          !valItem.cycle2Status &&
+          normalizeClosureReason(valItem.rejectReason).isGenericClosed;
+
+        // 4. Motif de fermeture générique ("Fermé", "Refusé", etc.)
         if (c1 === 'excluded') {
           // Créneau volontairement écarté hors offre : aucun motif perso requis
         } else if (c1 === 'not_published' || isNotPublishedCycle1(valItem)) {
@@ -348,6 +359,13 @@ export const buildDataAuditReport = ({
               detail: `Motif actuel : « ${rawReason || 'Non précisé'} ». Précise s’il s’agit de Vacances, Réunion, Impératif personnel, ou « Hors offre » afin de ne pas fausser les stats.`,
             });
           }
+        } else if (isLegacyGenericRejection && !obs) {
+          issues.push({
+            code: 'ambiguous_rejection',
+            level: 'warning',
+            label: `Ancien « ${valItem.rejectReason || 'Refusé / Fermé'} » sans précision`,
+            detail: `Créneau marqué « ${valItem.rejectReason || 'vide'} » avant la règle Cycle 1/2 : clique « ✏️ Corriger / Aligner » pour préciser s’il s’agissait d’un manque d’inscrits, de la météo, d’une fermeture école ou d’un créneau hors offre.`,
+          });
         } else if (valItem.status === 'rejected' && c1 !== 'closed_no_bookings' && c2 !== 'cancelled_weather' && c2 !== 'merged') {
           const norm = normalizeClosureReason(valItem.rejectReason);
           if (!valItem.rejectReason || norm.isGenericClosed) {
@@ -450,12 +468,21 @@ export const buildDataAuditReport = ({
                 detail: `Le planning indique « À ne pas publier » (motif perso/école), mais le REX indique « ${obsReasonLabel} ». Aligne la vraie cause.`,
               });
             } else if (c2 === 'cancelled_weather' && (obsIsNoClients || obsIsInstructor || obsIsHorsOffre)) {
-              issues.push({
-                code: 'reason_mismatch_vie2',
-                level: 'conflict',
-                label: 'Motif REX incohérent avec Annulation Météo',
-                detail: `Le planning indique « Annulé météo », mais le REX indique « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Choisis la vraie cause entre météo, manque d’inscrits, fermeture école ou hors offre.`,
-              });
+              if (isLegacyGenericRejection) {
+                issues.push({
+                  code: 'legacy_rejection_to_align_with_rex',
+                  level: 'warning',
+                  label: `Ancien « ${valItem.rejectReason || 'Refusé'} » à aligner sur le REX (« ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} »)`,
+                  detail: `L’ancienne fiche planning indiquait simplement « ${valItem.rejectReason || 'Refusé'} » sans préciser la cause (avant la règle Cycle 1/2), alors que le REX précise déjà « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Clique « ✏️ Corriger / Aligner » puis enregistre (la cause du REX est pré-sélectionnée).`,
+                });
+              } else {
+                issues.push({
+                  code: 'reason_mismatch_vie2',
+                  level: 'conflict',
+                  label: 'Motif REX incohérent avec Annulation Météo',
+                  detail: `Le planning indique « Annulé météo », mais le REX indique « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Choisis la vraie cause entre météo, manque d’inscrits, fermeture école ou hors offre.`,
+                });
+              }
             }
           }
 
@@ -555,7 +582,18 @@ export const buildDataAuditReport = ({
             })
           : undefined;
 
-      if (computedSlots.length > 0 && !computedMatch?.isExactKeyMatch && !isAlreadyExcluded) {
+      const hasExplicitManualShiftMemorized =
+        hasRecordedShift(valItem) &&
+        Boolean(valItem?.actualStart) &&
+        Boolean(valItem?.actualEnd) &&
+        (Boolean(computedMatch) || hasDayCustomOverride);
+
+      if (
+        computedSlots.length > 0 &&
+        !computedMatch?.isExactKeyMatch &&
+        !isAlreadyExcluded &&
+        !hasExplicitManualShiftMemorized
+      ) {
         issues.push({
           code: 'slot_key_drift',
           level: 'warning',
@@ -576,7 +614,7 @@ export const buildDataAuditReport = ({
             ? `Ce créneau démarrait avant 09h00 (ancien calcul automatique, ou horaire avancé manuellement à l’époque). Si la séance a vraiment existé, garde-la en cliquant « ✅ Valider ». Sinon, clique « ✏️ Corriger / Aligner » → « Hors offre » (ou supprime-la si c’était un essai).`
             : `Deux explications possibles : soit Jérôme a modifié manuellement l’heure de début ce jour-là (décalage / sur-mesure), soit tes réglages de marée actuels (seuil, mode Réel/Théorique ou tolérance) ne donnent plus exactement cet horaire${
                 nearbyComp ? ` (aujourd’hui l’appli propose ${nearbyComp.startTime}–${nearbyComp.endTime})` : ''
-              }. • Si la séance a bien existé à cet horaire : garde-la et clique simplement « ✅ Valider ». • Si c’était un ancien horaire en double ou jamais vendu sur anny : clique « ✏️ Corriger / Aligner » → « Hors offre » (ou supprime l’ancien).`,
+              }. • Si la séance a bien existé à cet horaire : garde-la et clique simplement « ✅ Valider ». • Si c’était un ancien horaire en double ou jamais validé pour la réservation chez le futur prestataire : clique « ✏️ Corriger / Aligner » → « Hors offre » (ou supprime l’ancien).`,
         });
       }
 
@@ -593,22 +631,33 @@ export const buildDataAuditReport = ({
       if (valItem) {
         const c1 = getEffectiveCycle1Status(valItem);
         const c2 = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
+        const itemHasShift = hasRecordedShift(valItem);
+        const shiftSuffix = itemHasShift
+          ? ` · décalée ${valItem.actualStart || startTime}–${valItem.actualEnd || endTime} (C1 : ${valItem.publishedStart || valItem.s})`
+          : '';
         if (c1 === 'excluded') {
           summaryStatusLabel = '➖ Hors offre (exclu des stats)';
         } else if (c1 === 'not_published') {
           summaryStatusLabel = `🚫 École fermée · Non publié (${valItem.nonPublishReason || valItem.rejectReason || 'motif à préciser'})`;
         } else if (c1 === 'closed_no_bookings' || isNoBookingsReason(valItem.rejectReason)) {
           summaryStatusLabel = "👥 Annulée · Pas d'inscrits";
+        } else if (
+          valItem.status === 'rejected' &&
+          !valItem.cycle1Status &&
+          !valItem.cycle2Status &&
+          normalizeClosureReason(valItem.rejectReason).isGenericClosed
+        ) {
+          summaryStatusLabel = `⛔ Ancien refus / fermeture (« ${valItem.rejectReason || 'sans motif'} » — à classer)`;
         } else if (c2 === 'cancelled_weather') {
           summaryStatusLabel = `⛔ Annulée · Météo / Plage (${valItem.rejectReason || 'météo'})`;
         } else if (c2 === 'merged') {
           summaryStatusLabel = `🔗 Regroupé → ${valItem.mergedLabel || valItem.mergedIntoKey || ''}`;
         } else if (c2 === 'shifted') {
-          summaryStatusLabel = `🕒 Séance décalée (${valItem.actualStart || startTime})`;
+          summaryStatusLabel = `🕒 Séance décalée ${valItem.actualStart || startTime}–${valItem.actualEnd || endTime} (C1 : ${valItem.publishedStart || valItem.s})`;
         } else if (c2 === 'realized') {
-          summaryStatusLabel = '🏁 Séance effectuée';
+          summaryStatusLabel = `🏁 Séance effectuée${shiftSuffix}`;
         } else if (c2 === 'confirmed') {
-          summaryStatusLabel = '⚡ Séance active (inscrits confirmés)';
+          summaryStatusLabel = `⚡ Séance active (inscrits confirmés)${shiftSuffix}`;
         } else {
           summaryStatusLabel = '📅 Ouvert (en attente de suite)';
         }

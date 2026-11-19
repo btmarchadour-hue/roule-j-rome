@@ -18,6 +18,7 @@ import {
   formatObsReasonFr,
 } from '../utils/dataAuditEngine';
 import {
+  computeShiftMinutes,
   DEFAULT_NON_PUBLISH_REASONS,
   getEffectiveCycle1Status,
   getEffectiveCycle2Status,
@@ -276,7 +277,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
   onAddCustomNonPublishReason,
 }) => {
   const [filterMode, setFilterMode] = useState<AuditFilterMode>('all');
+  const [monthFilter, setMonthFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedEntryKey, setCopiedEntryKey] = useState<string | null>(null);
   const [editingEntryKey, setEditingEntryKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraftState | null>(null);
   const [bulkDayDs, setBulkDayDs] = useState<string | null>(null);
@@ -289,18 +292,40 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [showPedagogyGuide, setShowPedagogyGuide] = useState<boolean>(
-    () => report.conflictCount > 0 || report.warningCount > 0 || report.unverifiedCount > 0
-  );
+  const [showPedagogyGuide, setShowPedagogyGuide] = useState<boolean>(false);
 
   const allNonPublishChoices = useMemo(() => {
     const merged = [...DEFAULT_NON_PUBLISH_REASONS, ...customNonPublishReasons];
     return Array.from(new Set(merged));
   }, [customNonPublishReasons]);
 
+  const availableMonths = useMemo(() => {
+    const map: Record<
+      string,
+      { ym: string; label: string; total: number; conflicts: number; warnings: number }
+    > = {};
+    report.entries.forEach(e => {
+      if (!e.ds || e.ds.length < 7) return;
+      const ym = e.ds.slice(0, 7);
+      if (!map[ym]) {
+        const dt = new Date(`${ym}-15T12:00:00`);
+        const raw = Number.isNaN(dt.getTime())
+          ? ym
+          : dt.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+        const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+        map[ym] = { ym, label, total: 0, conflicts: 0, warnings: 0 };
+      }
+      map[ym].total += 1;
+      if (e.severity === 'conflict') map[ym].conflicts += 1;
+      else if (e.severity === 'warning') map[ym].warnings += 1;
+    });
+    return Object.values(map).sort((a, b) => b.ym.localeCompare(a.ym));
+  }, [report.entries]);
+
   const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return report.entries.filter(entry => {
+      if (monthFilter !== 'all' && !entry.ds.startsWith(monthFilter)) return false;
       if (filterMode === 'conflict' && entry.severity !== 'conflict') return false;
       if (filterMode === 'warning' && entry.severity !== 'warning') return false;
       if (filterMode === 'ok' && entry.severity !== 'ok') return false;
@@ -326,7 +351,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [report.entries, filterMode, searchQuery]);
+  }, [report.entries, filterMode, monthFilter, searchQuery]);
 
   const unverifiedOkEntries = useMemo(
     () => report.entries.filter(e => e.severity === 'ok' && !e.isVerified),
@@ -493,11 +518,35 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     if (val) {
       const effC1 = getEffectiveCycle1Status(val);
       const effC2 = getEffectiveCycle2Status(val, entry.bookingSummary.totalChars);
+      const isLegacyGenericVal =
+        val.status === 'rejected' &&
+        !val.cycle1Status &&
+        !val.cycle2Status &&
+        normalizeClosureReason(val.rejectReason).isGenericClosed;
 
       if (effC1 === 'excluded') situation = 'excluded';
       else if (effC1 === 'not_published') situation = 'not_published';
       else if (effC1 === 'closed_no_bookings') situation = 'closed_no_bookings';
-      else if (effC2 === 'cancelled_weather') situation = 'cancelled_weather';
+      else if (isLegacyGenericVal && obs && obs.status === 'cancelled') {
+        if (obs.cancellationReason === 'no_clients') {
+          situation = 'closed_no_bookings';
+        } else if (
+          (obs.cancellationNote || '').toLowerCase().includes('hors offre') ||
+          (obs.cancellationNote || '').toLowerCase().includes('non pertinent')
+        ) {
+          situation = 'excluded';
+        } else if (obs.cancellationReason === 'instructor') {
+          situation = 'not_published';
+          const normObs = normalizeClosureReason(obs.cancellationNote);
+          nonPublishReason = normObs.isGenericClosed
+            ? 'Impératif personnel'
+            : normObs.label || 'Impératif personnel';
+        } else {
+          situation = 'cancelled_weather';
+          weatherReason =
+            obs.cancellationNote || mapCancellationReasonToWeatherText(obs.cancellationReason);
+        }
+      } else if (effC2 === 'cancelled_weather') situation = 'cancelled_weather';
       else if (effC2 === 'realized') situation = 'realized';
       else if (effC2 === 'shifted') situation = 'shifted';
       else situation = 'open_active';
@@ -506,11 +555,11 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         val.nonPublishReason ||
         val.rejectReason?.replace(/^Non publié\s*\(C1\)\s*:\s*/i, '') ||
         '';
-      if (rawNonPub) {
+      if (rawNonPub && !nonPublishReason) {
         const norm = normalizeClosureReason(rawNonPub);
         nonPublishReason = norm.isGenericClosed ? 'Impératif personnel' : norm.label;
       }
-      if (situation === 'cancelled_weather') {
+      if (situation === 'cancelled_weather' && !isLegacyGenericVal) {
         const rawW = val.rejectReason || obs?.cancellationNote || '';
         const normW = normalizeClosureReason(rawW);
         weatherReason =
@@ -1233,6 +1282,12 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         ? draft.secondaryQualification || (secAddChars! <= 8 ? 'CQP' : 'DE_BPJEPS')
         : undefined;
 
+      const computedShiftMinutes = computeShiftMinutes(normStart, normActualStart);
+      const keepActualShift =
+        draft.situation === 'shifted' ||
+        ((draft.situation === 'realized' || draft.situation === 'open_active') &&
+          (normActualStart !== normStart || normActualEnd !== normEnd));
+
       const existingVal = entry.valItem;
       const nextItem: ValidationItem = {
         k: targetSlotKey,
@@ -1249,9 +1304,9 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         cycle1Status: c1Status,
         nonPublishReason: c1Status === 'not_published' ? cleanNonPubReason : undefined,
         cycle2Status: c1Status === 'published' ? c2Status : undefined,
-        actualStart: draft.situation === 'shifted' ? normActualStart : undefined,
-        actualEnd: draft.situation === 'shifted' ? normActualEnd : undefined,
-        shiftMinutes: draft.situation === 'shifted' ? existingVal?.shiftMinutes : undefined,
+        actualStart: keepActualShift ? normActualStart : undefined,
+        actualEnd: keepActualShift ? normActualEnd : undefined,
+        shiftMinutes: keepActualShift ? computedShiftMinutes ?? existingVal?.shiftMinutes : undefined,
         instructor: draft.instructor.trim() || 'Jérôme',
         assignedPilot: draft.instructor.trim() || 'Jérôme',
         secondaryInstructor: cleanSec || undefined,
@@ -1463,6 +1518,29 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     URL.revokeObjectURL(url);
   };
 
+  const handleCopyEntrySummary = async (entry: AuditSlotEntry) => {
+    const valChars = getValidationItemChars(entry.valItem);
+    const lines = [
+      `📅 ${formatDateFr(entry.ds)} (${entry.ds}) · 🕒 ${entry.displayTime} · #${entry.slotKey}`,
+      `Diagnostic : ${entry.severity === 'conflict' ? '🔴 Contradiction' : entry.severity === 'warning' ? '🟠 À préciser' : '🟢 Cohérente'}`,
+      `Planning : ${entry.valItem ? `${entry.summaryStatusLabel} · ${valChars.totalChars} char(s) (${valChars.mono}m/${valChars.bi}b)` : 'Aucune fiche planning'}`,
+      `REX : ${entry.obs ? `${entry.obs.status === 'realized' ? 'Réalisée' : `Annulée (${formatObsReasonFr(entry.obs.cancellationReason)})`} · ${getObservationChars(entry.obs)} char(s)${entry.obs.cancellationNote ? ` · « ${entry.obs.cancellationNote} »` : ''}` : 'Aucun REX'}`,
+      `Inscrits : ${entry.bookingSummary.totalChars} char(s) (${entry.bookings.length} dossier(s))`,
+      entry.issues.length > 0
+        ? `Anomalies :\n${entry.issues.map(i => `- ${i.label} : ${i.detail}`).join('\n')}`
+        : 'Anomalies : Aucune',
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setCopiedEntryKey(entry.entryKey);
+      window.setTimeout(() => {
+        setCopiedEntryKey(prev => (prev === entry.entryKey ? null : prev));
+      }, 2200);
+    } catch {
+      setActionError('Copie automatique bloquée par le navigateur : utilise le bouton 📥 CSV en haut.');
+    }
+  };
+
   const severityBadge = (severity: AuditSeverity) => {
     if (severity === 'conflict') {
       return { label: '🔴 Contradiction à trancher', bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5' };
@@ -1494,7 +1572,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           borderRadius: '16px',
           maxWidth: '1080px',
           width: '100%',
-          maxHeight: '94vh',
+          height: '92vh',
+          maxHeight: '92vh',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -1503,46 +1582,45 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* EN-TÊTE FIXE */}
+        {/* EN-TÊTE FIXE COMPACT */}
         <div
           style={{
+            flexShrink: 0,
             background: '#0f172a',
             color: '#ffffff',
-            padding: '14px 18px',
+            padding: '10px 16px',
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: '12px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px',
           }}
         >
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span
                 style={{
                   background: '#d97706',
                   color: '#ffffff',
-                  fontSize: '0.66rem',
+                  fontSize: '0.64rem',
                   fontWeight: 900,
-                  padding: '2px 8px',
+                  padding: '2px 7px',
                   borderRadius: '4px',
                   textTransform: 'uppercase',
                 }}
               >
-                Outil Audit & Réconciliation Cloud
+                Audit & Réconciliation Cloud
               </span>
               <span style={{ fontSize: '0.72rem', color: '#cbd5e1', fontWeight: 700 }}>
-                {report.daysAnalyzed} journée{report.daysAnalyzed > 1 ? 's' : ''} · {report.totalCount} créneau{report.totalCount > 1 ? 'x' : ''} enregistré{report.totalCount > 1 ? 's' : ''} ·{' '}
+                {report.daysAnalyzed} journée{report.daysAnalyzed > 1 ? 's' : ''} · {report.totalCount} créneau{report.totalCount > 1 ? 'x' : ''} ·{' '}
                 <strong style={{ color: '#86efac' }}>
                   {report.verifiedCount}/{report.totalCount} validé{report.verifiedCount > 1 ? 's' : ''}
                 </strong>
               </span>
             </div>
-            <h3 style={{ margin: '6px 0 2px', fontSize: '1.12rem', fontWeight: 900 }}>
-              🩺 Mise en Conformité &amp; Cohérence des Données Existantes (Cycle 1 / Cycle 2 / REX)
+            <h3 style={{ margin: '4px 0 0', fontSize: '1.02rem', fontWeight: 900 }}>
+              🩺 Mise en Conformité &amp; Cohérence des Données
             </h3>
-            <div style={{ fontSize: '0.74rem', color: '#cbd5e1' }}>
-              Passe en revue l’historique déjà enregistré : valide en 1 clic ou corrige sur place pour aligner Cycle 1, Cycle 2 et REX (en complément du Bilan Express ◀ Jour préc. pour rattraper les journées sans REX).
-            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -1584,22 +1662,23 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           </div>
         </div>
 
-        {/* BARRE DE FILTRES & OUTILS */}
+        {/* BARRE DE FILTRES COMPACTE FIXE */}
         <div
           style={{
+            flexShrink: 0,
             background: '#f8fafc',
             borderBottom: '1px solid #cbd5e1',
-            padding: '10px 16px',
+            padding: '8px 14px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px',
+            gap: '7px',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
               {[
                 { id: 'all' as const, label: `Toutes (${report.totalCount})`, activeBg: '#0f172a', activeFg: '#fff' },
-                { id: 'conflict' as const, label: `🔴 Incohérences (${report.conflictCount})`, activeBg: '#dc2626', activeFg: '#fff' },
+                { id: 'conflict' as const, label: `🔴 Contradictions (${report.conflictCount})`, activeBg: '#dc2626', activeFg: '#fff' },
                 { id: 'warning' as const, label: `🟠 À préciser (${report.warningCount})`, activeBg: '#d97706', activeFg: '#fff' },
                 { id: 'ok' as const, label: `🟢 Cohérentes (${report.okCount})`, activeBg: '#16a34a', activeFg: '#fff' },
                 { id: 'unverified' as const, label: `⏳ À valider (${report.unverifiedCount})`, activeBg: '#0284c7', activeFg: '#fff' },
@@ -1612,12 +1691,12 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                     type="button"
                     onClick={() => setFilterMode(tab.id)}
                     style={{
-                      padding: '5px 10px',
+                      padding: '4px 9px',
                       borderRadius: '6px',
                       border: isActive ? `1.5px solid ${tab.activeBg}` : '1px solid #cbd5e1',
                       background: isActive ? tab.activeBg : '#ffffff',
                       color: isActive ? tab.activeFg : '#334155',
-                      fontSize: '0.72rem',
+                      fontSize: '0.70rem',
                       fontWeight: 800,
                       cursor: 'pointer',
                     }}
@@ -1628,42 +1707,68 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
               })}
             </div>
 
-            <input
-              type="text"
-              placeholder="🔍 Filtrer (date, motif, client, note...)"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                borderRadius: '6px',
-                border: '1px solid #cbd5e1',
-                fontSize: '0.74rem',
-                width: '230px',
-                maxWidth: '100%',
-                background: '#ffffff',
-              }}
-            />
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                value={monthFilter}
+                onChange={e => setMonthFilter(e.target.value)}
+                aria-label="Filtrer par mois"
+                style={{
+                  padding: '5px 8px',
+                  borderRadius: '6px',
+                  border: monthFilter !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  background: monthFilter !== 'all' ? '#e0f2fe' : '#ffffff',
+                  color: monthFilter !== 'all' ? '#0369a1' : '#0f172a',
+                }}
+              >
+                <option value="all">📅 Tous les mois ({report.totalCount})</option>
+                {availableMonths.map(m => (
+                  <option key={m.ym} value={m.ym}>
+                    {m.label} ({m.total}
+                    {m.conflicts > 0 ? ` · ${m.conflicts} 🔴` : ''}
+                    {m.warnings > 0 ? ` · ${m.warnings} 🟠` : ''})
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                placeholder="🔍 Date, motif, client..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.72rem',
+                  width: '185px',
+                  maxWidth: '100%',
+                  background: '#ffffff',
+                }}
+              />
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
                 onClick={() => setShowPedagogyGuide(v => !v)}
                 style={{
-                  padding: '6px 11px',
+                  padding: '5px 10px',
                   borderRadius: '6px',
                   border: '1.5px solid #0284c7',
                   background: showPedagogyGuide ? '#0284c7' : '#f0f9ff',
                   color: showPedagogyGuide ? '#ffffff' : '#0369a1',
-                  fontSize: '0.72rem',
+                  fontSize: '0.70rem',
                   fontWeight: 800,
                   cursor: 'pointer',
                 }}
               >
                 {showPedagogyGuide
-                  ? '🧭 Masquer le guide (Pourquoi & comment vérifier)'
-                  : '🧭 Guide Jérôme : Pourquoi & comment vérifier ?'}
+                  ? '🧭 Masquer le guide'
+                  : '🧭 Guide Jérôme (Pourquoi & comment vérifier)'}
               </button>
 
               {settings && EX.length > 0 && (
@@ -1671,24 +1776,77 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                   type="button"
                   onClick={() => setShowAddDayClosure(v => !v)}
                   style={{
-                    padding: '6px 11px',
+                    padding: '5px 10px',
                     borderRadius: '6px',
                     border: '1.5px solid #d97706',
                     background: showAddDayClosure ? '#d97706' : '#fffbeb',
                     color: showAddDayClosure ? '#ffffff' : '#92400e',
-                    fontSize: '0.72rem',
+                    fontSize: '0.70rem',
                     fontWeight: 800,
                     cursor: 'pointer',
                   }}
                 >
                   {showAddDayClosure
                     ? 'Fermer saisie journée complète'
-                    : '➕ Déclarer / fermer une journée entière (ex. Hier / Aujourd’hui)'}
+                    : '➕ Déclarer / fermer une journée entière'}
                 </button>
               )}
             </div>
+
+            {monthFilter !== 'all' || filterMode !== 'all' || searchQuery.trim() ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMonthFilter('all');
+                  setFilterMode('all');
+                  setSearchQuery('');
+                }}
+                style={{
+                  padding: '4px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                ↺ Réinitialiser filtres ({filteredEntries.length}/{report.totalCount})
+              </button>
+            ) : null}
           </div>
 
+          {actionError && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#991b1b',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+              }}
+            >
+              {actionError}
+            </div>
+          )}
+        </div>
+
+        {/* ZONE DE DÉFILEMENT PRINCIPALE (Guide / Outils dépliés + Liste des entrées) */}
+        <div
+          style={{
+            padding: '12px 14px',
+            overflowY: 'auto',
+            flex: '1 1 auto',
+            minHeight: 0,
+            background: '#f1f5f9',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
           {showPedagogyGuide && (
             <div
               style={{
@@ -1697,7 +1855,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                 borderRadius: '10px',
                 padding: '10px 12px',
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(235px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                 gap: '10px',
                 fontSize: '0.72rem',
                 color: '#1e293b',
@@ -1709,7 +1867,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                   1. Pourquoi on vérifie la cohérence ?
                 </div>
                 <div>
-                  Pour partir sur une base <strong>100 % propre</strong> : éviter qu’un ancien créneau « Fermé » passe pour un manque de clients, fiabiliser vos <strong>stats Vie 1 / Vie 2</strong>, sécuriser l’export vers <strong>anny</strong> et caler juste le seuil de Lestrevet.
+                  Pour partir sur une base <strong>100 % propre</strong> : éviter qu’un ancien créneau « Fermé » passe pour un manque de clients, fiabiliser vos <strong>stats Vie 1 / Vie 2</strong>, sécuriser l’export vers le <strong>futur prestataire de réservation</strong> (seuls les créneaux validés « À publier » par Jérôme) et caler juste le seuil de Lestrevet.
                 </div>
               </div>
 
@@ -1718,7 +1876,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                   2. Ce qui a changé (Avant → Aujourd’hui)
                 </div>
                 <div>
-                  Avant, un créneau était juste <em>Validé</em> ou <em>Fermé</em>. Aujourd’hui on distingue : <strong>Cycle 1</strong> (mis en vente sur anny / fermeture école / <em>Hors offre</em>), <strong>Cycle 2</strong> (terrain, décalage, 2e moniteur) et le <strong>REX</strong> (bilan final, simplifié par le <strong>Bilan Express</strong>).
+                  Avant, un créneau était juste <em>Validé</em> ou <em>Fermé</em>. Aujourd’hui on distingue : <strong>Cycle 1</strong> (validé « À publier » pour le futur prestataire / fermeture école / <em>Hors offre</em>), <strong>Cycle 2</strong> (terrain, décalage, 2e moniteur) et le <strong>REX</strong> (bilan final, simplifié par le <strong>Bilan Express</strong>).
                 </div>
               </div>
 
@@ -1727,8 +1885,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                   3. Ce qu’il faut vérifier &amp; valider
                 </div>
                 <div>
-                  <strong>🔴 Rouge :</strong> contradiction Planning vs REX ➔ clique <em>✏️ Corriger / Aligner</em> pour trancher.<br />
-                  <strong>🟠 Orange :</strong> motif « Fermé » vague, horaire marée recalculé ou séance passée en attente ➔ précise, valide si c’était réel, ou passe par <em>Bilan Express ◀ Jour préc.</em>.<br />
+                  <strong>🔴 Rouge :</strong> contradiction Planning vs REX ➔ clique <em>⚖️ Trancher</em>.<br />
+                  <strong>🟠 Orange :</strong> motif « Fermé » vague, horaire décalé ou séance passée en attente ➔ précise ou valide si c’était réel.<br />
                   <strong>🟢 Vert :</strong> déjà juste ➔ clique <em>✅ Valider</em> pour signer.
                 </div>
               </div>
@@ -1886,25 +2044,6 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             </div>
           )}
 
-          {actionError && (
-            <div
-              style={{
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
-                color: '#991b1b',
-                padding: '7px 12px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-              }}
-            >
-              {actionError}
-            </div>
-          )}
-        </div>
-
-        {/* LISTE DES ENTRÉES */}
-        <div style={{ padding: '14px 16px', overflowY: 'auto', flex: 1, background: '#f1f5f9' }}>
           {filteredEntries.length === 0 ? (
             <div
               style={{
@@ -2527,6 +2666,24 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                         >
                           {isEditing ? 'Fermer édition' : '✏️ Corriger / Aligner'}
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyEntrySummary(entry)}
+                          style={{
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            border: '1px solid #cbd5e1',
+                            background: copiedEntryKey === entry.entryKey ? '#ecfdf5' : '#ffffff',
+                            color: copiedEntryKey === entry.entryKey ? '#065f46' : '#475569',
+                            fontSize: '0.70rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                          title="Copier le résumé de ce créneau pour le coller dans le chat"
+                        >
+                          {copiedEntryKey === entry.entryKey ? '✓ Copié' : '📋'}
+                        </button>
                       </div>
                     </div>
 
@@ -3046,7 +3203,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
                               />
                             </label>
 
-                            {draft.situation === 'shifted' && (
+                            {(draft.situation === 'shifted' ||
+                              ((draft.situation === 'realized' || draft.situation === 'open_active') &&
+                                (normalizeTimeHHhMM(draft.actualStart) !== normalizeTimeHHhMM(draft.publishedStart) ||
+                                  normalizeTimeHHhMM(draft.actualEnd) !== normalizeTimeHHhMM(draft.publishedEnd)))) && (
                               <>
                                 <label style={{ fontWeight: 700 }}>
                                   Début réel (décalé) :

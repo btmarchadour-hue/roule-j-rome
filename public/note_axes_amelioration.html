@@ -363,9 +363,88 @@
       </div>
     </div>
 
+    <!-- AXE 6 : REGROUPEMENT DE CRENEAUX (OPTION POTENTIELLE POUR JEROME) -->
+    <div class="block block-amber">
+      <h2><span class="step-num">6</span> Option Potentielle · Regroupement de Créneaux en Cycle 2</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Fusionner deux créneaux peu remplis d’une même journée (ex. 11h00 ➔ 15h00)</span>
+          <span class="tag tag-amber">Mis en pause · À arbitrer par Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Pourquoi l’option a été retirée du terrain pour l’instant :</strong> déplacer un groupe vers un autre horaire implique une vraie <strong>logistique de communication client</strong> (contacter chaque inscrit par appel ou SMS, gérer les clients qui refusent le nouvel horaire, éviter les incohérences entre réservations, jauge 12/20/24 chars et REX).</li>
+          <li><strong>Question de pertinence pour Jérôme :</strong> dans la vraie vie à Lestrevet, as-tu vraiment l’usage d’un outil de regroupement dans l’application, ou gères-tu ces rares cas par simple appel téléphonique (ou uniquement plus tard quand le futur prestataire saura envoyer des SMS automatiques) ?</li>
+          <li><strong>Questions à trancher pour sécuriser ce point si on l’active un jour :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Communication &amp; préavis :</strong> quel délai minimum avant la séance (ex. J-1 18h max) et faut-il attendre les SMS auto du futur outil de réservation ?</li>
+              <li><strong>Transfert &amp; jauge :</strong> comment bloquer proprement si A + B dépassent 12 chars (ou 20/24 avec 2ᵉ moniteur) et transférer sans doublon les fiches clients ?</li>
+              <li><strong>Clients qui refusent le nouvel horaire :</strong> doivent-ils être classés « Reportés sur autre date » ou « Perdus », et le créneau A fusionné ne doit jamais compter comme « annulé météo ».</li>
+            </ol>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- AXE 7 : DECALAGE HORAIRE EN CYCLE 2 (OPTION POTENTIELLE POUR JEROME) -->
+    <div class="block block-amber">
+      <h2><span class="step-num">7</span> Option Potentielle · Décalage Horaire en Cycle 2 (« Décaler »)</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Décaler l’heure d’une séance déjà validée et publiée en Cycle 2 (±15 à ±45 min)</span>
+          <span class="tag tag-amber">Mis en pause · À arbitrer par Jérôme</span>
+        </div>
+        <ul>
+          <li><strong>Pourquoi l’option a été retirée du Cycle 2 pour l’instant (contraintes techniques &amp; couplage) :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Risque de désynchronisation avec le futur outil de réservation :</strong> si un créneau déjà publié et exporté change d’heure dans notre outil, le prestataire externe (s’il relie par <em>Date + Heure</em>) peut créer un doublon, perdre la correspondance des réservations qui remontent ou laisser les clients inscrits sur l’ancien horaire.</li>
+              <li><strong>Logistique de communication client :</strong> dès qu’au moins 1 client est inscrit sur l’horaire Cycle 1 d’origine, décaler oblige à prévenir tous les participants (appel ou SMS automatique) et à gérer ceux qui refusent le nouvel horaire.</li>
+              <li><strong>Risque de chevauchement entre séances :</strong> décaler un créneau vers l’avant ou l’arrière (ex. +45 min) peut le faire empiéter sur la séance suivante du même moniteur sur la plage.</li>
+            </ol>
+          </li>
+          <li><strong>Question de pertinence pour Jérôme :</strong> une fois une séance validée « À publier » en Cycle 1, as-tu réellement besoin de décaler son horaire en Cycle 2 sur le terrain, ou suffit-il d’ajuster les créneaux <em>avant</em> publication Cycle 1 ?</li>
+          <li><strong>Points techniques &amp; métier à trancher si tu souhaites réactiver « Décaler » un jour :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Périmètre d’autorisation :</strong> autoriser le décalage <strong>uniquement s’il y a 0 inscrit</strong> (zéro impact client/billetterie) ou aussi <strong>avec inscrits</strong> (sous réserve que l’outil de réservation supporte la mise à jour horaire via identifiant unique + l’envoi de SMS auto) ?</li>
+              <li><strong>Préavis limite :</strong> jusqu’à quel moment avant la séance un décalage resterait-il acceptable (ex. J-1 au soir maximum, jamais le jour J) ?</li>
+              <li><strong>Garde-fous obligatoires :</strong> blocage automatique si chevauchement avec un autre créneau du même moniteur, et envoi explicite vers le futur prestataire de l’identifiant immuable + heure C1 d’origine + heure actualisée.</li>
+            </ol>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- AXE 8 : AJUSTEMENT HORAIRE CYCLE 1 H-48H & COUPLAGE RESERVATION -->
+    <div class="block block-indigo">
+      <h2><span class="step-num">8</span> Ajustement Horaire Cycle 1 jusqu’à H−48h &amp; Couplage Réservation</h2>
+      <div class="axe-card" style="margin-bottom:0;">
+        <div class="axe-head">
+          <span>Manipuler −15m / +15m / 🕒 Ajuster en Cycle 1 avant H−48h sans casser la billetterie</span>
+          <span class="tag">En place (0 inscrit) · Arbitrage Jérôme pour les inscrits</span>
+        </div>
+        <ul>
+          <li><strong>Règle appliquée dès maintenant en pré-production :</strong> Jérôme peut ajuster l’horaire Cycle 1 jusqu’à <strong>H−48h avant le début de séance</strong> (même si déjà validé « À publier ») <strong>tant qu’il y a 0 inscrit</strong>, avec blocage automatique en cas de chevauchement entre deux séances et verrou explicite sous H−48h ou dès ≥ 1 inscrit.</li>
+          <li><strong>Les 4 contraintes techniques liées à l’outil de réservation :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Identifiant Date+Heure vs ID fixe :</strong> aujourd’hui, l’identifiant d’un créneau repose sur sa date et son heure de début. Si le créneau est déjà exporté et change d’heure, une billetterie sans ID technique fixe risque de créer un doublon ou de perdre la remontée des inscrits.</li>
+              <li><strong>Cas ≥ 1 inscrit avant H−48h :</strong> dès qu’un client a déjà reçu sa confirmation pour l’heure d’origine, un décalage impose une notification client fiable (email/SMS).</li>
+              <li><strong>Chevauchement planning moniteur :</strong> tout ajustement doit respecter les autres séances actives du même moniteur le même jour.</li>
+              <li><strong>Calcul exact H−48h :</strong> verrou calculé en heure locale de la plage par rapport à l’heure de début exacte de la séance.</li>
+            </ol>
+          </li>
+          <li><strong>Solutions / arbitrages soumis à Jérôme (Q6 &amp; Q7 du QCM) :</strong>
+            <ol style="margin:4px 0 0; padding-left:18px;">
+              <li><strong>Choix A (actuel · 0 risque) :</strong> autoriser l’ajustement en C1 jusqu’à H−48h uniquement s’il y a <strong>0 inscrit</strong> (et verrouiller dès ≥ 1 inscrit ou &lt; 48h).</li>
+              <li><strong>Choix B (avec future billetterie) :</strong> autoriser jusqu’à H−48h même avec inscrits, uniquement si le futur prestataire met à jour le créneau par <strong>identifiant immuable</strong> et envoie automatiquement un email/SMS aux inscrits.</li>
+              <li><strong>Choix C (strict) :</strong> figer l’heure dès le clic « À publier » (et bloquer à H−48h même avant publication).</li>
+            </ol>
+          </li>
+        </ul>
+      </div>
+    </div>
+
     <!-- TABLEAU VIVANT POUR COMPLETER AU FIL DE L'EAU -->
     <div class="block">
-      <h2><span class="step-num">6</span> Tableau de suivi &amp; ajouts ultérieurs</h2>
+      <h2><span class="step-num">9</span> Tableau de suivi &amp; ajouts ultérieurs</h2>
       <table class="ref-table">
         <thead>
           <tr>
@@ -376,6 +455,24 @@
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><strong>Ajustement horaire Cycle 1 jusqu’à H−48h</strong></td>
+            <td>Revue cohérence (Point 3)</td>
+            <td>Actif (0 inscrit) · QCM Jérôme (Q6–Q7)</td>
+            <td>Arbitrage sur le cas ≥ 1 inscrit + exigence d’identifiant immuable &amp; notif auto pour le futur outil de résa</td>
+          </tr>
+          <tr>
+            <td><strong>Décalage horaire en Cycle 2 (« Décaler »)</strong></td>
+            <td>Revue cohérence (Point 3)</td>
+            <td>Option potentielle (QCM Jérôme)</td>
+            <td>Arbitrage Jérôme + couplage API identifiant immuable / SMS auto + contrôle anti-chevauchement</td>
+          </tr>
+          <tr>
+            <td><strong>Regroupement de créneaux (Cycle 2)</strong></td>
+            <td>Revue cohérence (Point 3)</td>
+            <td>Option potentielle (QCM Jérôme)</td>
+            <td>Validation d’intérêt par Jérôme + logistique SMS/communication + règles de transfert</td>
+          </tr>
           <tr>
             <td><strong>Bâches &amp; ruissellements Lestrevet</strong></td>
             <td>Cadrage Terrain (Q3)</td>

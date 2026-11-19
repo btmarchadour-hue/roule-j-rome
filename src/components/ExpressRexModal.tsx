@@ -47,7 +47,7 @@ export interface ExpressRexModalProps {
   onSaveBatch: (dateStr: string, obsList: SlotObservation[]) => Promise<void> | void;
 }
 
-type ExpressMode = 'realized' | 'no_clients' | 'cancelled_weather';
+type ExpressMode = 'pending' | 'realized' | 'no_clients' | 'cancelled_weather';
 
 interface ExpressRowState {
   slotKey: string;
@@ -67,6 +67,7 @@ interface ExpressRowState {
   biCount: number;
   participantsCount: number;
   bookedParticipantsCount: number;
+  agendaBookedCount: number;
   rescheduledCount: number;
   lostCount: number;
   observedWindKts?: number;
@@ -210,7 +211,9 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
 
       const c1Status = getEffectiveCycle1Status(valItem);
       const c2Status = getEffectiveCycle2Status(valItem, bSummary.totalChars, existingObs);
-      const isHiddenC1 = (c1Status === 'excluded' || c1Status === 'not_published') && !existingObs;
+      const isHiddenC1 =
+        (c1Status === 'excluded' || c1Status === 'not_published' || c1Status === 'unpublished') &&
+        !existingObs;
 
       const maxChars = valItem ? getSlotMaxCapacity(valItem) : MAX_CHARS_PER_INSTRUCTOR;
       const primaryInstructor = valItem?.instructor || existingObs?.author || 'Jérôme';
@@ -243,15 +246,15 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
 
       const weatherMeta = getSlotWeatherRexDefaults(
         activeDate,
-        slotStart,
-        slotEnd,
+        valItem?.actualStart || slotStart,
+        valItem?.actualEnd || slotEnd,
         EX,
         windList,
         null
       );
 
-      // Determine smart initial mode
-      let mode: ExpressMode = 'no_clients';
+      // Determine smart initial mode (Option B: 0-booking undecided slots start on 'pending')
+      let mode: ExpressMode = 'pending';
       let cancellationReason: CancellationReason = 'no_clients';
       if (existingObs) {
         if (existingObs.status === 'realized') {
@@ -270,8 +273,11 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
       } else if (c2Status === 'cancelled_weather') {
         mode = 'cancelled_weather';
         cancellationReason = slot.ok === false ? 'wind_high' : 'wind_low';
-      } else if (c1Status === 'closed_no_bookings' || preChars === 0) {
+      } else if (c1Status === 'closed_no_bookings') {
         mode = 'no_clients';
+        cancellationReason = 'no_clients';
+      } else if (preChars === 0) {
+        mode = 'pending';
         cancellationReason = 'no_clients';
       } else if (slot.ok === false) {
         mode = 'cancelled_weather';
@@ -286,6 +292,8 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
           ? 'Hors offre'
           : c1Status === 'not_published'
           ? `Non publié (${valItem?.nonPublishReason || 'C1'})`
+          : c1Status === 'unpublished'
+          ? 'En attente C1'
           : '';
 
       const bookedCount =
@@ -311,6 +319,7 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
         biCount: preBi,
         participantsCount: prePeople,
         bookedParticipantsCount: bookedCount,
+        agendaBookedCount: bSummary.totalPeople,
         rescheduledCount: existingObs?.rescheduledCount ?? 0,
         lostCount: existingObs?.lostCount ?? bookedCount,
         observedWindKts: existingObs?.observedWindKts ?? weatherMeta.windKts,
@@ -377,6 +386,7 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
     let realized = 0;
     let noClients = 0;
     let cancelledWeather = 0;
+    let pending = 0;
     let totalChars = 0;
     let totalPilots = 0;
     let windsupCount = 0;
@@ -390,17 +400,43 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
         totalPilots += r.participantsCount > 0 ? r.participantsCount : r.monoCount + r.biCount * 2;
       } else if (r.mode === 'no_clients') {
         noClients++;
-      } else {
+      } else if (r.mode === 'cancelled_weather') {
         cancelledWeather++;
+      } else {
+        pending++;
       }
     }
 
-    return { realized, noClients, cancelledWeather, totalChars, totalPilots, windsupCount };
+    return {
+      realized,
+      noClients,
+      cancelledWeather,
+      pending,
+      toSaveCount: visibleRows.length - pending,
+      totalChars,
+      totalPilots,
+      windsupCount,
+    };
   }, [visibleRows]);
 
   const updateRow = (slotKey: string, updater: (r: ExpressRowState) => ExpressRowState) => {
     setValidationError(null);
     setRows(prev => prev.map(r => (r.slotKey === slotKey ? updater(r) : r)));
+  };
+
+  const markPendingAsNoClients = () => {
+    setValidationError(null);
+    setRows(prev =>
+      prev.map(r => {
+        if (r.isHiddenC1 && !showHiddenC1) return r;
+        if (r.mode !== 'pending') return r;
+        return {
+          ...r,
+          mode: 'no_clients',
+          cancellationReason: 'no_clients',
+        };
+      })
+    );
   };
 
   const applyGlobalBeach = (cond: NonNullable<SlotObservation['beachCondition']>) => {
@@ -416,11 +452,12 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
 
   const handleSaveAll = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly || visibleRows.length === 0) return;
+    const rowsToSave = visibleRows.filter(r => r.mode !== 'pending');
+    if (isReadOnly || rowsToSave.length === 0) return;
     setValidationError(null);
 
-    // Strict validation guards across all rows
-    for (const r of visibleRows) {
+    // Strict validation guards across selected rows
+    for (const r of rowsToSave) {
       if (r.mode === 'realized') {
         const chars = r.monoCount + r.biCount;
         if (chars <= 0 && r.participantsCount <= 0) {
@@ -429,16 +466,24 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
           );
           return;
         }
-        if (chars > r.maxChars) {
+        const checkChars = chars > 0 ? chars : r.participantsCount;
+        if (checkChars > r.maxChars) {
           setValidationError(
-            `Créneau ${r.slotStart} – ${r.slotEnd} : plafond strict dépassé (${chars}/${r.maxChars} chars max).`
+            `Créneau ${r.slotStart} – ${r.slotEnd} : plafond strict dépassé (${checkChars}/${r.maxChars} chars max).`
           );
           return;
         }
+      } else if (r.mode === 'no_clients' && r.agendaBookedCount > 0) {
+        setValidationError(
+          `Créneau ${r.slotStart} – ${r.slotEnd} : impossible de marquer « Pas d'inscrit » avec ${r.agendaBookedCount} inscrit${
+            r.agendaBookedCount > 1 ? 's' : ''
+          } dans les réservations.`
+        );
+        return;
       }
     }
 
-    const obsList: SlotObservation[] = visibleRows.map(r => {
+    const obsList: SlotObservation[] = rowsToSave.map(r => {
       const now = Date.now();
       const baseWeather = {
         observedPressure: r.observedPressure,
@@ -712,6 +757,26 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '0.73rem', color: '#475569' }}>
+            {!isReadOnly && summary.pending > 0 && (
+              <button
+                type="button"
+                onClick={markPendingAsNoClients}
+                style={{
+                  minHeight: '32px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #c4b5fd',
+                  background: '#f5f3ff',
+                  color: '#5b21b6',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+                title="Basculer d'un clic tous les créneaux encore en attente sur « Pas d'inscrit » (idéal en fin de journée)"
+              >
+                👥 Tout passer en « Pas d&apos;inscrit » ({summary.pending})
+              </button>
+            )}
             <span>
               {windsUpStatus === 'loading'
                 ? 'Chargement balise Winds-Up…'
@@ -726,7 +791,7 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
                   checked={showHiddenC1}
                   onChange={e => setShowHiddenC1(e.target.checked)}
                 />
-                <span>Afficher non publiés / hors offre ({hiddenCount})</span>
+                <span>Afficher non validés / hors offre ({hiddenCount})</span>
               </label>
             )}
           </div>
@@ -755,7 +820,7 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
             {visibleRows.length === 0 ? (
               <div style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b', fontSize: '0.86rem' }}>
                 Aucun créneau actif à saisir sur cette journée.
-                {hiddenCount > 0 && ' Cochez « Afficher non publiés / hors offre » ci-dessus si besoin.'}
+                {hiddenCount > 0 && ' Cochez « Afficher non validés / hors offre » ci-dessus si besoin.'}
               </div>
             ) : (
               <div>
@@ -879,24 +944,44 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
 
                           <button
                             type="button"
-                            disabled={isReadOnly}
-                            onClick={() =>
+                            disabled={isReadOnly || row.agendaBookedCount > 0}
+                            title={
+                              row.agendaBookedCount > 0
+                                ? `Impossible : déjà ${row.agendaBookedCount} inscrit${
+                                    row.agendaBookedCount > 1 ? 's' : ''
+                                  } sur ce créneau`
+                                : "Classer le créneau sans inscrit (hors annulations météo)"
+                            }
+                            onClick={() => {
+                              if (row.agendaBookedCount > 0) return;
                               updateRow(row.slotKey, prev => ({
                                 ...prev,
                                 mode: 'no_clients',
                                 cancellationReason: 'no_clients',
-                              }))
-                            }
+                              }));
+                            }}
                             style={{
                               minHeight: '40px',
                               padding: '6px 14px',
                               borderRadius: '8px',
                               border: row.mode === 'no_clients' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
-                              background: row.mode === 'no_clients' ? '#f5f3ff' : '#ffffff',
-                              color: row.mode === 'no_clients' ? '#5b21b6' : '#475569',
+                              background:
+                                row.agendaBookedCount > 0
+                                  ? '#f1f5f9'
+                                  : row.mode === 'no_clients'
+                                  ? '#f5f3ff'
+                                  : '#ffffff',
+                              color:
+                                row.agendaBookedCount > 0
+                                  ? '#94a3b8'
+                                  : row.mode === 'no_clients'
+                                  ? '#5b21b6'
+                                  : '#475569',
+                              opacity: row.agendaBookedCount > 0 ? 0.55 : 1,
                               fontSize: '0.78rem',
                               fontWeight: row.mode === 'no_clients' ? 800 : 600,
-                              cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                              cursor:
+                                isReadOnly || row.agendaBookedCount > 0 ? 'not-allowed' : 'pointer',
                               whiteSpace: 'nowrap',
                             }}
                           >
@@ -931,6 +1016,32 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
                             }}
                           >
                             ⛔ Annulée
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isReadOnly}
+                            onClick={() =>
+                              updateRow(row.slotKey, prev => ({
+                                ...prev,
+                                mode: 'pending',
+                              }))
+                            }
+                            style={{
+                              minHeight: '40px',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              border: row.mode === 'pending' ? '2px solid #64748b' : '1px solid #cbd5e1',
+                              background: row.mode === 'pending' ? '#f1f5f9' : '#ffffff',
+                              color: row.mode === 'pending' ? '#334155' : '#64748b',
+                              fontSize: '0.76rem',
+                              fontWeight: row.mode === 'pending' ? 800 : 600,
+                              cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title="Laisser ce créneau en attente (aucun REX enregistré pour lui lors de la sauvegarde)"
+                          >
+                            ⏳ Ignorer
                           </button>
                         </div>
                       </div>
@@ -1285,8 +1396,14 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
                         </div>
                       )}
 
+                      {row.mode === 'pending' && (
+                        <div style={{ fontSize: '0.74rem', color: '#64748b', paddingLeft: '2px', fontStyle: 'italic' }}>
+                          ⏳ Non statué · Ignoré lors de l&apos;enregistrement (aucun REX écrit pour ce créneau)
+                        </div>
+                      )}
+
                       {/* Détails météo & note optionnels */}
-                      {row.expandedDetails && row.mode !== 'no_clients' && (
+                      {row.expandedDetails && (row.mode === 'realized' || row.mode === 'cancelled_weather') && (
                         <div
                           style={{
                             padding: '10px 12px',
@@ -1433,6 +1550,7 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
               {summary.noClients} pas d&apos;inscrit
               {' · '}
               {summary.cancelledWeather} annulée{summary.cancelledWeather > 1 ? 's' : ''}
+              {summary.pending > 0 ? ` · ${summary.pending} ignoré${summary.pending > 1 ? 's' : ''}` : ''}
             </div>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1457,22 +1575,26 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
               {!isReadOnly && (
                 <button
                   type="submit"
-                  disabled={isSaving || visibleRows.length === 0}
+                  disabled={isSaving || summary.toSaveCount === 0}
                   style={{
                     minHeight: '40px',
                     padding: '8px 18px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: isSaving || visibleRows.length === 0 ? '#94a3b8' : '#0284c7',
+                    background: isSaving || summary.toSaveCount === 0 ? '#94a3b8' : '#0284c7',
                     color: '#ffffff',
                     fontSize: '0.82rem',
                     fontWeight: 800,
-                    cursor: isSaving || visibleRows.length === 0 ? 'not-allowed' : 'pointer',
+                    cursor: isSaving || summary.toSaveCount === 0 ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {isSaving
                     ? 'Enregistrement…'
-                    : `✓ Valider toute la journée (${visibleRows.length})`}
+                    : summary.toSaveCount === 0
+                    ? 'Choisissez au moins 1 créneau'
+                    : summary.pending === 0
+                    ? `✓ Valider toute la journée (${summary.toSaveCount})`
+                    : `✓ Enregistrer la sélection (${summary.toSaveCount}/${visibleRows.length})`}
                 </button>
               )}
             </div>

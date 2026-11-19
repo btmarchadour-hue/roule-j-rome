@@ -37,12 +37,13 @@ import {
   getEffectiveCycle2Status,
   getMonitorBadgeStyle,
   getSlotBookingsSummary,
-  getSlotFleetAlerts,
   getSlotMaxCapacity,
   getValidationItemChars,
+  hasCycle2Activity,
   hasCycle2Trigger,
+  hasRecordedShift,
+  normalizeSlotTimeHHhMM,
   SECONDARY_INSTRUCTOR_PRESETS,
-  shiftTimeString,
 } from '../utils/cycleHelpers';
 import { CalendarGrid } from './CalendarGrid';
 import { CurveChart } from './CurveChart';
@@ -173,7 +174,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   } | null>(null);
   const [openTool, setOpenTool] = useState<{
     slotKey: string;
-    mode: 'shift' | 'merge' | 'double_instructor';
+    mode: 'double_instructor';
   } | null>(null);
   const [doubleName, setDoubleName] = useState<string>('Youenn');
   const [doubleQual, setDoubleQual] = useState<'CQP' | 'DE_BPJEPS'>('CQP');
@@ -181,13 +182,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const [doubleEnd, setDoubleEnd] = useState<string>('');
   const [doubleFormula, setDoubleFormula] = useState<string>('');
   const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState<boolean>(false);
-  const [adjustMenuSlotKey, setAdjustMenuSlotKey] = useState<string | null>(null);
+  const [confirmResetC2SlotKey, setConfirmResetC2SlotKey] = useState<string | null>(null);
 
   const handleSelectCustomDate = (ds: string) => {
     setInternalFocusDate(ds);
     onFocusDateChange?.(ds);
     setOpenTool(null);
-    setAdjustMenuSlotKey(null);
+    setConfirmResetC2SlotKey(null);
   };
 
   const targetDs = propFocusDate || internalFocusDate;
@@ -272,15 +273,11 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     const effectivePeople =
       bookingSummary.totalChars > 0 ? bookingSummary.totalPeople : itemChars.people;
     const isOverCapacity = effectiveChars > slotMaxChars;
-    const fleetAlerts = getSlotFleetAlerts(
-      effectiveMono,
-      effectiveBi,
-      settings.parkMaxMono,
-      settings.parkMaxBi
-    );
 
-    const displayStart = valItem?.actualStart || startTimeStr;
-    const displayEnd = valItem?.actualEnd || endTimeStr;
+    const displayStart = normalizeSlotTimeHHhMM(valItem?.actualStart || startTimeStr);
+    const displayEnd = normalizeSlotTimeHHhMM(valItem?.actualEnd || endTimeStr);
+    const pubDisplayStart = normalizeSlotTimeHHhMM(valItem?.publishedStart || startTimeStr);
+    const pubDisplayEnd = normalizeSlotTimeHHhMM(valItem?.publishedEnd || endTimeStr);
     const normT = (v?: string) => (v || '').replace('h', ':');
     const slotObs = observations
       .filter(
@@ -303,11 +300,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     let c2Status = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
 
     if (slotObs?.status === 'cancelled') {
+      const obsHasBookedClients =
+        bookingSummary.totalChars > 0 || (slotObs.bookedParticipantsCount ?? 0) > 0;
       if (slotObs.cancellationReason === 'no_clients') {
         c1Status = 'closed_no_bookings';
         inCycle2 = false;
         c2Status = 'none';
-      } else if (slotObs.cancellationReason === 'instructor') {
+      } else if (slotObs.cancellationReason === 'instructor' && !obsHasBookedClients) {
         c1Status = 'not_published';
         inCycle2 = false;
         c2Status = 'none';
@@ -316,51 +315,17 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         inCycle2 = true;
         c2Status = 'cancelled_weather';
       }
-    } else if (slotObs?.status === 'realized' && (c2Status === 'none' || c2Status === 'awaiting_booking')) {
+    } else if (slotObs?.status === 'realized') {
       c1Status = 'published';
       inCycle2 = true;
       c2Status = 'realized';
     }
 
-    const isShifted =
-      c2Status === 'shifted' &&
-      Boolean(valItem?.actualStart) &&
-      (valItem?.actualStart !== startTimeStr || valItem?.actualEnd !== endTimeStr);
+    const isShifted = hasRecordedShift(valItem);
 
     const isToolOpen = (
-      mode: 'confirm_chars' | 'shift' | 'merge' | 'cancel_weather' | 'double_instructor'
+      mode: 'double_instructor'
     ) => openTool?.slotKey === slotKey && openTool.mode === mode;
-
-    // Créneaux candidats pour le regroupement / fusion sur la même journée (uniquement parmi les créneaux validés Cycle 1)
-    const mergeTargets = f.list
-      .filter(other => {
-        const oKey = kOf(other);
-        if (oKey === slotKey) return false;
-        if (validatedMergeKeys) return validatedMergeKeys.has(oKey);
-        const oStart = lc(other.a, f.y, f.m, f.d);
-        const oEnd = lc(other.b, f.y, f.m, f.d);
-        const oVal = findMatchingValidationItem(valRecord, oKey, oStart, oEnd);
-        const oBook = getSlotBookingsSummary(bookingsMap[buildReservationKey(f.ds, oKey)] || []);
-        return getEffectiveCycle1Status(oVal) === 'published' || hasCycle2Trigger(oVal, oBook.totalChars);
-      })
-      .map(other => {
-        const oKey = kOf(other);
-        const oStart = lc(other.a, f.y, f.m, f.d);
-        const oEnd = lc(other.b, f.y, f.m, f.d);
-        const oVal = findMatchingValidationItem(valRecord, oKey, oStart, oEnd);
-        const oBook = getSlotBookingsSummary(bookingsMap[buildReservationKey(f.ds, oKey)] || []);
-        const oChars = Math.max(oBook.totalChars, getValidationItemChars(oVal).totalChars);
-        const maxTargetChars = getSlotMaxCapacity(oVal);
-        const combined = effectiveChars + oChars;
-        return {
-          slotKey: oKey,
-          label: `${oVal?.actualStart || oStart} - ${oVal?.actualEnd || oEnd}`,
-          oChars,
-          combined,
-          maxTargetChars,
-          overMax: combined > maxTargetChars,
-        };
-      });
 
     const cardBg =
       c2Status === 'cancelled_weather' || c1Status === 'closed_no_bookings'
@@ -413,11 +378,27 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         ? '#0284c7'
         : '#94a3b8';
 
-    let chip = <span className="fchip">VENT ?</span>;
-    if (x.isCustom) {
+    const isPastDay = f.ds < tdRaw;
+    const isTrueCustom = Boolean(x.isCustom && !x.isAdapted && !x.isUnchangedTide);
+    const isAdapted = Boolean(x.isAdapted);
+
+    let chip: React.ReactNode = isPastDay ? null : <span className="fchip">VENT ?</span>;
+    if (isPastDay) {
+      if (isTrueCustom) {
+        chip = <span className="fchip">SUR MESURE</span>;
+      } else if (isAdapted) {
+        chip = <span className="fchip">ADAPTÉ</span>;
+      }
+    } else if (isTrueCustom) {
       chip = (
         <span className={`fchip ${x.ok === true ? 'fg' : x.ok === false ? 'fr' : 'fo'}`}>
           SUR MESURE · {x.ok === true ? 'VENT OK' : x.ok === false ? 'VENT HORS PLAGE' : 'VENT ?'}
+        </span>
+      );
+    } else if (isAdapted) {
+      chip = (
+        <span className={`fchip ${x.ok === true ? 'fg' : x.ok === false ? 'fr' : 'fo'}`}>
+          ADAPTÉ · {x.ok === true ? 'VENT OK' : x.ok === false ? 'VENT HORS PLAGE' : 'VENT ?'}
         </span>
       );
     } else if (x.opt) {
@@ -428,20 +409,16 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       chip = <span className="fchip fr">VENT HORS PLAGE</span>;
     }
 
-    const sub = x.isCustom
+    const sub = isTrueCustom
       ? x.customTitle || 'Créneau personnalisé'
+      : isAdapted
+      ? x.txt || 'Horaire adapté en Cycle 1'
       : x.opt
       ? `dépasse la contrainte ${
           x.lim === 'marée' ? 'de marée' : "d'heure du jour"
         } au ${x.side} · à ta discrétion`
       : x.txt || '';
-    const slotWindSector = x.st ? classifyWindSector(x.st.dir) : null;
-
-    const isAdjustOpen =
-      adjustMenuSlotKey === slotKey ||
-      isToolOpen('shift') ||
-      isToolOpen('merge') ||
-      isToolOpen('cancel_weather');
+    const slotWindSector = !isPastDay && x.st ? classifyWindSector(x.st.dir) : null;
 
     return (
       <div
@@ -512,8 +489,16 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       : c2Status === 'shifted'
                       ? `DÉCALÉ ${valItem?.shiftMinutes ? (valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes) + ' MIN' : ''}`
                       : c2Status === 'realized'
-                      ? '🏁 CYCLE 2 · SÉANCE EFFECTUÉE'
-                      : 'CYCLE 2 · CONFIRMÉ'}
+                      ? isShifted && valItem?.shiftMinutes
+                        ? `🏁 CYCLE 2 · EFFECTUÉE (DÉCALÉE ${valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes} MIN)`
+                        : isShifted
+                        ? '🏁 CYCLE 2 · EFFECTUÉE (DÉCALÉE)'
+                        : '🏁 CYCLE 2 · SÉANCE EFFECTUÉE'
+                      : isShifted && valItem?.shiftMinutes
+                      ? `CYCLE 2 · ACTIF (DÉCALÉ ${valItem.shiftMinutes > 0 ? `+${valItem.shiftMinutes}` : valItem.shiftMinutes} MIN)`
+                      : c2Status === 'confirmed'
+                      ? 'CYCLE 2 · CONFIRMÉ'
+                      : 'CYCLE 2 · ACTIF'}
                   </span>
                 </span>
 
@@ -770,45 +755,88 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           {/* DROITE : Boutons Tactiques Cycle 2 + Horaire */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  padding: '5px 10px',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  color: effectiveChars > 0 ? '#166534' : '#0369a1',
-                  background: effectiveChars > 0 ? '#dcfce7' : '#e0f2fe',
-                  border: effectiveChars > 0 ? '1px solid #86efac' : '1px solid #7dd3fc',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                }}
-                onClick={() =>
-                  setActiveBookingSlot({
-                    slotKey: effectiveBookingKey,
-                    slotStart: startTimeStr,
-                    slotEnd: endTimeStr,
-                    slotTitle: x.customTitle,
-                    maxChars: slotMaxChars,
-                    primaryInstructor,
-                    secondaryInstructor,
-                    secondaryQualification: valItem?.secondaryQualification,
-                    secondaryActualEnd: valItem?.secondaryActualEnd,
-                    secondaryFormula: valItem?.secondaryFormula,
-                  })
-                }
-                title="Ouvrir la fiche numérique des réservations"
-              >
-                👥 Inscriptions ({effectiveChars}/{slotMaxChars})
-              </button>
+              {(() => {
+                const canEditSlotBookings = c1Status === 'published' || inCycle2;
+                const hasTerminalC2Decision =
+                  c2Status === 'realized' ||
+                  c2Status === 'cancelled_weather' ||
+                  c1Status === 'closed_no_bookings' ||
+                  c2Status === 'merged';
+                const showBookingsBtn =
+                  c1Status !== 'excluded' &&
+                  c1Status !== 'not_published' &&
+                  (!hasTerminalC2Decision || c2Status === 'realized');
+                if (!showBookingsBtn) return null;
+                return (
+                  <button
+                    type="button"
+                    className="fbtn"
+                    disabled={!canEditSlotBookings}
+                    style={{
+                      margin: 0,
+                      padding: '5px 10px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      color: !canEditSlotBookings
+                        ? '#94a3b8'
+                        : effectiveChars > 0
+                        ? '#166534'
+                        : '#0369a1',
+                      background: !canEditSlotBookings
+                        ? '#f1f5f9'
+                        : effectiveChars > 0
+                        ? '#dcfce7'
+                        : '#e0f2fe',
+                      border: !canEditSlotBookings
+                        ? '1px solid #cbd5e1'
+                        : effectiveChars > 0
+                        ? '1px solid #86efac'
+                        : '1px solid #7dd3fc',
+                      borderRadius: '6px',
+                      cursor: canEditSlotBookings ? 'pointer' : 'not-allowed',
+                      opacity: canEditSlotBookings ? 1 : 0.7,
+                    }}
+                    onClick={() => {
+                      if (!canEditSlotBookings) return;
+                      const bookingTitle = isShifted
+                        ? `${x.customTitle ? `${x.customTitle} · ` : ''}C1 : ${pubDisplayStart}–${pubDisplayEnd}`
+                        : x.customTitle;
+                      setActiveBookingSlot({
+                        slotKey: effectiveBookingKey,
+                        slotStart: displayStart,
+                        slotEnd: displayEnd,
+                        slotTitle: bookingTitle,
+                        maxChars: slotMaxChars,
+                        primaryInstructor,
+                        secondaryInstructor,
+                        secondaryQualification: valItem?.secondaryQualification,
+                        secondaryActualEnd: valItem?.secondaryActualEnd,
+                        secondaryFormula: valItem?.secondaryFormula,
+                      });
+                    }}
+                    title={
+                      canEditSlotBookings
+                        ? 'Ouvrir la fiche des inscriptions (facultatif)'
+                        : 'Validez d’abord ce créneau « À publier » en Cycle 1 pour y saisir des inscriptions'
+                    }
+                  >
+                    👥 Inscriptions ({effectiveChars}/{slotMaxChars})
+                  </button>
+                );
+              })()}
 
-              {!isReadOnly && onCycle2Action && (
-                <>
-                  {c1Status !== 'closed_no_bookings' &&
-                    c1Status !== 'not_published' &&
-                    c1Status !== 'excluded' &&
-                    c2Status !== 'cancelled_weather' && (
+              {!isReadOnly && onCycle2Action && (() => {
+                const hasTerminalC2Decision =
+                  c2Status === 'realized' ||
+                  c2Status === 'cancelled_weather' ||
+                  c1Status === 'closed_no_bookings' ||
+                  c2Status === 'merged';
+                return (
+                  <>
+                    {((!hasTerminalC2Decision &&
+                      c1Status !== 'not_published' &&
+                      c1Status !== 'excluded') ||
+                      c2Status === 'realized') && (
                       <button
                         type="button"
                         className="fbtn"
@@ -860,69 +888,72 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       </button>
                     )}
 
-                  {(c1Status === 'published' || inCycle2) && (
-                    <button
-                      type="button"
-                      className="fbtn"
-                      style={{
-                        margin: 0,
-                        padding: '5px 9px',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        color: c2Status === 'cancelled_weather' ? '#fff' : '#dc2626',
-                        background: c2Status === 'cancelled_weather' ? '#dc2626' : '#fef2f2',
-                        border: '1.5px solid #fca5a5',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => {
-                        setOpenTool(null);
-                        if (onOpenObservationModal) {
-                          const keptWeatherReason =
-                            slotObs?.status === 'cancelled' &&
-                            slotObs.cancellationReason &&
-                            slotObs.cancellationReason !== 'no_clients' &&
-                            slotObs.cancellationReason !== 'instructor'
-                              ? slotObs.cancellationReason
-                              : x.ok === false
-                              ? 'wind_high'
-                              : 'wind_low';
-                          onOpenObservationModal({
-                            dateStr: currentDs,
-                            slotKey,
-                            slotStart: displayStart,
-                            slotEnd: displayEnd,
-                            isCustom: x.isCustom,
-                            customTitle: x.customTitle,
-                            maxChars: slotMaxChars,
-                            primaryInstructor,
-                            secondaryInstructor,
-                            forceIntent: true,
-                            defaultStatus: 'cancelled',
-                            defaultCancellationReason: keptWeatherReason,
-                            defaultBookedParticipantsCount:
-                              effectivePeople > 0 ? effectivePeople : undefined,
-                          });
-                        } else {
-                          onCycle2Action(f, x, {
-                            type: 'cancel_weather',
-                            reason:
-                              x.ok === false
-                                ? 'Vent trop fort / rafales'
-                                : 'Vent insuffisant (< 8 nds)',
-                            rescheduledChars: 0,
-                            lostChars: effectiveChars,
-                          });
-                        }
-                      }}
-                      title="Annuler en Vie 2 (météo, terrain...) et compléter le REX en un seul écran"
-                    >
-                      ⛔ Annuler (Vie 2)
-                    </button>
-                  )}
+                    {((!hasTerminalC2Decision && (c1Status === 'published' || inCycle2)) ||
+                      c2Status === 'cancelled_weather') && (
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: c2Status === 'cancelled_weather' ? '#fff' : '#dc2626',
+                          background: c2Status === 'cancelled_weather' ? '#dc2626' : '#fef2f2',
+                          border: '1.5px solid #fca5a5',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setOpenTool(null);
+                          if (onOpenObservationModal) {
+                            const keptWeatherReason =
+                              slotObs?.status === 'cancelled' &&
+                              slotObs.cancellationReason &&
+                              slotObs.cancellationReason !== 'no_clients' &&
+                              slotObs.cancellationReason !== 'instructor'
+                                ? slotObs.cancellationReason
+                                : x.ok === false
+                                ? 'wind_high'
+                                : 'wind_low';
+                            onOpenObservationModal({
+                              dateStr: currentDs,
+                              slotKey,
+                              slotStart: displayStart,
+                              slotEnd: displayEnd,
+                              isCustom: x.isCustom,
+                              customTitle: x.customTitle,
+                              maxChars: slotMaxChars,
+                              primaryInstructor,
+                              secondaryInstructor,
+                              forceIntent: true,
+                              defaultStatus: 'cancelled',
+                              defaultCancellationReason: keptWeatherReason,
+                              defaultBookedParticipantsCount:
+                                effectivePeople > 0 ? effectivePeople : undefined,
+                            });
+                          } else {
+                            onCycle2Action(f, x, {
+                              type: 'cancel_weather',
+                              reason:
+                                x.ok === false
+                                  ? 'Vent trop fort / rafales'
+                                  : 'Vent insuffisant (< 8 nds)',
+                              rescheduledChars: 0,
+                              lostChars: effectiveChars,
+                            });
+                          }
+                        }}
+                        title="Annuler en Vie 2 (météo, terrain...) et compléter le REX en un seul écran"
+                      >
+                        ⛔ Annuler (Vie 2)
+                      </button>
+                    )}
 
-                  {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) &&
-                    effectiveChars === 0 && (
+                    {((!hasTerminalC2Decision &&
+                      (c1Status === 'published' || inCycle2) &&
+                      effectiveChars === 0) ||
+                      c1Status === 'closed_no_bookings') && (
                       <button
                         type="button"
                         className="fbtn"
@@ -969,74 +1000,69 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       </button>
                     )}
 
-                  {(c1Status === 'published' || inCycle2) && c2Status !== 'cancelled_weather' && (
-                    <button
-                      type="button"
-                      className="fbtn"
-                      style={{
-                        margin: 0,
-                        padding: '5px 9px',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        color: secondaryInstructor ? '#047857' : '#6d28d9',
-                        background: secondaryInstructor ? '#ecfdf5' : '#f5f3ff',
-                        border: secondaryInstructor ? '1.5px solid #34d399' : '1.5px solid #c4b5fd',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => {
-                        setDoubleName(valItem?.secondaryInstructor || 'Youenn');
-                        setDoubleQual(valItem?.secondaryQualification || 'CQP');
-                        setDoubleAddChars(
-                          valItem?.secondaryMaxChars ??
-                            (valItem?.secondaryQualification === 'DE_BPJEPS' ? 12 : 8)
-                        );
-                        setDoubleEnd(valItem?.secondaryActualEnd || '');
-                        setDoubleFormula(valItem?.secondaryFormula || '');
-                        setOpenTool(
-                          isToolOpen('double_instructor')
-                            ? null
-                            : { slotKey, mode: 'double_instructor' }
-                        );
-                      }}
-                      title="Doubler ce créneau en haute saison (ex. Jérôme + Youenn CQP = 20 chars max)"
-                    >
-                      {secondaryInstructor ? `👥 +${secondaryInstructor}` : '+ Doubler (2e moniteur)'}
-                    </button>
-                  )}
+                    {!hasTerminalC2Decision && (c1Status === 'published' || inCycle2) && (
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: secondaryInstructor ? '#047857' : '#6d28d9',
+                          background: secondaryInstructor ? '#ecfdf5' : '#f5f3ff',
+                          border: secondaryInstructor ? '1.5px solid #34d399' : '1.5px solid #c4b5fd',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setDoubleName(valItem?.secondaryInstructor || 'Youenn');
+                          setDoubleQual(valItem?.secondaryQualification || 'CQP');
+                          setDoubleAddChars(
+                            valItem?.secondaryMaxChars ??
+                              (valItem?.secondaryQualification === 'DE_BPJEPS' ? 12 : 8)
+                          );
+                          setDoubleEnd(valItem?.secondaryActualEnd || '');
+                          setDoubleFormula(valItem?.secondaryFormula || '');
+                          setOpenTool(
+                            isToolOpen('double_instructor')
+                              ? null
+                              : { slotKey, mode: 'double_instructor' }
+                          );
+                        }}
+                        title="Doubler ce créneau en haute saison (ex. Jérôme + Youenn CQP = 20 chars max)"
+                      >
+                        {secondaryInstructor ? `👥 +${secondaryInstructor}` : '+ Doubler (2e moniteur)'}
+                      </button>
+                    )}
 
-                  {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) && (
-                    <button
-                      type="button"
-                      className="fbtn"
-                      style={{
-                        margin: 0,
-                        padding: '5px 9px',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        color: isAdjustOpen ? '#fff' : '#334155',
-                        background: isAdjustOpen ? '#334155' : '#f1f5f9',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => {
-                        if (isAdjustOpen) {
-                          setAdjustMenuSlotKey(null);
-                          if (openTool?.slotKey === slotKey) {
-                            setOpenTool(null);
-                          }
-                        } else {
-                          setAdjustMenuSlotKey(slotKey);
-                        }
-                      }}
-                      title="Décaler l'horaire, regrouper sur un autre créneau ou revenir en Cycle 1"
-                    >
-                      🔀 Horaires / Regrouper {isAdjustOpen ? '▲' : '▼'}
-                    </button>
-                  )}
-                </>
-              )}
+                    {(hasTerminalC2Decision || c2Status === 'shifted') && (
+                      <button
+                        type="button"
+                        className="fbtn"
+                        style={{
+                          margin: 0,
+                          padding: '5px 9px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          color: confirmResetC2SlotKey === slotKey ? '#fff' : '#475569',
+                          background: confirmResetC2SlotKey === slotKey ? '#475569' : '#fff',
+                          border: '1px solid #94a3b8',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setOpenTool(null);
+                          setConfirmResetC2SlotKey(prev => (prev === slotKey ? null : slotKey));
+                        }}
+                        title="Annuler la décision terrain Cycle 2 et remettre la séance en attente (confirmation demandée)"
+                      >
+                        ↩ Annuler décision C2
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
 
               {isReadOnly && slotObs && onOpenObservationModal && (
                 <button
@@ -1080,7 +1106,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             <div style={{ minWidth: '130px', textAlign: 'right' }}>
               {isShifted && (
                 <div style={{ fontSize: '0.72rem', color: '#64748b', textDecoration: 'line-through', fontWeight: 700 }}>
-                  C1 : {startTimeStr} - {endTimeStr}
+                  C1 : {pubDisplayStart} - {pubDisplayEnd}
                 </div>
               )}
               <div
@@ -1117,96 +1143,141 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         </div>
 
-        {/* MENU DÉPLIANT ⚙️ AJUSTER : Décaler / Regrouper / Annuler (Vie 2) / Revenir C1 */}
-        {(c1Status === 'published' || c1Status === 'closed_no_bookings' || inCycle2) &&
-          isAdjustOpen &&
-          !isReadOnly &&
-          onCycle2Action && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              flexWrap: 'wrap',
-              padding: '8px 10px',
-              borderRadius: '8px',
-              background: '#f8fafc',
-              border: '1px solid #cbd5e1',
-            }}
-          >
-            <span style={{ fontSize: '0.70rem', fontWeight: 800, color: '#475569', marginRight: '4px' }}>
-              Actions Cycle 2 :
-            </span>
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                padding: '5px 9px',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                color: isToolOpen('shift') ? '#fff' : '#b45309',
-                background: isToolOpen('shift') ? '#d97706' : '#fef3c7',
-                border: '1px solid #fcd34d',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
-              onClick={() =>
-                setOpenTool(isToolOpen('shift') ? null : { slotKey, mode: 'shift' })
-              }
-              title="Décaler l'horaire en conservant l'heure Cycle 1 d'origine"
-            >
-              🕒 Décaler
-            </button>
+        {/* Options Décalage horaire et Regroupement différées vers Axes d'Amélioration (QCM Jérôme) */}
 
-            {mergeTargets.length > 0 && (
-              <button
-                type="button"
-                className="fbtn"
-                style={{
-                  margin: 0,
-                  padding: '5px 9px',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  color: isToolOpen('merge') ? '#fff' : '#6d28d9',
-                  background: isToolOpen('merge') ? '#7c3aed' : '#f3e8ff',
-                  border: '1px solid #d8b4fe',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                }}
-                onClick={() =>
-                  setOpenTool(isToolOpen('merge') ? null : { slotKey, mode: 'merge' })
-                }
-                title="Regrouper les inscrits sur un autre créneau (bloqué au-delà de 12/20/24 chars selon encadrement)"
-              >
-                🔗 Regrouper
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="fbtn"
+        {/* CONFIRMATION INLINE ANNULATION DÉCISION CYCLE 2 */}
+        {confirmResetC2SlotKey === slotKey && !isReadOnly && onCycle2Action && (
+          slotObs ? (
+            <div
               style={{
-                margin: 0,
-                padding: '5px 9px',
-                fontSize: '0.70rem',
-                fontWeight: 700,
-                color: '#64748b',
-                background: '#fff',
-                border: '1px solid #cbd5e1',
-                borderRadius: '6px',
-                cursor: 'pointer',
+                padding: '9px 12px',
+                borderRadius: '8px',
+                background: '#fef2f2',
+                border: '1.5px solid #fca5a5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
+                fontSize: '0.75rem',
               }}
-              onClick={() => {
-                onCycle2Action(f, x, { type: 'reset_to_cycle1' });
-                setOpenTool(null);
-                setAdjustMenuSlotKey(null);
-              }}
-              title="Revenir à l'état Cycle 1 (sans décision tactique)"
             >
-              ↩ Revenir C1
-            </button>
-          </div>
+              <span style={{ color: '#991b1b', fontWeight: 800 }}>
+                ⛔ Un REX est enregistré sur cette séance : ouvrez d&apos;abord la fiche REX pour le modifier ou le supprimer avant d&apos;annuler la décision Cycle 2.
+              </span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {onOpenObservationModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmResetC2SlotKey(null);
+                      onOpenObservationModal({
+                        dateStr: currentDs,
+                        slotKey,
+                        slotStart: displayStart,
+                        slotEnd: displayEnd,
+                        isCustom: x.isCustom,
+                        customTitle: x.customTitle,
+                        maxChars: slotMaxChars,
+                        primaryInstructor,
+                        secondaryInstructor,
+                      });
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: '#dc2626',
+                      color: '#fff',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📝 Ouvrir le REX
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setConfirmResetC2SlotKey(null)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #fca5a5',
+                    background: '#fff',
+                    color: '#991b1b',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Compris
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: '9px 12px',
+                borderRadius: '8px',
+                background: '#fffbeb',
+                border: '1.5px solid #fcd34d',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '8px',
+                fontSize: '0.75rem',
+              }}
+            >
+              <span style={{ color: '#92400e', fontWeight: 800 }}>
+                ⚠️ Confirmer l’annulation de la décision Cycle 2 («{' '}
+                {c1Status === 'closed_no_bookings'
+                  ? "Pas d'inscrit"
+                  : c2Status === 'cancelled_weather'
+                  ? 'Annulé météo'
+                  : c2Status === 'realized'
+                  ? 'Séance effectuée'
+                  : c2Status === 'merged'
+                  ? 'Regroupé'
+                  : 'Décalé'}
+                {' ») et remettre cette séance en attente ?'}
+              </span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmResetC2SlotKey(null);
+                    onCycle2Action(f, x, { type: 'reset_to_cycle1' });
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#d97706',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✓ Confirmer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmResetC2SlotKey(null)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#fff',
+                    color: '#475569',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕ Garder
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         {/* ALERTE DÉPASSEMENT CAPACITÉ MONITEUR(S) */}
@@ -1227,31 +1298,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             {secondaryInstructor
               ? ` (${primaryInstructor} + ${secondaryInstructor})`
               : ' (1 moniteur — utilisez « + Doubler » pour passer à 20 ou 24 chars)'}
-            .
-          </div>
-        )}
-
-        {/* ALERTE PARC MATÉRIEL DISTINCTE MONOPLACES / BIPLACES (Q3 opt_b) */}
-        {(fleetAlerts.monoOver || fleetAlerts.biOver) && (
-          <div
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              background: '#fff7ed',
-              border: '1px solid #fdba74',
-              color: '#9a3412',
-              fontSize: '0.74rem',
-              fontWeight: 800,
-            }}
-          >
-            ⚠️ Parc matériel dépassé :{' '}
-            {fleetAlerts.monoOver
-              ? `${effectiveMono} monoplaces réservés > ${fleetAlerts.parkMaxMono} max utilisables`
-              : ''}
-            {fleetAlerts.monoOver && fleetAlerts.biOver ? ' · ' : ''}
-            {fleetAlerts.biOver
-              ? `${effectiveBi} biplaces réservés > ${fleetAlerts.parkMaxBi} max utilisables`
-              : ''}
             .
           </div>
         )}
@@ -1477,135 +1523,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
 
 
-        {/* PANNEAU INLINE 2 : DÉCALAGE HORAIRE */}
-        {isToolOpen('shift') && !isReadOnly && onCycle2Action && (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '8px',
-              background: '#fffbeb',
-              border: '1.5px solid #fcd34d',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '8px',
-              fontSize: '0.76rem',
-            }}
-          >
-            <div>
-              <strong style={{ color: '#92400e' }}>
-                🕒 Décaler depuis Cycle 1 ({startTimeStr} – {endTimeStr}) :
-              </strong>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {[-30, -15, 0, 15, 30, 45].map(delta => (
-                <button
-                  key={delta}
-                  type="button"
-                  onClick={() => {
-                    onCycle2Action(f, x, {
-                      type: 'shift',
-                      shiftMinutes: delta,
-                      newStart: shiftTimeString(startTimeStr, delta),
-                      newEnd: shiftTimeString(endTimeStr, delta),
-                    });
-                    setOpenTool(null);
-                  }}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: '6px',
-                    border: '1px solid #f59e0b',
-                    background: delta === 0 ? '#fff' : '#fef3c7',
-                    color: '#92400e',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {delta === 0 ? 'Heure C1 d’origine' : delta > 0 ? `+${delta} min` : `${delta} min`}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setOpenTool(null)}
-                style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Panneau Décalage horaire retiré en Cycle 2 pour sécuriser la synchro réservation (voir Axes d'Amélioration) */}
 
-        {/* PANNEAU INLINE 3 : REGROUPEMENT / FUSION */}
-        {isToolOpen('merge') && !isReadOnly && onCycle2Action && (
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '8px',
-              background: '#faf5ff',
-              border: '1.5px solid #d8b4fe',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              fontSize: '0.76rem',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong style={{ color: '#6d28d9' }}>
-                🔗 Regrouper ces {effectiveChars} char(s) sur un autre créneau de la journée :
-              </strong>
-              <button
-                type="button"
-                onClick={() => setOpenTool(null)}
-                style={{ padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Fermer
-              </button>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {mergeTargets.map(tgt => (
-                <button
-                  key={tgt.slotKey}
-                  type="button"
-                  disabled={tgt.overMax}
-                  title={
-                    tgt.overMax
-                      ? `Regroupement bloqué : ${tgt.combined} chars dépasse le plafond strict de ${tgt.maxTargetChars} chars`
-                      : `Regrouper vers ${tgt.label}`
-                  }
-                  onClick={() => {
-                    if (tgt.overMax) return;
-                    onCycle2Action(f, x, {
-                      type: 'merge',
-                      targetSlotKey: tgt.slotKey,
-                      targetLabel: tgt.label,
-                    });
-                    setOpenTool(null);
-                  }}
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: '6px',
-                    border: tgt.overMax ? '1.5px solid #fca5a5' : '1.5px solid #a855f7',
-                    background: tgt.overMax ? '#fef2f2' : '#ffffff',
-                    color: tgt.overMax ? '#991b1b' : '#581c87',
-                    fontWeight: 800,
-                    opacity: tgt.overMax ? 0.65 : 1,
-                    cursor: tgt.overMax ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {tgt.overMax
-                    ? `⛔ ${tgt.label} · Bloqué (${effectiveChars} + ${tgt.oChars} = ${tgt.combined}/${tgt.maxTargetChars} max)`
-                    : `➔ ${tgt.label} (${effectiveChars} + ${tgt.oChars} = ${tgt.combined}/${tgt.maxTargetChars} chars)`}
-                </button>
-              ))}
-            </div>
-            {mergeTargets.some(tgt => tgt.overMax) && (
-              <div style={{ fontSize: '0.7rem', color: '#991b1b', fontWeight: 700 }}>
-                ⛔ Blocage strict à 12 / 20 / 24 chars : doublez d&apos;abord le créneau cible avec un 2e moniteur (Youenn CQP 20 / Katleen 24) si vous devez y regrouper davantage de chars.
-              </div>
-            )}
-          </div>
-        )}
+
 
 
       </div>
@@ -2260,42 +2180,95 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           );
         })()}
 
-        {onUpdateCustomSlots && (
-          <CustomSlotsManager
-            dateStr={currentDs}
-            settings={settings}
-            windList={windList}
-            customSlotsMap={customSlotsMap}
-            onUpdateCustomSlots={onUpdateCustomSlots}
-            onCreateAndPublishSlot={
-              onCreateAndPublishCustomSlot
-                ? (ds, slot) => {
-                    onCreateAndPublishCustomSlot(ds, slot);
-                    setIsCustomSlotsOpen(false);
-                  }
-                : undefined
+        {onUpdateCustomSlots && (() => {
+          const protectedSlotReasons: Array<{ start: string; end: string; reason: string }> = [];
+          let hasAnyLockedSlot = false;
+          const valRec = validations[currentDs];
+          const dayObs = observations.filter(o => o.ds === currentDs);
+          const normT = (v?: string) => (v || '').replace('h', ':');
+          currentFocus.list.forEach(s => {
+            const sKey = kOf(s);
+            const sStart = lc(s.a, cy, cm, cd);
+            const sEnd = lc(s.b, cy, cm, cd);
+            const sVal = findMatchingValidationItem(valRec, sKey, sStart, sEnd);
+            const bKey =
+              sVal && (bookingsMap[buildReservationKey(currentDs, sVal.k)]?.length ?? 0) > 0
+                ? sVal.k
+                : sKey;
+            const bChars = getSlotBookingsSummary(
+              bookingsMap[buildReservationKey(currentDs, bKey)] || []
+            ).totalChars;
+            const eChars = bChars > 0 ? bChars : getValidationItemChars(sVal).totalChars;
+            const sObs = dayObs.find(
+              o =>
+                o.slotKey === sKey ||
+                (sVal && o.slotKey === sVal.k) ||
+                (Boolean(o.slotStart) &&
+                  Boolean(o.slotEnd) &&
+                  normT(o.slotStart) === normT(sStart) &&
+                  normT(o.slotEnd) === normT(sEnd))
+            );
+            const sHHMM = sStart.replace('h', ':');
+            const eHHMM = sEnd.replace('h', ':');
+            const c1 = getEffectiveCycle1Status(sVal);
+            if (eChars > 0) {
+              protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: `≥ 1 inscrit (${eChars})` });
+              hasAnyLockedSlot = true;
+            } else if (sObs) {
+              protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: 'REX enregistré' });
+              hasAnyLockedSlot = true;
+            } else if (
+              hasCycle2Activity(sVal, eChars, sObs) ||
+              c1 === 'excluded' ||
+              c1 === 'not_published' ||
+              c1 === 'closed_no_bookings'
+            ) {
+              protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: 'Décision C1/C2 enregistrée' });
+              hasAnyLockedSlot = true;
+            } else if (s.a - Date.now() / 60000 < 48 * 60) {
+              protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: '< 48h avant début' });
+              hasAnyLockedSlot = true;
             }
-            defaultSlots={(() => {
-              const pl = plan(cy, cm, cd, settings, tideW, first, last);
-              return pl.full
-                .map((x, idx) => ({
-                  start: lc(x[0], cy, cm, cd),
-                  end: lc(x[1], cy, cm, cd),
-                  title: `Séance ${idx + 1}`,
-                }))
-                .concat(
-                  pl.extra.map(x => ({
+          });
+          return (
+            <CustomSlotsManager
+              dateStr={currentDs}
+              settings={settings}
+              windList={windList}
+              customSlotsMap={customSlotsMap}
+              onUpdateCustomSlots={onUpdateCustomSlots}
+              onCreateAndPublishSlot={
+                onCreateAndPublishCustomSlot
+                  ? (ds, slot) => {
+                      onCreateAndPublishCustomSlot(ds, slot);
+                      setIsCustomSlotsOpen(false);
+                    }
+                  : undefined
+              }
+              defaultSlots={(() => {
+                const pl = plan(cy, cm, cd, settings, tideW, first, last);
+                return pl.full
+                  .map((x, idx) => ({
                     start: lc(x[0], cy, cm, cd),
                     end: lc(x[1], cy, cm, cd),
-                    title: `Optionnel (+${x[3]} min)`,
+                    title: `Séance ${idx + 1}`,
                   }))
-                );
-            })()}
-            isOpenControlled={isCustomSlotsOpen}
-            onToggleOpen={() => setIsCustomSlotsOpen(prev => !prev)}
-            isReadOnly={isReadOnly || currentDs < tdRaw}
-          />
-        )}
+                  .concat(
+                    pl.extra.map(x => ({
+                      start: lc(x[0], cy, cm, cd),
+                      end: lc(x[1], cy, cm, cd),
+                      title: `Optionnel (+${x[3]} min)`,
+                    }))
+                  );
+              })()}
+              isOpenControlled={isCustomSlotsOpen}
+              onToggleOpen={() => setIsCustomSlotsOpen(prev => !prev)}
+              isReadOnly={isReadOnly || currentDs < tdRaw}
+              protectedSlotReasons={protectedSlotReasons}
+              dayResetLockReason={hasAnyLockedSlot ? 'créneaux < 48h ou avec activité/décision' : null}
+            />
+          );
+        })()}
 
         <div className="m" style={{ marginTop: '12px' }}>
           ☀ Lever {R.lev} · Coucher {R.cou} · lumière retenue {R.lum}
@@ -2371,8 +2344,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           }}
           isReadOnly={isReadOnly}
           maxChars={activeBookingSlot.maxChars}
-          parkMaxMono={settings.parkMaxMono}
-          parkMaxBi={settings.parkMaxBi}
           primaryInstructor={activeBookingSlot.primaryInstructor}
           secondaryInstructor={activeBookingSlot.secondaryInstructor}
           secondaryQualification={activeBookingSlot.secondaryQualification}

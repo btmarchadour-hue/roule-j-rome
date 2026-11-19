@@ -723,7 +723,9 @@ export function dayFocus(
     x: [number, number] | [number, number, string, number, string],
     opt: boolean,
     isCustom?: boolean,
-    customTitle?: string
+    customTitle?: string,
+    isAdapted?: boolean,
+    isUnchangedTide?: boolean
   ): SessionItem => {
     const ok = sw(x[0], x[1], settings, windList);
     const st = wstat(x[0], x[1], windList);
@@ -732,6 +734,8 @@ export function dayFocus(
       b: x[1],
       opt,
       isCustom,
+      isAdapted,
+      isUnchangedTide,
       customTitle,
       ok,
       st,
@@ -747,12 +751,38 @@ export function dayFocus(
   let list: SessionItem[] = [];
 
   if (customCfg && customCfg.slots.length > 0) {
+    const normT = (v: string) => v.trim().replace('h', ':');
     const customItems: SessionItem[] = customCfg.slots.map(cs => {
       const [sh, sm] = cs.start.split(':').map(Number);
       const [eh, em] = cs.end.split(':').map(Number);
       const a = toU(y, m, d, sh * 60 + sm);
       const b = toU(y, m, d, eh * 60 + em);
-      return mk([a, b], false, true, cs.title);
+      const isAdaptedRecord = Boolean(cs.isAdapted) || cs.id.startsWith('c1-');
+      if (isAdaptedRecord) {
+        const csStartNorm = normT(cs.start);
+        const csEndNorm = normT(cs.end);
+        const matchesFull = pl.full.some(
+          p => normT(lc(p[0], y, m, d)) === csStartNorm && normT(lc(p[1], y, m, d)) === csEndNorm
+        );
+        if (matchesFull) {
+          return mk([a, b], false, true, cs.title, false, true);
+        }
+        const matchedExtra = pl.extra.find(
+          p => normT(lc(p[0], y, m, d)) === csStartNorm && normT(lc(p[1], y, m, d)) === csEndNorm
+        );
+        if (matchedExtra) {
+          return mk(
+            [a, b, matchedExtra[2], matchedExtra[3], matchedExtra[4]],
+            true,
+            true,
+            cs.title,
+            false,
+            true
+          );
+        }
+        return mk([a, b], false, true, cs.title, true, false);
+      }
+      return mk([a, b], false, true, cs.title, false, false);
     });
 
     if (customCfg.replaceDefault) {

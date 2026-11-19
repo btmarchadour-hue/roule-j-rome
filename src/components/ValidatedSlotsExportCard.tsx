@@ -4,11 +4,11 @@ import { AgendaBookingItem } from '../utils/firebaseSync';
 import { MOIS } from '../utils/tides';
 import {
   collectValidatedExportSlots,
-  downloadValidatedSlotsAnnyBlockerIcs,
   downloadValidatedSlotsCsvFr,
   downloadValidatedSlotsCsvUniversal,
   downloadValidatedSlotsIcs,
   downloadValidatedSlotsJson,
+  downloadValidatedSlotsProviderBlockerIcs,
   ExportScope,
   getScopeLabel,
 } from '../utils/validatedSlotsExport';
@@ -87,7 +87,7 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <strong style={{ fontSize: '0.92rem', color: '#0f172a' }}>
-              🚀 Export Réservation · Créneaux validés par Jérôme uniquement
+              🚀 Export Réservation · Créneaux à venir validés par Jérôme
             </strong>
             <span
               style={{
@@ -100,14 +100,14 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
                 border: isEmpty ? '1px solid #cbd5e1' : '1px solid #86efac',
               }}
             >
-              {exportSlots.length} créneau{exportSlots.length > 1 ? 'x' : ''} validé{exportSlots.length > 1 ? 's' : ''} ·{' '}
+              {exportSlots.length} créneau{exportSlots.length > 1 ? 'x' : ''} à venir ·{' '}
               {totalAvailable}/{totalCapacity} chars dispos
             </span>
           </div>
           <div style={{ fontSize: '0.73rem', color: '#475569', marginTop: '3px', lineHeight: 1.4 }}>
-            Exporte strictement les créneaux publiés en Cycle 1 (exclut automatiquement les créneaux en attente,{' '}
-            <em>À ne pas publier</em>, <em>Hors offre</em>, <em>Pas d&apos;inscrits</em>, <em>Annulés</em> et{' '}
-            <em>Regroupés</em>).
+            Exporte strictement les <strong>créneaux à venir</strong> validés « <strong>À publier</strong> » par Jérôme pour le futur prestataire de réservation (exclut automatiquement le passé, les créneaux non validés,{' '}
+            <em>À ne pas publier</em>, <em>Hors offre</em>, <em>Pas d&apos;inscrits</em>, <em>Annulés</em>,{' '}
+            <em>Regroupés</em> et <em>Réalisés</em>).
           </div>
         </div>
 
@@ -115,9 +115,8 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
           <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
             {(
               [
-                { id: 'upcoming', label: '📅 À venir (≥ aujourd’hui)' },
-                { id: 'month', label: `🗓️ ${MOIS[month]} ${year}` },
-                { id: 'all', label: '📦 Tout le calendrier' },
+                { id: 'upcoming', label: '📅 Tous les créneaux à venir' },
+                { id: 'month', label: `🗓️ À venir · ${MOIS[month]} ${year}` },
               ] as const
             ).map(opt => {
               const active = scope === opt.id;
@@ -164,7 +163,7 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
         </div>
       </div>
 
-      {/* Grille des formats d'importation adaptés à anny et aux outils de réservation */}
+      {/* Grille des formats d'importation adaptés au futur prestataire de réservation et aux outils externes */}
       <div
         style={{
           display: 'grid',
@@ -176,8 +175,8 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
           type="button"
           disabled={isEmpty}
           onClick={() => {
-            downloadValidatedSlotsAnnyBlockerIcs(exportSlots, scope, year, month);
-            notifyExport('iCal Bloquant anny (.ics)');
+            downloadValidatedSlotsProviderBlockerIcs(exportSlots, scope, year, month);
+            notifyExport('iCal Bloquant Futur Prestataire (.ics)');
           }}
           style={{
             textAlign: 'left',
@@ -193,10 +192,10 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
           }}
         >
           <span style={{ fontWeight: 900, fontSize: '0.8rem', color: isEmpty ? '#94a3b8' : '#0f766e' }}>
-            ⭐ Spécial anny · iCal Bloquant (.ics)
+            ⭐ Futur Prestataire · iCal Bloquant (.ics)
           </span>
           <span style={{ fontSize: '0.69rem', color: isEmpty ? '#94a3b8' : '#334155', lineHeight: 1.35 }}>
-            Génère les blocages hors créneaux validés : dans anny (Google/Outlook/ICS), seuls les créneaux validés par Jérôme restent réservables.
+            Génère les blocages hors créneaux validés : chez le futur prestataire (Google/Outlook/ICS), seuls les créneaux validés « À publier » par Jérôme restent réservables.
           </span>
         </button>
 
@@ -205,7 +204,7 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
           disabled={isEmpty}
           onClick={() => {
             downloadValidatedSlotsJson(exportSlots, scope, year, month);
-            notifyExport('JSON API anny / Make / n8n');
+            notifyExport('JSON API Futur Prestataire / Make / n8n');
           }}
           style={{
             textAlign: 'left',
@@ -221,10 +220,10 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
           }}
         >
           <span style={{ fontWeight: 900, fontSize: '0.8rem', color: isEmpty ? '#94a3b8' : '#6d28d9' }}>
-            🔌 JSON Structuré · API anny / Make / n8n
+            🔌 JSON Structuré · API Futur Prestataire / Make / n8n
           </span>
           <span style={{ fontSize: '0.69rem', color: isEmpty ? '#94a3b8' : '#334155', lineHeight: 1.35 }}>
-            Plages journalières + capacités 12/20/24 prêtes pour l&apos;Admin API anny ou scénario Make / n8n.
+            Plages journalières + capacités 12/20/24 prêtes pour l&apos;API du futur prestataire de réservation ou scénario Make / n8n.
           </span>
         </button>
 
@@ -280,7 +279,7 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
             📊 CSV Réservation FR (.csv)
           </span>
           <span style={{ fontSize: '0.69rem', color: isEmpty ? '#94a3b8' : '#334155', lineHeight: 1.35 }}>
-            Séparateur « ; » UTF-8 BOM : saisie guidée dans anny (horaires, capacité 12/20/24, dispo) &amp; Excel.
+            Séparateur « ; » UTF-8 BOM : import ou saisie guidée dans l&apos;outil du futur prestataire (horaires, capacité 12/20/24, dispo) &amp; Excel.
           </span>
         </button>
 
@@ -308,7 +307,7 @@ export const ValidatedSlotsExportCard: React.FC<ValidatedSlotsExportCardProps> =
             🌐 CSV Universel / Make / n8n (.csv)
           </span>
           <span style={{ fontSize: '0.69rem', color: isEmpty ? '#94a3b8' : '#334155', lineHeight: 1.35 }}>
-            Séparateur « , » + ISO 8601 : idéal pour Google Sheets, Make ou n8n vers l&apos;API anny.
+            Séparateur « , » + ISO 8601 : idéal pour Google Sheets, Make ou n8n vers l&apos;API du futur prestataire.
           </span>
         </button>
       </div>

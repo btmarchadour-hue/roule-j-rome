@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import { AppSettings, CustomSlot, CustomSlotsMap, WindPoint } from '../types';
 import { sw, toU } from '../utils/tides';
 
+interface ProtectedSlotReason {
+  start: string;
+  end: string;
+  reason: string;
+}
+
 interface CustomSlotsManagerProps {
   dateStr: string;
   settings: AppSettings;
@@ -13,6 +19,8 @@ interface CustomSlotsManagerProps {
   isOpenControlled?: boolean;
   onToggleOpen?: () => void;
   isReadOnly?: boolean;
+  protectedSlotReasons?: ProtectedSlotReason[];
+  dayResetLockReason?: string | null;
 }
 
 export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
@@ -26,6 +34,8 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   isOpenControlled,
   onToggleOpen,
   isReadOnly = false,
+  protectedSlotReasons = [],
+  dayResetLockReason = null,
 }) => {
   const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
     if (isReadOnly) return;
@@ -40,6 +50,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   const [titleInput, setTitleInput] = useState<string>('Séance sur mesure');
   const [placesInput, setPlacesInput] = useState<number>(settings.cap || 1);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [y, m0, d] = dateStr.split('-').map(Number);
 
@@ -47,11 +58,44 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   const customSlots = currentConfig.slots;
   const replaceDefault = currentConfig.replaceDefault;
 
+  const normHHMM = (v: string) => v.trim().replace('h', ':');
+  const toMinHHMM = (v: string) => {
+    const [hh, mm] = normHHMM(v).split(':').map(Number);
+    return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
+  };
+  const getSlotLockReason = (cs: CustomSlot): string | null => {
+    const prot = protectedSlotReasons.find(
+      p => normHHMM(p.start) === normHHMM(cs.start) && normHHMM(p.end) === normHHMM(cs.end)
+    );
+    if (prot) return prot.reason;
+    const [sh, sm] = cs.start.split(':').map(Number);
+    const startUtcMin = toU(y, m0 - 1, d, sh * 60 + sm);
+    if (startUtcMin - Date.now() / 60000 < 48 * 60) {
+      return '< 48h avant début';
+    }
+    return null;
+  };
+  const effectiveDayResetLock =
+    dayResetLockReason ||
+    (customSlots.some(cs => getSlotLockReason(cs) !== null)
+      ? 'au moins un créneau est verrouillé (< 48h ou avec activité/inscrits)'
+      : null);
+
   const handleSaveSlot = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!startInput || !endInput) return;
+    if (toMinHHMM(endInput) <= toMinHHMM(startInput)) {
+      setFormError('L’heure de fin doit être postérieure à l’heure de début.');
+      return;
+    }
 
     if (editingSlotId) {
+      const targetSlot = customSlots.find(s => s.id === editingSlotId);
+      if (targetSlot && getSlotLockReason(targetSlot)) {
+        setEditingSlotId(null);
+        return;
+      }
       // Mise à jour d'un créneau existant
       const updated = customSlots.map(s => {
         if (s.id === editingSlotId) {
@@ -85,6 +129,8 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   };
 
   const handleStartEdit = (cs: CustomSlot) => {
+    if (getSlotLockReason(cs)) return;
+    setFormError(null);
     setEditingSlotId(cs.id);
     setStartInput(cs.start);
     setEndInput(cs.end);
@@ -94,21 +140,26 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   };
 
   const handleCancelEdit = () => {
+    setFormError(null);
     setEditingSlotId(null);
     setTitleInput('Séance sur mesure');
   };
 
   const handleDeleteSlot = (id: string) => {
+    const target = customSlots.find(s => s.id === id);
+    if (target && getSlotLockReason(target)) return;
     const updated = customSlots.filter(s => s.id !== id);
     onUpdateCustomSlots(dateStr, replaceDefault, updated);
     if (editingSlotId === id) setEditingSlotId(null);
   };
 
   const handleToggleReplace = (checked: boolean) => {
+    if (effectiveDayResetLock) return;
     onUpdateCustomSlots(dateStr, checked, customSlots);
   };
 
   const handleImportCalculatedSlots = () => {
+    if (effectiveDayResetLock) return;
     if (!defaultSlots || defaultSlots.length === 0) return;
     const imported: CustomSlot[] = defaultSlots.map((ds, idx) => ({
       id: `cs_imp_${Date.now()}_${idx}`,
@@ -123,6 +174,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   };
 
   const handleClearAll = () => {
+    if (effectiveDayResetLock) return;
     if (window.confirm('Rétablir les créneaux automatiques et effacer les modifications manuelles de ce jour ?')) {
       onUpdateCustomSlots(dateStr, false, []);
       setEditingSlotId(null);
@@ -163,12 +215,25 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                 color: '#0f172a',
               }}
             >
-              Créneaux sur mesure &amp; modification manuelle ({customSlots.length > 0 ? `${customSlots.length} sur mesure` : 'automatique'})
+              {(() => {
+                const trueCustomCount = customSlots.filter(
+                  cs => !cs.isAdapted && !cs.id.startsWith('c1-')
+                ).length;
+                const summaryLabel =
+                  customSlots.length === 0
+                    ? 'automatique'
+                    : trueCustomCount > 0
+                    ? `${trueCustomCount} sur mesure`
+                    : `${customSlots.length} horaire${customSlots.length > 1 ? 's' : ''} géré${customSlots.length > 1 ? 's' : ''}`;
+                return `Créneaux sur mesure & modification manuelle (${summaryLabel})`;
+              })()}
             </b>
             <div style={{ fontSize: '0.70rem', color: '#64748b' }}>
               {customSlots.length > 0
                 ? replaceDefault
-                  ? '🔒 Créneaux manuels personnalisés (remplacent le calcul automatique)'
+                  ? customSlots.some(cs => !cs.isAdapted && !cs.id.startsWith('c1-'))
+                    ? '🔒 Créneaux manuels personnalisés (remplacent le calcul automatique)'
+                    : '🕒 Horaires adaptés en Cycle 1 depuis les créneaux de marée'
                   : '➕ Créneaux complémentaires ajoutés aux créneaux automatiques'
                 : 'Créer un créneau sur mesure ou redéfinir manuellement les créneaux de cette journée'}
             </div>
@@ -197,7 +262,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
       {isOpen && (
         <div style={{ marginTop: '14px', borderTop: '1px solid #cbd5e1', paddingTop: '12px' }}>
           {/* Quick action: Importer les créneaux automatiques pour modification totale */}
-          {defaultSlots.length > 0 && (!replaceDefault || customSlots.length === 0) && (
+          {defaultSlots.length > 0 && (!replaceDefault || customSlots.length === 0) && !effectiveDayResetLock && (
             <div
               style={{
                 background: '#ffffff',
@@ -242,32 +307,59 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
 
           {/* Replace default slots checkbox & reset button */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-            <label className="ck" style={{ margin: 0, fontSize: '0.76rem', color: '#334155' }}>
+            <label
+              className="ck"
+              style={{
+                margin: 0,
+                fontSize: '0.76rem',
+                color: effectiveDayResetLock ? '#94a3b8' : '#334155',
+                cursor: effectiveDayResetLock ? 'not-allowed' : 'pointer',
+              }}
+              title={effectiveDayResetLock ? `Verrouillé : ${effectiveDayResetLock}` : undefined}
+            >
               <input
                 type="checkbox"
                 checked={replaceDefault}
+                disabled={Boolean(effectiveDayResetLock)}
                 onChange={e => handleToggleReplace(e.target.checked)}
               />{' '}
               <strong>Remplacer totalement les créneaux automatiques</strong> par cette sélection manuelle
             </label>
 
             {customSlots.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAll}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #fca5a5',
-                  color: '#dc2626',
-                  borderRadius: '6px',
-                  padding: '3px 8px',
-                  fontSize: '0.70rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                ↩ Rétablir créneaux automatiques
-              </button>
+              effectiveDayResetLock ? (
+                <span
+                  style={{
+                    fontSize: '0.70rem',
+                    fontWeight: 700,
+                    color: '#64748b',
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '3px 8px',
+                  }}
+                  title={`Rétablissement verrouillé : ${effectiveDayResetLock}`}
+                >
+                  🔒 Rétablissement bloqué ({effectiveDayResetLock})
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #fca5a5',
+                    color: '#dc2626',
+                    borderRadius: '6px',
+                    padding: '3px 8px',
+                    fontSize: '0.70rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ↩ Rétablir créneaux automatiques
+                </button>
+              )
             )}
           </div>
 
@@ -325,42 +417,63 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                         </div>
                       </div>
 
-                      {!isReadOnly && (
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleStartEdit(cs)}
-                            style={{
-                              background: '#f1f5f9',
-                              border: '1px solid #cbd5e1',
-                              borderRadius: '4px',
-                              padding: '3px 8px',
-                              fontSize: '0.70rem',
-                              fontWeight: 700,
-                              color: '#334155',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            ✏️ Modifier
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSlot(cs.id)}
-                            style={{
-                              background: '#fee2e2',
-                              border: '1px solid #fca5a5',
-                              color: '#b91c1c',
-                              borderRadius: '4px',
-                              padding: '3px 8px',
-                              fontSize: '0.70rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            ✕ Supprimer
-                          </button>
-                        </div>
-                      )}
+                      {!isReadOnly && (() => {
+                        const rowLockReason = getSlotLockReason(cs);
+                        if (rowLockReason) {
+                          return (
+                            <span
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '5px',
+                                padding: '3px 8px',
+                                fontSize: '0.68rem',
+                                fontWeight: 800,
+                                color: '#64748b',
+                              }}
+                              title={`Modification et suppression verrouillées (${rowLockReason})`}
+                            >
+                              🔒 {rowLockReason}
+                            </span>
+                          );
+                        }
+                        return (
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(cs)}
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '4px',
+                                padding: '3px 8px',
+                                fontSize: '0.70rem',
+                                fontWeight: 700,
+                                color: '#334155',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ✏️ Modifier
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSlot(cs.id)}
+                              style={{
+                                background: '#fee2e2',
+                                border: '1px solid #fca5a5',
+                                color: '#b91c1c',
+                                borderRadius: '4px',
+                                padding: '3px 8px',
+                                fontSize: '0.70rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ✕ Supprimer
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -463,11 +576,32 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
             </div>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {formError && (
+                <div
+                  style={{
+                    width: '100%',
+                    padding: '5px 8px',
+                    borderRadius: '6px',
+                    background: '#fef2f2',
+                    border: '1px solid #fca5a5',
+                    color: '#b91c1c',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  ⛔ {formError}
+                </div>
+              )}
               {!editingSlotId && onCreateAndPublishSlot && (
                 <button
                   type="button"
                   onClick={() => {
+                    setFormError(null);
                     if (!startInput || !endInput) return;
+                    if (toMinHHMM(endInput) <= toMinHHMM(startInput)) {
+                      setFormError('L’heure de fin doit être postérieure à l’heure de début.');
+                      return;
+                    }
                     const newSlot: CustomSlot = {
                       id: `cs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                       start: startInput,

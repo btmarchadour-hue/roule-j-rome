@@ -278,12 +278,12 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         subtitle:
           'Explication claire : pourquoi cet audit existe, ce qui a changé dans l’appli, et quoi vérifier/valider sur les séances passées et le GPS',
         summary:
-          'Pourquoi on fait ce point ? Pour éviter qu’un ancien créneau « Fermé » soit compté comme un manque de clients, et pour partir sur des statistiques, un export anny et une calibration plage 100 % fiables. Ce qui a changé : on sépare désormais l’Offre mise en vente (Cycle 1), le pilotage terrain (Cycle 2) et le bilan réel (Temps 1 via Bilan Express + Temps 2 GPS hors-ligne consolidé H+2 sans GPX). Voici concrètement ce qu’il faut vérifier et valider ensemble.',
+          'Pourquoi on fait ce point ? Pour éviter qu’un ancien créneau « Fermé » soit compté comme un manque de clients, et pour partir sur des statistiques, un export vers le futur prestataire de réservation (strictement les créneaux validés « À publier » par Jérôme) et une calibration plage 100 % fiables. Ce qui a changé : on sépare désormais l’Offre mise en vente (Cycle 1), le pilotage terrain (Cycle 2) et le bilan réel (Temps 1 via Bilan Express + Temps 2 GPS hors-ligne consolidé H+2 sans GPX). Voici concrètement ce qu’il faut vérifier et valider ensemble.',
         keyPoints: [
           '1. Pourquoi c’est important : tant que l’historique contient d’anciens « Fermé » vagues ou des séances passées sans bilan, les % d’annulation (météo vs manque de clients) et la surcote moyenne sont faussés.',
           '2. Ce qui a changé (plus simple) : pour le quotidien, le Temps 1 se boucle en 30 sec le soir via le Bilan Express (pré-rempli Winds-Up/AROME, rattrapable avec ◀ Jour préc.) et le Temps 2 GPS fonctionne en 1 clic sans réseau plage (file hors-ligne + réel H+2, sans GPX).',
           '3. Ce que tu vérifies dans l’outil ci-dessous : 🔴 Contradictions (ex. REX effectué mais planning resté fermé) ➔ cliquer « ✏️ Corriger » ; 🟠 Anciens « Fermé » vagues ou journées passées en attente ➔ préciser (Vacances / Réunion / Hors offre) ou passer au Bilan Express ; 🟢 Lignes propres ➔ cliquer « ✅ Valider » pour signer.',
-          '4. À la clé (Exploitation) : des bilans justes par motif Vie 1 / Vie 2, de meilleurs créneaux à ouvrir dans anny, la courbe surcote vs pression pour régler le seuil de Lestrevet et les preuves chiffrées Litto3D (300 pts GPS → Mode Réel).',
+          '4. À la clé (Exploitation) : des bilans justes par motif Vie 1 / Vie 2, de meilleurs créneaux validés « À publier » à ouvrir chez le futur prestataire, la courbe surcote vs pression pour régler le seuil de Lestrevet et les preuves chiffrées Litto3D (300 pts GPS → Mode Réel).',
         ],
         docUrl: '',
         docBtnLabel: '🩺 Ouvrir l’outil de vérification & correction',
@@ -301,11 +301,11 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         icon: '🧭',
         title: 'Note & QCM · Validation du Cheminement en 6 Étapes & Dernières Évolutions (Vue Jérôme)',
         subtitle:
-          'Explication détaillée du parcours complet (Cycle 1 + export anny → Cycle 2 + Bilan Express → Statistiques → Modèle Empirique hors-ligne & réel H+2 → Comptes → CRM) avec QCM',
+          'Explication détaillée du parcours complet (Cycle 1 + export futur prestataire → Cycle 2 + Bilan Express → Statistiques → Modèle Empirique hors-ligne & réel H+2 → Comptes → CRM) avec QCM',
         summary:
-          'Document de synthèse complet pour Jérôme afin d’expliquer la logique bout-en-bout de « Ça roule ? » (Cycle 1 & export anny, verrou Cycle 2 + Bilan Express fin de journée, séparation Vie 1 / Vie 2, étalonnage GPS sans GPX en file hors-ligne + double couche Théorique/Réel H+2, comptes Admin/Moniteur, CRM) et recueillir sa validation étape par étape.',
+          'Document de synthèse complet pour Jérôme afin d’expliquer la logique bout-en-bout de « Ça roule ? » (Cycle 1 & export futur prestataire, verrou Cycle 2 + Bilan Express fin de journée, séparation Vie 1 / Vie 2, étalonnage GPS sans GPX en file hors-ligne + double couche Théorique/Réel H+2, comptes Admin/Moniteur, CRM) et recueillir sa validation étape par étape.',
         keyPoints: [
-          'Étape 1 (Calendrier & Validation C1) : prépare l’offre publiable (règle 09h, coef ≤ 50) et exporte les créneaux validés pour l’outil de réservation anny (Pont 1).',
+          'Étape 1 (Calendrier & Validation C1) : prépare l’offre publiable (règle 09h, coef ≤ 50) et exporte strictement les créneaux validés « À publier » par Jérôme pour l’application de réservation du futur prestataire (Pont 1).',
           'Étape 2 (Cycle 2 Météo & Bilan Express) : verrou strict sur C1, Winds-Up + AROME + Loupe Δ cm, dédoublement 2e moniteur (Youenn/Katleen) & Bilan Express Fin de Journée (avec navigation ◀ Jour préc.).',
           'Étape 3 (Module Statistique & Exploitation REX) : pilotage sans double saisie (12 / 20 / 24 chars), séparation Vie 1 / Vie 2 / Absentéisme, corrélation surcote vs pression/vent et suggestion du seuil effectif.',
           'Étape 4 (Modèle Empirique & Étalonnage GPS) : protocole plage sans GPX avec file hors-ligne, double couche Théorique + Réel consolidé H+2 (Winds-Up / METAR / SHOM Brest), 300 mesures sur 3 zones + bâches et conversion Litto3D pente 1,15 %.',
@@ -373,20 +373,20 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         categoryLabel: 'Axes d’Amélioration',
         categoryColor: '#6366f1',
         icon: '💡',
-        title: 'Note · Axes d’Amélioration & Évolutions Futures',
-        subtitle: 'Backlog vivant : bâches (ex-Q3), heures moniteur & stats, précision GPS/Litto3D, capteurs et billetterie',
+        title: 'Note · Axes d’Amélioration & Évolutions Futures (Regroupement & Décalage Cycle 2)',
+        subtitle: 'Backlog vivant : ajustement C1 H−48h, regroupement & décalage Cycle 2 (QCM Jérôme), bâches, heures moniteur, GPS/Litto3D',
         summary:
-          'Registre évolutif regroupant les sujets trop complexes pour être figés a priori (comme les bâches à Lestrevet) ou volontairement planifiés en phase 2 après les premiers retours terrain (heures moniteur, statistiques avancées, capteurs locaux).',
+          'Registre évolutif regroupant les arbitrages liés au couplage avec le futur outil de réservation (ajustement horaire Cycle 1 jusqu’à H−48h, regroupement et décalage horaire en Cycle 2), ainsi que les évolutions planifiées en phase 2.',
         keyPoints: [
+          'Ajustement Cycle 1 jusqu’à H−48h & couplage réservation (Q6–Q7) : règle active si 0 inscrit + anti-chevauchement, contraintes ID fixe / notification clients à trancher avec Jérôme.',
+          'Options potentielles Cycle 2 · Regroupement & Décalage horaire (Q1–Q5) : pertinence terrain face au couplage billetterie, SMS auto et chevauchement entre créneaux.',
           'Bâches & ruissellements Lestrevet (ex-Q3 Cadrage Terrain) : suivi via tag GPS « Bâches » + REX avant toute modélisation.',
-          'Heures moniteur & Stats avancées (ex-Évolution Majeure) : heures estran + préparation/convoyage, pertes par secteur vent et fréquentation par coef.',
-          'Précision & Modèle Plage : polyligne de dune (3–5 pts), watchPosition 1/σ², raster Litto3D 1 m, ou ZED-F9P Centipède RTK à long terme.',
-          'Météo, Cycle 2 & Billetterie : correctif Pentrez ↔ Lestrevet, balise club locale, houle OSO, schéma vectoriel et connexion Deux Ponts / SMS.',
+          'Heures moniteur, Précision & Billetterie : heures estran + prépa, polyligne dune, Litto3D 1 m, écart Pentrez ↔ Lestrevet et connexion futur prestataire.',
         ],
         docUrl: '/note_axes_amelioration.html',
         docBtnLabel: '💡 Ouvrir la Note Axes d’Amélioration (A4 / Word)',
         statusBadge: {
-          label: 'Évolutif · Backlog',
+          label: 'Évolutif · QCM Jérôme ouvert',
           bg: '#ede9fe',
           color: '#5b21b6',
         },
@@ -452,7 +452,7 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
           'Tous les points sont désormais actés et en production : capacité fixée à 12 chars max/moniteur (mono + bi), Cycle 2 déclenché dès la 1ère inscription, 100 % digital et publication Cycle 1 disponible au choix jour par jour, à la semaine ou au mois complet.',
         keyPoints: [
           'Cycle 1 (Offre commerciale) : protégé contre les alertes météo tant que 0 char inscrit · validation possible jour par jour, à la semaine ou au mois.',
-          'Cycle 2 (Pilotage terrain) : déclenché dès le 1er char inscrit (Maintenir, Décaler, Regrouper, Vie 2, REX).',
+          'Cycle 2 (Pilotage terrain) : tout créneau validé « À publier » en Cycle 1 est pilotable en Cycle 2 (2e moniteur, Vie 2, REX ; Décalage horaire et Regroupement mis en options potentielles).',
           'Capacité : règle officielle en nombre de chars (1 mono = 1 char, 1 bi = 1 char, max 12 chars / moniteur).',
           '100 % Digital : suppression définitive de la Fiche Agenda Papier · SMS clients reportés au nouvel outil de résa.',
         ],

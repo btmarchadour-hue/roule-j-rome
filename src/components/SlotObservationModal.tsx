@@ -23,7 +23,11 @@ interface SlotObservationModalProps {
   defaultWindDir?: string | null;
   defaultWaveH?: number | null;
   initialObservation?: SlotObservation | null;
-  onSaveSuccess: (updatedList: SlotObservation[], savedObs?: SlotObservation) => void;
+  onSaveSuccess: (
+    updatedList: SlotObservation[],
+    savedObs?: SlotObservation,
+    deletedObs?: SlotObservation
+  ) => void;
   isReadOnly?: boolean;
   maxChars?: number;
   primaryInstructor?: string;
@@ -37,6 +41,7 @@ interface SlotObservationModalProps {
   defaultBiCount?: number;
   defaultParticipantsCount?: number;
   defaultBookedParticipantsCount?: number;
+  agendaBookedPeopleCount?: number;
   forceIntent?: boolean;
 }
 
@@ -69,8 +74,14 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   defaultBiCount,
   defaultParticipantsCount,
   defaultBookedParticipantsCount,
+  agendaBookedPeopleCount,
   forceIntent = false,
 }) => {
+  const activeBookedClientsCount = Math.max(
+    agendaBookedPeopleCount ?? 0,
+    defaultBookedParticipantsCount ?? 0
+  );
+  const isNoClientsLocked = activeBookedClientsCount > 0;
   const [status, setStatus] = useState<'realized' | 'cancelled'>(
     forceIntent && defaultStatus
       ? defaultStatus
@@ -171,13 +182,13 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     !initialIsNoClients || hasInitialWeatherOrBeach
   );
 
-  // Calcul automatique de l'écart horaire quand l'utilisateur change l'heure réelle
   const handlePassableTimeChange = (val: string) => {
     setActualPassableTime(val);
     if (!val || !slotStart) return;
     try {
-      const [hS, mS] = slotStart.split(':').map(Number);
-      const [hA, mA] = val.split(':').map(Number);
+      const [hS, mS] = slotStart.replace('h', ':').split(':').map(Number);
+      const [hA, mA] = val.replace('h', ':').split(':').map(Number);
+      if (Number.isNaN(hS) || Number.isNaN(mS) || Number.isNaN(hA) || Number.isNaN(mA)) return;
       const minStart = hS * 60 + mS;
       const minActual = hA * 60 + mA;
       setTimeDeltaMin(minActual - minStart);
@@ -219,6 +230,13 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
         );
         return;
       }
+    } else if (cancellationReason === 'no_clients' && isNoClientsLocked) {
+      setErrorMessage(
+        `⛔ Impossible : déjà ${activeBookedClientsCount} inscrit${
+          activeBookedClientsCount > 1 ? 's' : ''
+        } sur ce créneau. Choisissez un motif d'annulation météo/client ou retirez d'abord les inscriptions.`
+      );
+      return;
     }
 
     const effectiveChars =
@@ -288,9 +306,10 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
   const handleDelete = () => {
     if (!initialObservation?.id) return;
     if (window.confirm('Voulez-vous supprimer ce relevé terrain ?')) {
-      const updated = deleteSlotObservation(initialObservation.id);
-      deleteObservationFromFirestore(initialObservation.id).catch(err => console.warn('Erreur suppression Firestore observation:', err));
-      onSaveSuccess(updated);
+      const deletedObs = initialObservation;
+      const updated = deleteSlotObservation(deletedObs.id);
+      deleteObservationFromFirestore(deletedObs.id).catch(err => console.warn('Erreur suppression Firestore observation:', err));
+      onSaveSuccess(updated, undefined, deletedObs);
       onClose();
     }
   };
@@ -458,7 +477,16 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => setStatus('cancelled')}
+                onClick={() => {
+                  setStatus('cancelled');
+                  if (bookedParticipantsCount === '' && activeBookedClientsCount > 0) {
+                    setBookedParticipantsCount(activeBookedClientsCount);
+                  }
+                  if (isNoClientsLocked && cancellationReason === 'no_clients') {
+                    setCancellationReason('wind_low');
+                    setWeatherExpanded(true);
+                  }
+                }}
                 style={{
                   padding: '9px 12px',
                   borderRadius: '8px',
@@ -491,26 +519,37 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
                 {(Object.keys(CANCELLATION_REASONS_INFO) as CancellationReason[]).map(r => {
                   const info = CANCELLATION_REASONS_INFO[r];
                   const isSelected = cancellationReason === r;
+                  const disabledNoClients = r === 'no_clients' && isNoClientsLocked;
                   return (
                     <button
                       key={r}
                       type="button"
+                      disabled={disabledNoClients}
                       onClick={() => {
+                        if (disabledNoClients) return;
                         setCancellationReason(r);
                         if (r !== 'no_clients') {
                           setWeatherExpanded(true);
                         }
                       }}
+                      title={
+                        disabledNoClients
+                          ? `Impossible : déjà ${activeBookedClientsCount} inscrit${
+                              activeBookedClientsCount > 1 ? 's' : ''
+                            } sur ce créneau`
+                          : info.label
+                      }
                       style={{
                         textAlign: 'left',
                         padding: '6px 8px',
                         borderRadius: '6px',
                         border: isSelected ? `2px solid ${info.color}` : '1px solid #cbd5e1',
-                        background: isSelected ? '#fff' : '#f8fafc',
-                        color: isSelected ? '#0f172a' : '#475569',
+                        background: disabledNoClients ? '#f1f5f9' : isSelected ? '#fff' : '#f8fafc',
+                        color: disabledNoClients ? '#94a3b8' : isSelected ? '#0f172a' : '#475569',
+                        opacity: disabledNoClients ? 0.55 : 1,
                         fontWeight: isSelected ? 800 : 600,
                         fontSize: '0.75rem',
-                        cursor: 'pointer',
+                        cursor: disabledNoClients ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',

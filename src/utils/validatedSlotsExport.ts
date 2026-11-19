@@ -9,7 +9,7 @@ import {
 } from './cycleHelpers';
 import { JS, MOIS, p2, tdy } from './tides';
 
-export type ExportScope = 'upcoming' | 'month' | 'all';
+export type ExportScope = 'upcoming' | 'month';
 
 export interface ValidatedExportSlot {
   ds: string;
@@ -50,9 +50,35 @@ function computeDurationMinutes(startHHMM: string, endHHMM: string): number {
 
 export function isSlotValidatedForBookingExport(item: ValidationItem): boolean {
   if (getEffectiveCycle1Status(item) !== 'published') return false;
+  const isExplicitlyValidated =
+    item.cycle1Status === 'published' || (!item.cycle1Status && item.status === 'valid');
+  if (!isExplicitlyValidated) return false;
   if (item.status === 'rejected') return false;
-  if (item.cycle2Status === 'cancelled_weather' || item.cycle2Status === 'merged') return false;
+  if (
+    item.cycle2Status === 'cancelled_weather' ||
+    item.cycle2Status === 'merged' ||
+    item.cycle2Status === 'realized'
+  ) {
+    return false;
+  }
   return true;
+}
+
+function getCurrentParisTimeHHMM(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Europe/Paris',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const hh = parts.find(p => p.type === 'hour')?.value ?? '00';
+    const mm = parts.find(p => p.type === 'minute')?.value ?? '00';
+    return `${hh === '24' ? '00' : hh}:${mm}`;
+  } catch {
+    const now = new Date();
+    return `${p2(now.getHours())}:${p2(now.getMinutes())}`;
+  }
 }
 
 export function collectValidatedExportSlots(params: {
@@ -65,12 +91,14 @@ export function collectValidatedExportSlots(params: {
 }): ValidatedExportSlot[] {
   const { validations, bookingsMap, scope, year, month, onlyWithAvailability = false } = params;
   const todayStr = tdy();
+  const nowParisHHMM = getCurrentParisTimeHHMM();
   const monthPrefix = `${year}-${p2(month + 1)}-`;
 
   const result: ValidatedExportSlot[] = [];
 
   for (const ds of Object.keys(validations).sort()) {
-    if (scope === 'upcoming' && ds < todayStr) continue;
+    // Règle stricte : l'export ne porte JAMAIS sur les créneaux passés
+    if (ds < todayStr) continue;
     if (scope === 'month' && !ds.startsWith(monthPrefix)) continue;
 
     const dayRec = validations[ds];
@@ -86,6 +114,7 @@ export function collectValidatedExportSlots(params: {
 
       const startTime = normalizeTimeHHMM(item.actualStart || item.publishedStart || item.s);
       const endTime = normalizeTimeHHMM(item.actualEnd || item.publishedEnd || item.e);
+      if (ds === todayStr && startTime <= nowParisHHMM) continue;
       const durationMinutes = computeDurationMinutes(startTime, endTime);
 
       const maxCapacityChars = getSlotMaxCapacity(item);
@@ -174,15 +203,13 @@ function escapeIcsText(val: string): string {
 }
 
 function buildScopeSlug(scope: ExportScope, year: number, month: number): string {
-  if (scope === 'month') return `${year}-${p2(month + 1)}`;
-  if (scope === 'upcoming') return 'a-venir';
-  return 'complet';
+  if (scope === 'month') return `${year}-${p2(month + 1)}-a-venir`;
+  return 'a-venir';
 }
 
 export function getScopeLabel(scope: ExportScope, year: number, month: number): string {
-  if (scope === 'month') return `${MOIS[month]} ${year}`;
-  if (scope === 'upcoming') return 'À partir d’aujourd’hui';
-  return 'Tout le calendrier';
+  if (scope === 'month') return `À venir sur ${MOIS[month]} ${year}`;
+  return 'Tous les créneaux à venir';
 }
 
 /**
@@ -409,12 +436,12 @@ function enumerateDateRange(startDs: string, endDs: string): string[] {
 }
 
 /**
- * Format spécial anny (.ics bloqueurs complémentaires) :
- * Dans anny, les événements iCal / Google Calendar importés bloquent la ressource.
- * Ce fichier génère les plages "Occupé / Fermé" complémentaires autour des créneaux
- * validés par Jérôme (08h00–21h00), afin que seuls les créneaux validés restent réservables dans anny.
+ * Format spécial futur prestataire (.ics bloqueurs complémentaires) :
+ * Pour les outils de réservation utilisant des événements iCal / Google Calendar en blocage,
+ * ce fichier génère les plages "Occupé / Fermé" complémentaires autour des créneaux
+ * validés « À publier » par Jérôme (08h00–21h00), afin que seuls ces créneaux validés restent réservables.
  */
-export function downloadValidatedSlotsAnnyBlockerIcs(
+export function downloadValidatedSlotsProviderBlockerIcs(
   slots: ValidatedExportSlot[],
   scope: ExportScope,
   year: number,
@@ -431,13 +458,14 @@ export function downloadValidatedSlotsAnnyBlockerIcs(
   const monthPrefix = `${year}-${p2(month + 1)}-`;
   const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
+  const monthStart = `${monthPrefix}01`;
   const rangeStart =
     scope === 'month'
-      ? `${monthPrefix}01`
-      : scope === 'upcoming'
-      ? todayStr < slots[0].ds
-        ? todayStr
-        : slots[0].ds
+      ? monthStart > todayStr
+        ? monthStart
+        : todayStr
+      : todayStr < slots[0].ds
+      ? todayStr
       : slots[0].ds;
   const rangeEnd =
     scope === 'month'
@@ -454,10 +482,10 @@ export function downloadValidatedSlotsAnnyBlockerIcs(
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Char a Voile Lestrevet//anny Blocker Sync//FR',
+    'PRODID:-//Char a Voile Lestrevet//Futur Prestataire Blocker Sync//FR',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:anny - Blocages hors créneaux validés (Lestrevet)',
+    'X-WR-CALNAME:Futur Prestataire - Blocages hors créneaux validés (Lestrevet)',
     'X-WR-TIMEZONE:Europe/Paris',
     'BEGIN:VTIMEZONE',
     'TZID:Europe/Paris',
@@ -526,7 +554,7 @@ export function downloadValidatedSlotsAnnyBlockerIcs(
         `DTSTART;TZID=Europe/Paris:${dateCompact}T${startCompact}`,
         `DTEND;TZID=Europe/Paris:${dateCompact}T${endCompact}`,
         `SUMMARY:${escapeIcsText('Indisponible / Hors créneau validé (Char à voile)')}`,
-        `DESCRIPTION:${escapeIcsText('Plage bloquée automatiquement pour anny : aucun créneau validé par Jérôme sur ce créneau.')}`,
+        `DESCRIPTION:${escapeIcsText('Plage bloquée automatiquement pour le futur prestataire de réservation : aucun créneau validé « À publier » par Jérôme sur ce créneau.')}`,
         'TRANSP:OPAQUE',
         'STATUS:CONFIRMED',
         'END:VEVENT'
@@ -538,14 +566,14 @@ export function downloadValidatedSlotsAnnyBlockerIcs(
 
   const slug = buildScopeSlug(scope, year, month);
   triggerFileDownload(
-    `anny-blocages-hors-valides-jerome-${slug}.ics`,
+    `futur-prestataire-blocages-hors-valides-jerome-${slug}.ics`,
     lines.join('\r\n'),
     'text/calendar;charset=utf-8;'
   );
 }
 
 /**
- * Format 4 : JSON structuré API / Webhook ("Pont 1" vers anny / Make / n8n)
+ * Format 4 : JSON structuré API / Webhook ("Pont 1" vers futur prestataire / Make / n8n)
  */
 export function downloadValidatedSlotsJson(
   slots: ValidatedExportSlot[],
@@ -580,7 +608,7 @@ export function downloadValidatedSlotsJson(
 
   const payload = {
     schemaVersion: '1.1',
-    targetBookingTool: 'anny',
+    targetBookingTool: 'futur_prestataire',
     source: 'Char à Voile du Bout du Monde · Validation Cycle 1 (Jérôme)',
     timezone: 'Europe/Paris',
     location: 'Plage de Lestrevet, 29550 Plomodiern',
@@ -613,7 +641,7 @@ export function downloadValidatedSlotsJson(
 
   const slug = buildScopeSlug(scope, year, month);
   triggerFileDownload(
-    `anny-creneaux-valides-jerome-${slug}.json`,
+    `futur-prestataire-creneaux-valides-jerome-${slug}.json`,
     JSON.stringify(payload, null, 2),
     'application/json;charset=utf-8;'
   );

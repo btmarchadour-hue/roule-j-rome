@@ -36,6 +36,7 @@ import {
   resetAllSettingsToFirestore,
   subscribeToTeamNotes,
   subscribeToObservations,
+  saveObservationToFirestore,
   batchSaveObservationsToFirestore,
   getActiveInstructor,
 } from './utils/firebaseSync';
@@ -43,6 +44,7 @@ import {
   CANCELLATION_REASONS_INFO,
   bulkUpsertObservations,
   getStoredObservations,
+  upsertSlotObservation,
 } from './utils/statisticsEngine';
 import {
   ActiveUserSession,
@@ -80,13 +82,18 @@ import {
 } from './utils/tides';
 import {
   buildReservationKey,
+  computeShiftMinutes,
   Cycle1SlotAction,
   Cycle2ActionPayload,
+  findMatchingValidationItem,
   getEffectiveCycle1Status,
   getSlotBookingsSummary,
   getSlotMaxCapacity,
   getValidationItemChars,
+  hasCycle2Activity,
   hasCycle2Trigger,
+  normalizeSlotTimeHHhMM,
+  parseTimeMinutes,
   stripReasonAccents,
 } from './utils/cycleHelpers';
 
@@ -122,8 +129,6 @@ const defaultSettings: AppSettings = {
   gmax: 35,
   fmin: 1,
   fminCustomized: false,
-  parkMaxMono: 16,
-  parkMaxBi: 6,
 };
 
 export const App: React.FC = () => {
@@ -475,90 +480,249 @@ export const App: React.FC = () => {
         console.warn('Erreur Firestore custom slots:', err)
       );
 
-      // Si la journée est déjà publiée en Cycle 1, synchroniser automatiquement les créneaux sans inscrit (tout en préservant les créneaux Cycle 2)
+      // Si la journée est déjà publiée en Cycle 1, synchroniser automatiquement les créneaux et migrer sans doublon Cycle 2 / réservations / REX
       const existingRecord = validations[dateStr];
       if (existingRecord && existingRecord.items && existingRecord.items.length > 0) {
         const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
-        const preservedCycle2 = existingRecord.items.filter(it => {
-          const bChars = getSlotBookingsSummary(
-            bookingsMap[buildReservationKey(dateStr, it.k)] || []
-          ).totalChars;
-          return hasCycle2Trigger(it, bChars);
-        });
-        const usedCycle2Keys = new Set<string>();
-        const syncedItems: ValidationItem[] = [];
+        const normTime = (v?: string) => (v || '').trim().replace('h', ':');
+        const existingItems = [...existingRecord.items];
+        const dayObsList = observations.filter(o => o.ds === dateStr);
 
-        for (const x of nextFocus.list) {
+        const matchObsForItem = (it: ValidationItem) =>
+          dayObsList.find(
+            o =>
+              o.slotKey === it.k ||
+              (Boolean(o.slotStart) &&
+                Boolean(o.slotEnd) &&
+                ((normTime(o.slotStart) === normTime(it.publishedStart || it.s) &&
+                  normTime(o.slotEnd) === normTime(it.publishedEnd || it.e)) ||
+                  (Boolean(it.actualStart) &&
+                    Boolean(it.actualEnd) &&
+                    normTime(o.slotStart) === normTime(it.actualStart) &&
+                    normTime(o.slotEnd) === normTime(it.actualEnd))))
+          ) || null;
+
+        const usedExistingKeys = new Set<string>();
+        const pairedExistingForNext: Array<ValidationItem | undefined> = new Array(
+          nextFocus.list.length
+        ).fill(undefined);
+
+        // Passe 1 : correspondance exacte (même clé OU même horaire publié OU même horaire réel)
+        nextFocus.list.forEach((x, idx) => {
           const slotKey = kOf(x);
           const startTimeStr = lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d);
           const endTimeStr = lc(x.b, nextFocus.y, nextFocus.m, nextFocus.d);
-
-          const matchedC2 = preservedCycle2.find(
-            it => !usedCycle2Keys.has(it.k) && (it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr))
+          const match = existingItems.find(
+            it =>
+              !usedExistingKeys.has(it.k) &&
+              (it.k === slotKey ||
+                (normTime(it.publishedStart || it.s) === normTime(startTimeStr) &&
+                  normTime(it.publishedEnd || it.e) === normTime(endTimeStr)) ||
+                (Boolean(it.actualStart) &&
+                  Boolean(it.actualEnd) &&
+                  normTime(it.actualStart) === normTime(startTimeStr) &&
+                  normTime(it.actualEnd) === normTime(endTimeStr)))
           );
-          if (matchedC2) {
-            usedCycle2Keys.add(matchedC2.k);
-            syncedItems.push(matchedC2);
-            continue;
+          if (match) {
+            pairedExistingForNext[idx] = match;
+            usedExistingKeys.add(match.k);
+          }
+        });
+
+        // Passe 2 : si un horaire vient d'être déplacé (-15/+15/Ajuster), rattacher la fiche existante (même avec inscrits/REX) au nouvel horaire sans laisser l'ancien en doublon
+        nextFocus.list.forEach((x, idx) => {
+          if (pairedExistingForNext[idx]) return;
+          const startTimeStr = lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d);
+          const newStartMin = parseTimeMinutes(startTimeStr);
+          if (newStartMin === null) return;
+
+          const remainingExisting = existingItems.filter(it => !usedExistingKeys.has(it.k));
+          let bestCandidate: ValidationItem | undefined;
+          let bestDiff = 181; // fenêtre large 3h pour absorber décalage d'un créneau
+
+          for (const cand of remainingExisting) {
+            const candTime = cand.actualStart || cand.publishedStart || cand.s;
+            const candMin = parseTimeMinutes(candTime);
+            if (candMin === null) continue;
+            const diff = Math.abs(newStartMin - candMin);
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              bestCandidate = cand;
+            }
           }
 
-          const matchedExisting = existingRecord.items.find(
-            it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
-          );
-          const keepExcluded =
-            matchedExisting?.cycle1Status === 'excluded' ||
-            (matchedExisting?.rejectReason || '').toLowerCase().includes('hors offre') ||
-            (matchedExisting?.rejectReason || '').toLowerCase().includes('non pertinent');
-          const keepNotPublished =
-            !keepExcluded &&
-            (matchedExisting?.cycle1Status === 'not_published' ||
-              Boolean(matchedExisting?.nonPublishReason));
-          const keepClosedVie1 =
-            !keepExcluded &&
-            !keepNotPublished &&
-            matchedExisting?.cycle1Status === 'closed_no_bookings';
-          const notPubReason =
-            matchedExisting?.nonPublishReason || 'Impératif personnel';
+          if (bestCandidate) {
+            pairedExistingForNext[idx] = bestCandidate;
+            usedExistingKeys.add(bestCandidate.k);
+          }
+        });
 
-          syncedItems.push({
-            k: slotKey,
-            s: startTimeStr,
-            e: endTimeStr,
-            publishedStart: startTimeStr,
-            publishedEnd: endTimeStr,
-            opt: x.opt,
-            over: x.over,
-            lim: x.lim,
-            customTitle: x.customTitle,
-            status: keepExcluded || keepNotPublished || keepClosedVie1 ? 'rejected' : 'valid',
-            rejectReason: keepExcluded
-              ? 'Hors offre / Non pertinent (C1)'
-              : keepNotPublished
-              ? `Non publié (C1) : ${notPubReason}`
-              : keepClosedVie1
-              ? matchedExisting?.rejectReason || "Faute d'inscrits (Vie 1)"
-              : undefined,
-            cycle1Status: keepExcluded
-              ? 'excluded'
-              : keepNotPublished
-              ? 'not_published'
-              : keepClosedVie1
-              ? 'closed_no_bookings'
-              : 'published',
-            nonPublishReason: keepNotPublished ? notPubReason : undefined,
-            cycle2Status: keepExcluded || keepNotPublished || keepClosedVie1 ? undefined : 'awaiting_booking',
-            charsCount: 0,
-            monoCount: 0,
-            biCount: 0,
-            pilotsCount: 0,
-          });
+        const bookingMigrations: Array<{ oldKey: string; newKey: string; items: AgendaBookingItem[] }> = [];
+        const obsMigrations: SlotObservation[] = [];
+
+        const syncedItems: ValidationItem[] = nextFocus.list
+          .map((x, idx): ValidationItem | null => {
+          const slotKey = kOf(x);
+          const startTimeStr = lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d);
+          const endTimeStr = lc(x.b, nextFocus.y, nextFocus.m, nextFocus.d);
+          const matchedExisting = pairedExistingForNext[idx];
+
+          if (matchedExisting) {
+            const oldKey = matchedExisting.k;
+            const oldBookings = bookingsMap[buildReservationKey(dateStr, oldKey)] || [];
+            const oldBookingChars = getSlotBookingsSummary(oldBookings).totalChars;
+            const matchedObs = matchObsForItem(matchedExisting);
+            const hasC2Activity = hasCycle2Activity(matchedExisting, oldBookingChars, matchedObs);
+
+            if (oldKey !== slotKey && oldBookings.length > 0) {
+              bookingMigrations.push({ oldKey, newKey: slotKey, items: oldBookings });
+            }
+
+            const origPubStart = matchedExisting.publishedStart || matchedExisting.s || startTimeStr;
+            const origPubEnd = matchedExisting.publishedEnd || matchedExisting.e || endTimeStr;
+            const timeChangedFromPub =
+              normTime(startTimeStr) !== normTime(origPubStart) ||
+              normTime(endTimeStr) !== normTime(origPubEnd);
+
+            const resolvedPubStart = hasC2Activity ? origPubStart : startTimeStr;
+            const resolvedPubEnd = hasC2Activity ? origPubEnd : endTimeStr;
+            const resolvedShiftMin = hasC2Activity
+              ? computeShiftMinutes(resolvedPubStart, startTimeStr)
+              : undefined;
+
+            if (matchedObs && (matchedObs.slotKey !== slotKey || normTime(matchedObs.slotStart) !== normTime(startTimeStr) || normTime(matchedObs.slotEnd) !== normTime(endTimeStr))) {
+              obsMigrations.push({
+                ...matchedObs,
+                slotKey,
+                slotStart: startTimeStr,
+                slotEnd: endTimeStr,
+                timeDeltaMin: resolvedShiftMin ?? matchedObs.timeDeltaMin,
+                updatedAt: Date.now(),
+              });
+            }
+
+            if (hasC2Activity) {
+              const keepC2 =
+                matchedExisting.cycle2Status === 'realized'
+                  ? 'realized'
+                  : matchedExisting.cycle2Status === 'cancelled_weather'
+                  ? 'cancelled_weather'
+                  : matchedExisting.cycle2Status === 'merged'
+                  ? 'merged'
+                  : timeChangedFromPub
+                  ? 'shifted'
+                  : matchedExisting.cycle2Status || 'confirmed';
+              return {
+                ...matchedExisting,
+                k: slotKey,
+                s: startTimeStr,
+                e: endTimeStr,
+                publishedStart: resolvedPubStart,
+                publishedEnd: resolvedPubEnd,
+                actualStart: timeChangedFromPub ? startTimeStr : matchedExisting.actualStart,
+                actualEnd: timeChangedFromPub ? endTimeStr : matchedExisting.actualEnd,
+                shiftMinutes: timeChangedFromPub ? resolvedShiftMin : matchedExisting.shiftMinutes,
+                opt: x.opt,
+                over: x.over,
+                lim: x.lim,
+                customTitle: x.customTitle ?? matchedExisting.customTitle,
+                cycle1Status: 'published',
+                cycle2Status: keepC2,
+              };
+            }
+
+            const keepExcluded =
+              matchedExisting.cycle1Status === 'excluded' ||
+              (matchedExisting.rejectReason || '').toLowerCase().includes('hors offre') ||
+              (matchedExisting.rejectReason || '').toLowerCase().includes('non pertinent');
+            const keepNotPublished =
+              !keepExcluded &&
+              (matchedExisting.cycle1Status === 'not_published' ||
+                Boolean(matchedExisting.nonPublishReason));
+            const keepClosedVie1 =
+              !keepExcluded &&
+              !keepNotPublished &&
+              matchedExisting.cycle1Status === 'closed_no_bookings';
+            const notPubReason = matchedExisting.nonPublishReason || 'Impératif personnel';
+
+            return {
+              ...matchedExisting,
+              k: slotKey,
+              s: startTimeStr,
+              e: endTimeStr,
+              publishedStart: startTimeStr,
+              publishedEnd: endTimeStr,
+              actualStart: undefined,
+              actualEnd: undefined,
+              shiftMinutes: undefined,
+              opt: x.opt,
+              over: x.over,
+              lim: x.lim,
+              customTitle: x.customTitle ?? matchedExisting.customTitle,
+              status: keepExcluded || keepNotPublished || keepClosedVie1 ? 'rejected' : 'valid',
+              rejectReason: keepExcluded
+                ? 'Hors offre / Non pertinent (C1)'
+                : keepNotPublished
+                ? `Non publié (C1) : ${notPubReason}`
+                : keepClosedVie1
+                ? matchedExisting.rejectReason || "Faute d'inscrits (Vie 1)"
+                : undefined,
+              cycle1Status: keepExcluded
+                ? 'excluded'
+                : keepNotPublished
+                ? 'not_published'
+                : keepClosedVie1
+                ? 'closed_no_bookings'
+                : 'published',
+              nonPublishReason: keepNotPublished ? notPubReason : undefined,
+              cycle2Status: keepExcluded || keepNotPublished || keepClosedVie1 ? undefined : 'awaiting_booking',
+            };
+          }
+
+          return null;
+        }).filter((it): it is ValidationItem => it !== null);
+
+        // Ne conserver un reliquat Cycle 2 non apparié QUE s'il a de réelles données non absorbées par un créneau migré
+        for (const rem of existingItems) {
+          if (usedExistingKeys.has(rem.k)) continue;
+          const bChars = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(dateStr, rem.k)] || []
+          ).totalChars;
+          const remObs = matchObsForItem(rem);
+          if (hasCycle2Activity(rem, bChars, remObs)) {
+            syncedItems.push(rem);
+          }
         }
 
-        // Préserver tout créneau Cycle 2 dont l'horaire ne figure plus dans la liste calculée
-        for (const c2Item of preservedCycle2) {
-          if (!usedCycle2Keys.has(c2Item.k)) {
-            syncedItems.push(c2Item);
+        if (bookingMigrations.length > 0) {
+          setBookingsMap(prev => {
+            const nextMap = { ...prev };
+            for (const mig of bookingMigrations) {
+              const oldResKey = buildReservationKey(dateStr, mig.oldKey);
+              const newResKey = buildReservationKey(dateStr, mig.newKey);
+              nextMap[newResKey] = mig.items;
+              delete nextMap[oldResKey];
+            }
+            return nextMap;
+          });
+          for (const mig of bookingMigrations) {
+            const oldResKey = buildReservationKey(dateStr, mig.oldKey);
+            const newResKey = buildReservationKey(dateStr, mig.newKey);
+            saveBookingToFirestore(newResKey, mig.items).catch(err =>
+              console.warn('Erreur Firestore migration réservations:', err)
+            );
+            saveBookingToFirestore(oldResKey, []).catch(err =>
+              console.warn('Erreur Firestore purge ancienne clé réservations:', err)
+            );
           }
+        }
+
+        if (obsMigrations.length > 0) {
+          const updatedObsList = bulkUpsertObservations(obsMigrations);
+          setObservations(updatedObsList);
+          batchSaveObservationsToFirestore(obsMigrations).catch(err =>
+            console.warn('Erreur Firestore migration REX:', err)
+          );
         }
 
         const nextValidation: ValidationDayRecord = {
@@ -581,12 +745,16 @@ export const App: React.FC = () => {
         saveValidationToFirestore(dateStr, nextValidation).catch(err =>
           console.warn('Erreur Firestore sync validation Cycle 1:', err)
         );
-        notifySync('📅 Horaires Cycle 1 mis à jour');
+        notifySync(
+          bookingMigrations.length > 0 || obsMigrations.length > 0
+            ? '📅 Horaire ajusté et fiches / inscrits migrés sans doublon'
+            : '📅 Horaires Cycle 1 mis à jour'
+        );
       } else {
         notifySync('✏️ Horaires du jour ajustés');
       }
     },
-    [currentUser, customSlotsMap, validations, settings, tideW, first, last, windList, bookingsMap]
+    [currentUser, customSlotsMap, validations, settings, tideW, first, last, windList, bookingsMap, observations]
   );
 
   const handleTabChange = (tab: number) => {
@@ -853,15 +1021,35 @@ export const App: React.FC = () => {
       const ds = savedObs.ds;
       const existingRecord = validations[ds];
 
-      const normTime = (v?: string) => (v || '').replace('h', ':');
+      const normTime = (v?: string) => (v || '').trim().replace('h', ':');
       const matchesObsSlot = (it: ValidationItem) =>
         it.k === savedObs.slotKey ||
         (Boolean(savedObs.slotStart) &&
           Boolean(savedObs.slotEnd) &&
-          normTime(it.publishedStart || it.s) === normTime(savedObs.slotStart) &&
-          normTime(it.publishedEnd || it.e) === normTime(savedObs.slotEnd));
+          ((normTime(it.publishedStart || it.s) === normTime(savedObs.slotStart) &&
+            normTime(it.publishedEnd || it.e) === normTime(savedObs.slotEnd)) ||
+            (Boolean(it.actualStart) &&
+              Boolean(it.actualEnd) &&
+              normTime(it.actualStart) === normTime(savedObs.slotStart) &&
+              normTime(it.actualEnd) === normTime(savedObs.slotEnd))));
 
       const applyRexToItem = (base: ValidationItem): ValidationItem => {
+        // Un REX ne doit jamais écraser silencieusement un créneau explicitement marqué Hors offre ou À ne pas publier
+        if (base.cycle1Status === 'excluded') {
+          return base;
+        }
+        if (base.cycle1Status === 'not_published') {
+          if (savedObs.status === 'cancelled' && savedObs.cancellationReason === 'instructor') {
+            const cleanReason = savedObs.cancellationNote?.trim() || base.nonPublishReason || 'Impératif personnel';
+            return {
+              ...base,
+              rejectReason: `Non publié (C1) : ${cleanReason}`,
+              nonPublishReason: cleanReason,
+            };
+          }
+          return base;
+        }
+
         if (savedObs.status === 'cancelled') {
           const reason = savedObs.cancellationReason || 'wind_low';
           const info = CANCELLATION_REASONS_INFO[reason];
@@ -885,6 +1073,36 @@ export const App: React.FC = () => {
           }
           if (reason === 'instructor') {
             const cleanReason = noteSuffix || 'Impératif personnel';
+            const slotBookings =
+              bookingsMap[buildReservationKey(ds, base.k)] ||
+              bookingsMap[buildReservationKey(ds, savedObs.slotKey)] ||
+              [];
+            const bSummary = getSlotBookingsSummary(slotBookings);
+            const hasBookedClients =
+              bSummary.totalChars > 0 ||
+              (savedObs.bookedParticipantsCount ?? 0) > 0 ||
+              ((base.charsCount ?? 0) > 0 && base.cycle1Status === 'published');
+            if (hasBookedClients) {
+              return {
+                ...base,
+                status: 'rejected',
+                rejectReason: noteSuffix
+                  ? `Indisponibilité moniteur · ${noteSuffix}`
+                  : 'Annulé (Vie 2) : Indisponibilité moniteur',
+                cycle1Status: 'published',
+                nonPublishReason: undefined,
+                cycle2Status: 'cancelled_weather',
+                monoCount: bSummary.monoCount,
+                biCount: bSummary.biCount,
+                charsCount: bSummary.totalChars,
+                pilotsCount: bSummary.totalPeople,
+                rescheduledChars: savedObs.rescheduledCount ?? base.rescheduledChars,
+                lostChars: savedObs.lostCount ?? base.lostChars,
+                assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+                instructor: base.instructor || base.assignedPilot || 'Jérôme',
+                secondaryInstructor: base.secondaryInstructor || savedObs.secondaryInstructor,
+              };
+            }
             return {
               ...base,
               status: 'rejected',
@@ -896,9 +1114,16 @@ export const App: React.FC = () => {
               biCount: 0,
               charsCount: 0,
               pilotsCount: 0,
+              rescheduledChars: undefined,
+              lostChars: undefined,
             };
           }
 
+          const slotBookings =
+            bookingsMap[buildReservationKey(ds, base.k)] ||
+            bookingsMap[buildReservationKey(ds, savedObs.slotKey)] ||
+            [];
+          const bSummary = getSlotBookingsSummary(slotBookings);
           const weatherLabel = noteSuffix
             ? `${info?.shortLabel || 'Météo'} · ${noteSuffix}`
             : info?.label || 'Annulé météo (Vie 2)';
@@ -907,19 +1132,30 @@ export const App: React.FC = () => {
             status: 'rejected',
             rejectReason: weatherLabel,
             cycle1Status: 'published',
+            nonPublishReason: undefined,
             cycle2Status: 'cancelled_weather',
+            monoCount: bSummary.monoCount,
+            biCount: bSummary.biCount,
+            charsCount: bSummary.totalChars,
+            pilotsCount: bSummary.totalPeople,
             rescheduledChars: savedObs.rescheduledCount ?? base.rescheduledChars,
             lostChars: savedObs.lostCount ?? base.lostChars,
-            instructor: savedObs.author || base.instructor || 'Jérôme',
-            secondaryInstructor: savedObs.secondaryInstructor || base.secondaryInstructor,
+            assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+            instructor: base.instructor || base.assignedPilot || 'Jérôme',
+            secondaryInstructor: base.secondaryInstructor || savedObs.secondaryInstructor,
           };
         }
 
-        // Séance réalisée dans le REX
+        // Séance réalisée dans le REX (en conservant l'horaire décalé et le moniteur titulaire)
         const mono = savedObs.monoCount ?? base.monoCount ?? 0;
         const bi = savedObs.biCount ?? base.biCount ?? 0;
         const chars = savedObs.charsCount ?? (mono + bi > 0 ? mono + bi : base.charsCount ?? 0);
         const pilots = savedObs.participantsCount ?? base.pilotsCount ?? mono + bi * 2;
+        const obsStartNorm = normalizeSlotTimeHHhMM(savedObs.slotStart);
+        const obsEndNorm = normalizeSlotTimeHHhMM(savedObs.slotEnd);
+        const basePubStart = base.publishedStart || base.s;
+        const obsDiffersFromPub =
+          Boolean(obsStartNorm && basePubStart && normTime(obsStartNorm) !== normTime(basePubStart));
         return {
           ...base,
           status: 'valid',
@@ -927,12 +1163,20 @@ export const App: React.FC = () => {
           cycle1Status: 'published',
           nonPublishReason: undefined,
           cycle2Status: 'realized',
+          actualStart: base.actualStart || (obsDiffersFromPub ? obsStartNorm : undefined),
+          actualEnd: base.actualEnd || (obsDiffersFromPub ? obsEndNorm : undefined),
+          shiftMinutes:
+            base.shiftMinutes ??
+            (obsDiffersFromPub ? computeShiftMinutes(basePubStart, obsStartNorm) : undefined),
           monoCount: mono,
           biCount: bi,
           charsCount: chars,
           pilotsCount: pilots,
-          instructor: savedObs.author || base.instructor || 'Jérôme',
-          secondaryInstructor: savedObs.secondaryInstructor || base.secondaryInstructor,
+          rescheduledChars: undefined,
+          lostChars: undefined,
+          assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+          instructor: base.instructor || base.assignedPilot || 'Jérôme',
+          secondaryInstructor: base.secondaryInstructor || savedObs.secondaryInstructor,
         };
       };
 
@@ -960,7 +1204,7 @@ export const App: React.FC = () => {
               customTitle: savedObs.customTitle,
               status: 'valid',
               cycle1Status: 'published',
-              cycle2Status: 'awaiting_booking',
+              cycle2Status: 'confirmed',
             })
           );
         }
@@ -973,41 +1217,38 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Si la journée n'avait pas encore de fiche validations, créer la fiche à partir de dayFocus pour que Cycle 1/2 & Stats restent 100 % alignés
+      // Si la journée n'avait pas encore de fiche validations, n'enregistrer QUE le créneau concerné par ce REX
+      // (sans jamais auto-publier les autres créneaux de la journée en Cycle 1).
       const df = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
-      let matchedComputed = false;
-      const computedItems: ValidationItem[] = df.list.map(x => {
+      const matchedDfSlot = df.list.find(x => {
         const sk = kOf(x);
         const st = lc(x.a, df.y, df.m, df.d);
         const en = lc(x.b, df.y, df.m, df.d);
-        const base: ValidationItem = {
-          k: sk,
-          s: st,
-          e: en,
-          publishedStart: st,
-          publishedEnd: en,
-          opt: x.opt,
-          over: x.over,
-          lim: x.lim,
-          customTitle: x.customTitle,
-          status: 'valid',
-          cycle1Status: 'published',
-          cycle2Status: 'awaiting_booking',
-          charsCount: 0,
-          monoCount: 0,
-          biCount: 0,
-          pilotsCount: 0,
-        };
-        if (matchesObsSlot(base)) {
-          matchedComputed = true;
-          return applyRexToItem(base);
-        }
-        return base;
+        return (
+          sk === savedObs.slotKey ||
+          (Boolean(savedObs.slotStart) &&
+            Boolean(savedObs.slotEnd) &&
+            normTime(st) === normTime(savedObs.slotStart) &&
+            normTime(en) === normTime(savedObs.slotEnd))
+        );
       });
 
-      if (!matchedComputed) {
-        computedItems.push(
-          applyRexToItem({
+      const baseForOnlyRexSlot: ValidationItem = matchedDfSlot
+        ? {
+            k: kOf(matchedDfSlot),
+            s: lc(matchedDfSlot.a, df.y, df.m, df.d),
+            e: lc(matchedDfSlot.b, df.y, df.m, df.d),
+            publishedStart: lc(matchedDfSlot.a, df.y, df.m, df.d),
+            publishedEnd: lc(matchedDfSlot.b, df.y, df.m, df.d),
+            opt: matchedDfSlot.opt,
+            over: matchedDfSlot.over,
+            lim: matchedDfSlot.lim,
+            customTitle: matchedDfSlot.customTitle,
+            status: 'valid',
+            cycle1Status: 'published',
+            cycle2Status: 'confirmed',
+          }
+        : {
             k: savedObs.slotKey,
             s: savedObs.slotStart,
             e: savedObs.slotEnd,
@@ -1019,20 +1260,96 @@ export const App: React.FC = () => {
             customTitle: savedObs.customTitle,
             status: 'valid',
             cycle1Status: 'published',
-            cycle2Status: 'awaiting_booking',
-          })
-        );
-      }
+            cycle2Status: 'confirmed',
+          };
 
       persistDayValidation(ds, {
         sig: sigOf(df),
         ts: Date.now(),
         k: df.k,
-        cycle1PublishedAt: Date.now(),
-        items: computedItems,
+        items: [applyRexToItem(baseForOnlyRexSlot)],
       });
     },
-    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap]
+    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap, bookingsMap]
+  );
+
+  const resetValidationAfterRexDeleted = useCallback(
+    (deletedObs: SlotObservation) => {
+      if (!deletedObs || !deletedObs.ds || isAdminLocked) return;
+      const ds = deletedObs.ds;
+      const existingRecord = validations[ds];
+      if (!existingRecord || !existingRecord.items || existingRecord.items.length === 0) {
+        return;
+      }
+
+      const normTime = (v?: string) => (v || '').trim().replace('h', ':');
+      const matchesObsSlot = (it: ValidationItem) =>
+        it.k === deletedObs.slotKey ||
+        (Boolean(deletedObs.slotStart) &&
+          Boolean(deletedObs.slotEnd) &&
+          ((normTime(it.publishedStart || it.s) === normTime(deletedObs.slotStart) &&
+            normTime(it.publishedEnd || it.e) === normTime(deletedObs.slotEnd)) ||
+            (Boolean(it.actualStart) &&
+              Boolean(it.actualEnd) &&
+              normTime(it.actualStart) === normTime(deletedObs.slotStart) &&
+              normTime(it.actualEnd) === normTime(deletedObs.slotEnd))));
+
+      let updatedAny = false;
+      let restoredHasBookings = false;
+      const nextItems = existingRecord.items.map(it => {
+        if (!matchesObsSlot(it)) return it;
+        updatedAny = true;
+
+        if (it.cycle1Status === 'excluded' || it.cycle1Status === 'not_published') {
+          return it;
+        }
+
+        const slotBookings =
+          bookingsMap[buildReservationKey(ds, it.k)] ||
+          bookingsMap[buildReservationKey(ds, deletedObs.slotKey)] ||
+          [];
+        const bSummary = getSlotBookingsSummary(slotBookings);
+        const hasBookings = bSummary.totalChars > 0;
+        if (hasBookings) {
+          restoredHasBookings = true;
+        }
+        const isShifted = Boolean(it.actualStart && it.shiftMinutes && it.shiftMinutes !== 0);
+
+        return {
+          ...it,
+          status: 'valid' as const,
+          rejectReason: undefined,
+          nonPublishReason: undefined,
+          cycle1Status: 'published' as const,
+          cycle2Status: (hasBookings
+            ? isShifted
+              ? 'shifted'
+              : 'confirmed'
+            : 'awaiting_booking') as ValidationItem['cycle2Status'],
+          monoCount: bSummary.monoCount,
+          biCount: bSummary.biCount,
+          charsCount: bSummary.totalChars,
+          pilotsCount: bSummary.totalPeople,
+          rescheduledChars: undefined,
+          lostChars: undefined,
+        };
+      });
+
+      if (!updatedAny) return;
+
+      persistDayValidation(ds, {
+        ...existingRecord,
+        ts: Date.now(),
+        items: nextItems,
+      });
+
+      notifySync(
+        restoredHasBookings
+          ? '🗑 REX supprimé · Créneau remis en Cycle 2 Confirmé (inscriptions conservées)'
+          : '🗑 REX supprimé · Créneau remis en Cycle 1 Actif (en attente d’inscription)'
+      );
+    },
+    [validations, isAdminLocked, bookingsMap, persistDayValidation]
   );
 
   const handleSaveExpressRexBatch = useCallback(
@@ -1045,6 +1362,21 @@ export const App: React.FC = () => {
       if (!isAdminLocked) {
         const normTime = (v?: string) => (v || '').replace('h', ':');
         const applyRexToItem = (base: ValidationItem, obs: SlotObservation): ValidationItem => {
+          if (base.cycle1Status === 'excluded') {
+            return base;
+          }
+          if (base.cycle1Status === 'not_published') {
+            if (obs.status === 'cancelled' && obs.cancellationReason === 'instructor') {
+              const cleanReason = obs.cancellationNote?.trim() || base.nonPublishReason || 'Impératif personnel';
+              return {
+                ...base,
+                rejectReason: `Non publié (C1) : ${cleanReason}`,
+                nonPublishReason: cleanReason,
+              };
+            }
+            return base;
+          }
+
           if (obs.status === 'cancelled') {
             const reason = obs.cancellationReason || 'wind_low';
             const info = CANCELLATION_REASONS_INFO[reason];
@@ -1068,6 +1400,36 @@ export const App: React.FC = () => {
             }
             if (reason === 'instructor') {
               const cleanReason = noteSuffix || 'Impératif personnel';
+              const slotBookings =
+                bookingsMap[buildReservationKey(ds, base.k)] ||
+                bookingsMap[buildReservationKey(ds, obs.slotKey)] ||
+                [];
+              const bSummary = getSlotBookingsSummary(slotBookings);
+              const hasBookedClients =
+                bSummary.totalChars > 0 ||
+                (obs.bookedParticipantsCount ?? 0) > 0 ||
+                ((base.charsCount ?? 0) > 0 && base.cycle1Status === 'published');
+              if (hasBookedClients) {
+                return {
+                  ...base,
+                  status: 'rejected',
+                  rejectReason: noteSuffix
+                    ? `Indisponibilité moniteur · ${noteSuffix}`
+                    : 'Annulé (Vie 2) : Indisponibilité moniteur',
+                  cycle1Status: 'published',
+                  nonPublishReason: undefined,
+                  cycle2Status: 'cancelled_weather',
+                  monoCount: bSummary.monoCount,
+                  biCount: bSummary.biCount,
+                  charsCount: bSummary.totalChars,
+                  pilotsCount: bSummary.totalPeople,
+                  rescheduledChars: obs.rescheduledCount ?? base.rescheduledChars,
+                  lostChars: obs.lostCount ?? base.lostChars,
+                  assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+                  instructor: base.instructor || base.assignedPilot || 'Jérôme',
+                  secondaryInstructor: base.secondaryInstructor || obs.secondaryInstructor,
+                };
+              }
               return {
                 ...base,
                 status: 'rejected',
@@ -1079,9 +1441,16 @@ export const App: React.FC = () => {
                 biCount: 0,
                 charsCount: 0,
                 pilotsCount: 0,
+                rescheduledChars: undefined,
+                lostChars: undefined,
               };
             }
 
+            const slotBookings =
+              bookingsMap[buildReservationKey(ds, base.k)] ||
+              bookingsMap[buildReservationKey(ds, obs.slotKey)] ||
+              [];
+            const bSummary = getSlotBookingsSummary(slotBookings);
             const weatherLabel = noteSuffix
               ? `${info?.shortLabel || 'Météo'} · ${noteSuffix}`
               : info?.label || 'Annulé météo (Vie 2)';
@@ -1090,11 +1459,17 @@ export const App: React.FC = () => {
               status: 'rejected',
               rejectReason: weatherLabel,
               cycle1Status: 'published',
+              nonPublishReason: undefined,
               cycle2Status: 'cancelled_weather',
+              monoCount: bSummary.monoCount,
+              biCount: bSummary.biCount,
+              charsCount: bSummary.totalChars,
+              pilotsCount: bSummary.totalPeople,
               rescheduledChars: obs.rescheduledCount ?? base.rescheduledChars,
               lostChars: obs.lostCount ?? base.lostChars,
-              instructor: obs.author || base.instructor || 'Jérôme',
-              secondaryInstructor: obs.secondaryInstructor || base.secondaryInstructor,
+              assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+              instructor: base.instructor || base.assignedPilot || 'Jérôme',
+              secondaryInstructor: base.secondaryInstructor || obs.secondaryInstructor,
             };
           }
 
@@ -1102,6 +1477,11 @@ export const App: React.FC = () => {
           const bi = obs.biCount ?? base.biCount ?? 0;
           const chars = obs.charsCount ?? (mono + bi > 0 ? mono + bi : base.charsCount ?? 0);
           const pilots = obs.participantsCount ?? base.pilotsCount ?? mono + bi * 2;
+          const obsStartNorm = normalizeSlotTimeHHhMM(obs.slotStart);
+          const obsEndNorm = normalizeSlotTimeHHhMM(obs.slotEnd);
+          const basePubStart = base.publishedStart || base.s;
+          const obsDiffersFromPub =
+            Boolean(obsStartNorm && basePubStart && normTime(obsStartNorm) !== normTime(basePubStart));
           return {
             ...base,
             status: 'valid',
@@ -1109,43 +1489,30 @@ export const App: React.FC = () => {
             cycle1Status: 'published',
             nonPublishReason: undefined,
             cycle2Status: 'realized',
+            actualStart: base.actualStart || (obsDiffersFromPub ? obsStartNorm : undefined),
+            actualEnd: base.actualEnd || (obsDiffersFromPub ? obsEndNorm : undefined),
+            shiftMinutes:
+              base.shiftMinutes ??
+              (obsDiffersFromPub ? computeShiftMinutes(basePubStart, obsStartNorm) : undefined),
             monoCount: mono,
             biCount: bi,
             charsCount: chars,
             pilotsCount: pilots,
-            instructor: obs.author || base.instructor || 'Jérôme',
-            secondaryInstructor: obs.secondaryInstructor || base.secondaryInstructor,
+            rescheduledChars: undefined,
+            lostChars: undefined,
+            assignedPilot: base.assignedPilot || base.instructor || 'Jérôme',
+            instructor: base.instructor || base.assignedPilot || 'Jérôme',
+            secondaryInstructor: base.secondaryInstructor || obs.secondaryInstructor,
           };
         };
 
         const df = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
         const existingRecord = validations[ds];
+        // Ne jamais auto-publier en C1 les autres créneaux d'une journée sans validation C1 préalable
         let nextItems: ValidationItem[] =
           existingRecord && existingRecord.items && existingRecord.items.length > 0
             ? [...existingRecord.items]
-            : df.list.map(x => {
-                const sk = kOf(x);
-                const st = lc(x.a, df.y, df.m, df.d);
-                const en = lc(x.b, df.y, df.m, df.d);
-                return {
-                  k: sk,
-                  s: st,
-                  e: en,
-                  publishedStart: st,
-                  publishedEnd: en,
-                  opt: x.opt,
-                  over: x.over,
-                  lim: x.lim,
-                  customTitle: x.customTitle,
-                  status: 'valid',
-                  cycle1Status: 'published',
-                  cycle2Status: 'awaiting_booking',
-                  charsCount: 0,
-                  monoCount: 0,
-                  biCount: 0,
-                  pilotsCount: 0,
-                };
-              });
+            : [];
 
         for (const obs of obsList) {
           let matched = false;
@@ -1154,8 +1521,12 @@ export const App: React.FC = () => {
               it.k === obs.slotKey ||
               (Boolean(obs.slotStart) &&
                 Boolean(obs.slotEnd) &&
-                normTime(it.publishedStart || it.s) === normTime(obs.slotStart) &&
-                normTime(it.publishedEnd || it.e) === normTime(obs.slotEnd));
+                ((normTime(it.publishedStart || it.s) === normTime(obs.slotStart) &&
+                  normTime(it.publishedEnd || it.e) === normTime(obs.slotEnd)) ||
+                  (Boolean(it.actualStart) &&
+                    Boolean(it.actualEnd) &&
+                    normTime(it.actualStart) === normTime(obs.slotStart) &&
+                    normTime(it.actualEnd) === normTime(obs.slotEnd))));
             if (isMatch) {
               matched = true;
               return applyRexToItem(it, obs);
@@ -1163,22 +1534,49 @@ export const App: React.FC = () => {
             return it;
           });
           if (!matched) {
+            const matchedDf = df.list.find(x => {
+              const sk = kOf(x);
+              const st = lc(x.a, df.y, df.m, df.d);
+              const en = lc(x.b, df.y, df.m, df.d);
+              return (
+                sk === obs.slotKey ||
+                (Boolean(obs.slotStart) &&
+                  Boolean(obs.slotEnd) &&
+                  normTime(st) === normTime(obs.slotStart) &&
+                  normTime(en) === normTime(obs.slotEnd))
+              );
+            });
             nextItems.push(
               applyRexToItem(
-                {
-                  k: obs.slotKey,
-                  s: obs.slotStart,
-                  e: obs.slotEnd,
-                  publishedStart: obs.slotStart,
-                  publishedEnd: obs.slotEnd,
-                  opt: false,
-                  over: 0,
-                  lim: '',
-                  customTitle: obs.customTitle,
-                  status: 'valid',
-                  cycle1Status: 'published',
-                  cycle2Status: 'awaiting_booking',
-                },
+                matchedDf
+                  ? {
+                      k: kOf(matchedDf),
+                      s: lc(matchedDf.a, df.y, df.m, df.d),
+                      e: lc(matchedDf.b, df.y, df.m, df.d),
+                      publishedStart: lc(matchedDf.a, df.y, df.m, df.d),
+                      publishedEnd: lc(matchedDf.b, df.y, df.m, df.d),
+                      opt: matchedDf.opt,
+                      over: matchedDf.over,
+                      lim: matchedDf.lim,
+                      customTitle: matchedDf.customTitle,
+                      status: 'valid',
+                      cycle1Status: 'published',
+                      cycle2Status: 'confirmed',
+                    }
+                  : {
+                      k: obs.slotKey,
+                      s: obs.slotStart,
+                      e: obs.slotEnd,
+                      publishedStart: obs.slotStart,
+                      publishedEnd: obs.slotEnd,
+                      opt: false,
+                      over: 0,
+                      lim: '',
+                      customTitle: obs.customTitle,
+                      status: 'valid',
+                      cycle1Status: 'published',
+                      cycle2Status: 'confirmed',
+                    },
                 obs
               )
             );
@@ -1189,7 +1587,7 @@ export const App: React.FC = () => {
           sig: existingRecord?.sig || sigOf(df),
           ts: Date.now(),
           k: existingRecord?.k || df.k,
-          cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+          cycle1PublishedAt: existingRecord?.cycle1PublishedAt,
           items: nextItems,
         });
       }
@@ -1209,7 +1607,7 @@ export const App: React.FC = () => {
         } · ${totalChars} char${totalChars > 1 ? 's' : ''})`
       );
     },
-    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap]
+    [validations, isAdminLocked, persistDayValidation, settings, tideW, first, last, windList, customSlotsMap, bookingsMap]
   );
 
   const buildCycle1DayRecord = useCallback(
@@ -1234,8 +1632,8 @@ export const App: React.FC = () => {
             []
         ).totalChars;
 
-        // Préserver intact tout créneau déjà engagé en Cycle 2 (>= 1 char ou action terrain)
-        if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
+        // Préserver intact tout créneau déjà engagé en Cycle 2 (inscrits, décalage, 2e moniteur ou REX)
+        if (existingItem && hasCycle2Activity(existingItem, bookingChars)) {
           return {
             ...existingItem,
             publishedStart: existingItem.publishedStart || startTimeStr,
@@ -1450,12 +1848,53 @@ export const App: React.FC = () => {
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
       const existingItem = currentItems.find(it => it.k === slotKey);
+      const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
+      const bSummary = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
+          bookingsMap[buildReservationKey(ds, slotKey)] ||
+          []
+      );
+      const existingSlotObs = findObservationForSlot(
+        ds,
+        existingItem?.k || slotKey,
+        existingItem?.actualStart || existingItem?.publishedStart || startTimeStr,
+        existingItem?.actualEnd || existingItem?.publishedEnd || endTimeStr
+      );
 
       let nextItems: ValidationItem[];
       if (action === 'reset') {
+        if (
+          (existingItem && hasCycle2Activity(existingItem, bSummary.totalChars, existingSlotObs)) ||
+          bSummary.totalChars > 0 ||
+          Boolean(existingSlotObs)
+        ) {
+          notifySync(
+            '⛔ Ce créneau possède déjà une activité Cycle 2 (inscrits, décalage, 2e moniteur ou REX) : impossible de le réinitialiser.'
+          );
+          return;
+        }
         nextItems = currentItems.filter(it => it.k !== slotKey);
       } else {
+        if (
+          (action === 'excluded' || action === 'not_published' || action === 'close_no_bookings') &&
+          (bSummary.totalChars > 0 ||
+            Boolean(existingSlotObs) ||
+            (existingItem && hasCycle2Activity(existingItem, bSummary.totalChars, existingSlotObs)))
+        ) {
+          notifySync(
+            '⛔ Action bloquée : ce créneau possède déjà des inscrits, un REX ou une activité Cycle 2.'
+          );
+          return;
+        }
         const cleanReason = reason?.trim() || 'Impératif personnel';
+        const preservedActiveC2 =
+          existingItem?.cycle2Status &&
+          existingItem.cycle2Status !== 'awaiting_booking' &&
+          (existingItem.cycle2Status !== 'confirmed' || bSummary.totalChars > 0)
+            ? existingItem.cycle2Status
+            : bSummary.totalChars > 0
+            ? 'confirmed'
+            : 'awaiting_booking';
         const nextItem: ValidationItem =
           action === 'excluded'
             ? {
@@ -1521,24 +1960,25 @@ export const App: React.FC = () => {
                 pilotsCount: 0,
               }
             : {
+                ...(existingItem || {}),
                 k: slotKey,
-                s: existingItem?.publishedStart || startTimeStr,
-                e: existingItem?.publishedEnd || endTimeStr,
+                s: existingItem?.s || existingItem?.publishedStart || startTimeStr,
+                e: existingItem?.e || existingItem?.publishedEnd || endTimeStr,
                 publishedStart: existingItem?.publishedStart || startTimeStr,
                 publishedEnd: existingItem?.publishedEnd || endTimeStr,
                 opt: slot.opt,
                 over: slot.over,
                 lim: slot.lim,
-                customTitle: slot.customTitle,
+                customTitle: existingItem?.customTitle ?? slot.customTitle,
                 status: 'valid',
                 rejectReason: undefined,
                 cycle1Status: 'published',
                 nonPublishReason: undefined,
-                cycle2Status: 'awaiting_booking',
-                charsCount: 0,
-                monoCount: 0,
-                biCount: 0,
-                pilotsCount: 0,
+                cycle2Status: preservedActiveC2,
+                charsCount: bSummary.totalChars > 0 ? bSummary.totalChars : existingItem?.charsCount ?? 0,
+                monoCount: bSummary.totalChars > 0 ? bSummary.monoCount : existingItem?.monoCount ?? 0,
+                biCount: bSummary.totalChars > 0 ? bSummary.biCount : existingItem?.biCount ?? 0,
+                pilotsCount: bSummary.totalChars > 0 ? bSummary.totalPeople : existingItem?.pilotsCount ?? 0,
               };
 
         nextItems = existingItem
@@ -1559,7 +1999,7 @@ export const App: React.FC = () => {
             }
       );
     },
-    [isAdminLocked, validations, persistDayValidation]
+    [isAdminLocked, validations, persistDayValidation, bookingsMap, findObservationForSlot]
   );
 
   // CYCLE 1 : Écarter d'un clic tous les créneaux encore indécis de la journée en "Hors offre / Non pertinent (hors stats)"
@@ -1594,7 +2034,7 @@ export const App: React.FC = () => {
             []
         ).totalChars;
 
-        if (existingItem && hasCycle2Trigger(existingItem, bookingChars)) {
+        if (existingItem && hasCycle2Activity(existingItem, bookingChars)) {
           continue;
         }
         if (existingItem) {
@@ -1700,13 +2140,19 @@ export const App: React.FC = () => {
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
       const existingItem = currentItems.find(it => it.k === slotKey);
+      const isPublishedC1 = Boolean(existingItem && getEffectiveCycle1Status(existingItem) === 'published');
+      if (!isPublishedC1 || !existingItem) {
+        notifySync('⛔ Créneau non validé « À publier » en Cycle 1 : validez-le d’abord dans Validation des créneaux.');
+        return;
+      }
+
       const slotMaxChars = getSlotMaxCapacity(existingItem);
       const summary = getSlotBookingsSummary(bookings, slotMaxChars);
 
       if (summary.totalChars > slotMaxChars) {
         notifySync(
           `⛔ Blocage encadrement : ${summary.totalChars}/${slotMaxChars} chars max autorisés (${
-            existingItem?.secondaryInstructor
+            existingItem.secondaryInstructor
               ? `${existingItem.instructor || 'Jérôme'} + ${existingItem.secondaryInstructor}`
               : '1 moniteur'
           }). Enregistrement bloqué.`
@@ -1722,84 +2168,56 @@ export const App: React.FC = () => {
 
       const instructor = getActiveInstructor() || 'Jérôme';
 
-      let nextItem: ValidationItem;
-      if (summary.totalChars > 0) {
-        const nextC2Status =
-          existingItem?.cycle2Status && existingItem.cycle2Status !== 'awaiting_booking'
-            ? existingItem.cycle2Status
-            : 'confirmed';
+      const preservedC2Status =
+        existingItem.cycle2Status && existingItem.cycle2Status !== 'awaiting_booking'
+          ? existingItem.cycle2Status
+          : 'confirmed';
 
-        nextItem = {
-          ...(existingItem || {
-            k: slotKey,
-            s: slotStart,
-            e: slotEnd,
-            opt: slotKey.endsWith('o'),
-            over: 0,
-            lim: '',
-          }),
-          k: slotKey,
-          s: existingItem?.s || slotStart,
-          e: existingItem?.e || slotEnd,
-          publishedStart: existingItem?.publishedStart || slotStart,
-          publishedEnd: existingItem?.publishedEnd || slotEnd,
-          cycle1Status: 'published',
-          cycle2Status: nextC2Status,
-          status: existingItem?.status === 'rejected' && nextC2Status === 'cancelled_weather' ? 'rejected' : 'valid',
-          rejectReason:
-            existingItem?.status === 'rejected' && nextC2Status === 'cancelled_weather'
-              ? existingItem.rejectReason
-              : undefined,
-          assignedPilot: existingItem?.assignedPilot || instructor,
-          instructor: existingItem?.instructor || instructor,
-          charsCount: summary.totalChars,
-          monoCount: summary.monoCount,
-          biCount: summary.biCount,
-          pilotsCount: summary.totalPeople,
-        };
-        notifySync(
-          `⚡ ${summary.totalChars}/${slotMaxChars} char(s) inscrit(s) · Créneau basculé en Cycle 2`
-        );
-      } else {
-        nextItem = {
-          ...(existingItem || {
-            k: slotKey,
-            s: slotStart,
-            e: slotEnd,
-            opt: slotKey.endsWith('o'),
-            over: 0,
-            lim: '',
-          }),
-          k: slotKey,
-          s: existingItem?.s || slotStart,
-          e: existingItem?.e || slotEnd,
-          publishedStart: existingItem?.publishedStart || slotStart,
-          publishedEnd: existingItem?.publishedEnd || slotEnd,
-          cycle1Status:
-            existingItem?.cycle1Status === 'excluded'
-              ? 'excluded'
-              : existingItem?.cycle1Status === 'not_published'
-              ? 'not_published'
-              : existingItem?.cycle1Status === 'closed_no_bookings'
-              ? 'closed_no_bookings'
-              : 'published',
-          cycle2Status:
-            existingItem?.cycle1Status === 'excluded' ||
-            existingItem?.cycle1Status === 'not_published' ||
-            existingItem?.cycle1Status === 'closed_no_bookings'
-              ? undefined
-              : 'awaiting_booking',
-          charsCount: 0,
-          monoCount: 0,
-          biCount: 0,
-          pilotsCount: 0,
-        };
-        notifySync('📅 0 char inscrit · Retour en attente Cycle 1');
-      }
+      const nextItem: ValidationItem =
+        summary.totalChars > 0
+          ? {
+              ...existingItem,
+              k: slotKey,
+              s: existingItem.s || slotStart,
+              e: existingItem.e || slotEnd,
+              publishedStart: existingItem.publishedStart || slotStart,
+              publishedEnd: existingItem.publishedEnd || slotEnd,
+              cycle1Status: 'published',
+              cycle2Status: preservedC2Status,
+              status: existingItem.status === 'rejected' && preservedC2Status === 'cancelled_weather' ? 'rejected' : 'valid',
+              rejectReason:
+                existingItem.status === 'rejected' && preservedC2Status === 'cancelled_weather'
+                  ? existingItem.rejectReason
+                  : undefined,
+              assignedPilot: existingItem.assignedPilot || instructor,
+              instructor: existingItem.instructor || instructor,
+              charsCount: summary.totalChars,
+              monoCount: summary.monoCount,
+              biCount: summary.biCount,
+              pilotsCount: summary.totalPeople,
+            }
+          : {
+              ...existingItem,
+              k: slotKey,
+              s: existingItem.s || slotStart,
+              e: existingItem.e || slotEnd,
+              publishedStart: existingItem.publishedStart || slotStart,
+              publishedEnd: existingItem.publishedEnd || slotEnd,
+              cycle1Status: 'published',
+              cycle2Status: preservedC2Status,
+              charsCount: 0,
+              monoCount: 0,
+              biCount: 0,
+              pilotsCount: 0,
+            };
 
-      const nextItems = existingItem
-        ? currentItems.map(it => (it.k === slotKey ? nextItem : it))
-        : [...currentItems, nextItem];
+      notifySync(
+        summary.totalChars > 0
+          ? `👥 ${summary.totalChars}/${slotMaxChars} char(s) enregistré(s)`
+          : '👥 Compteur mis à jour : 0 char saisi (créneau maintenu actif en Cycle 2)'
+      );
+
+      const nextItems = currentItems.map(it => (it.k === slotKey ? nextItem : it));
 
       persistDayValidation(ds, {
         sig: existingRecord?.sig || slotKey,
@@ -1827,9 +2245,12 @@ export const App: React.FC = () => {
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
       const existingItem = currentItems.find(it => it.k === slotKey);
-      const bookingChars = getSlotBookingsSummary(
-        bookingsMap[buildReservationKey(ds, existingItem ? existingItem.k : slotKey)] || []
-      ).totalChars;
+      const bSummary = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(ds, existingItem ? existingItem.k : slotKey)] ||
+          bookingsMap[buildReservationKey(ds, slotKey)] ||
+          []
+      );
+      const bookingChars = bSummary.totalChars;
       const isValidatedC1 =
         (existingItem &&
           (getEffectiveCycle1Status(existingItem) === 'published' ||
@@ -1895,25 +2316,57 @@ export const App: React.FC = () => {
             : '⚡ Cycle 2 · Créneau confirmé'
         );
       } else if (payload.type === 'shift') {
-        const isZeroShift = payload.shiftMinutes === 0;
+        const cleanNewStart = normalizeSlotTimeHHhMM(payload.newStart);
+        const cleanNewEnd = normalizeSlotTimeHHhMM(payload.newEnd);
+        const origStart = baseItem.publishedStart || startTimeStr;
+        const computedDelta = computeShiftMinutes(origStart, cleanNewStart);
+        const effectiveShift = computedDelta ?? payload.shiftMinutes;
+        const isZeroShift = effectiveShift === 0 || payload.shiftMinutes === 0;
+        const nextC2AfterShift =
+          baseItem.cycle2Status === 'realized'
+            ? 'realized'
+            : isZeroShift
+            ? 'confirmed'
+            : 'shifted';
         updatedSource = {
           ...baseItem,
-          publishedStart: baseItem.publishedStart || startTimeStr,
+          publishedStart: origStart,
           publishedEnd: baseItem.publishedEnd || endTimeStr,
-          actualStart: isZeroShift ? undefined : payload.newStart,
-          actualEnd: isZeroShift ? undefined : payload.newEnd,
-          shiftMinutes: isZeroShift ? undefined : payload.shiftMinutes,
+          actualStart: isZeroShift ? undefined : cleanNewStart,
+          actualEnd: isZeroShift ? undefined : cleanNewEnd,
+          shiftMinutes: isZeroShift ? undefined : effectiveShift,
           cycle1Status: 'published',
-          cycle2Status: isZeroShift ? 'confirmed' : 'shifted',
+          cycle2Status: nextC2AfterShift,
           status: 'valid',
           rejectReason: undefined,
           assignedPilot: baseItem.assignedPilot || instructor,
           instructor: baseItem.instructor || instructor,
         };
+        const existingSlotObs = findObservationForSlot(
+          ds,
+          baseItem.k,
+          baseItem.actualStart || origStart,
+          baseItem.actualEnd || baseItem.publishedEnd || endTimeStr
+        );
+        if (existingSlotObs) {
+          const syncedObs: SlotObservation = {
+            ...existingSlotObs,
+            slotKey: baseItem.k,
+            slotStart: isZeroShift ? origStart : cleanNewStart,
+            slotEnd: isZeroShift ? baseItem.publishedEnd || endTimeStr : cleanNewEnd,
+            timeDeltaMin: isZeroShift ? 0 : effectiveShift,
+            updatedAt: Date.now(),
+          };
+          const updatedObsList = upsertSlotObservation(syncedObs);
+          setObservations(updatedObsList);
+          saveObservationToFirestore(syncedObs).catch(err =>
+            console.warn('Erreur Firestore sync horaire REX décalé:', err)
+          );
+        }
         notifySync(
           isZeroShift
             ? '🕒 Horaire rétabli sur Cycle 1'
-            : `🕒 Séance décalée (${payload.shiftMinutes > 0 ? '+' : ''}${payload.shiftMinutes} min) ➔ ${payload.newStart} - ${payload.newEnd}`
+            : `🕒 Séance décalée (${effectiveShift > 0 ? '+' : ''}${effectiveShift} min) ➔ ${cleanNewStart} - ${cleanNewEnd} (mémorisée)`
         );
       } else if (payload.type === 'merge') {
         // Vérifier le plafond AVANT toute fusion (blocage strict à 12 / 20 / 24 chars selon encadrement cible)
@@ -2088,6 +2541,22 @@ export const App: React.FC = () => {
           notifySync(`⛔ Annulé météo (Vie 2) : ${payload.reason}`);
         }
       } else if (payload.type === 'reset_to_cycle1') {
+        const existingSlotObs = findObservationForSlot(
+          ds,
+          baseItem.k,
+          baseItem.actualStart || baseItem.publishedStart || startTimeStr,
+          baseItem.actualEnd || baseItem.publishedEnd || endTimeStr
+        );
+        if (existingSlotObs) {
+          notifySync(
+            '⛔ Un REX est enregistré sur cette séance : modifiez ou supprimez d’abord le REX avant d’annuler la décision Cycle 2.'
+          );
+          return;
+        }
+        const resetMono = bSummary.totalChars > 0 ? bSummary.monoCount : 0;
+        const resetBi = bSummary.totalChars > 0 ? bSummary.biCount : 0;
+        const resetChars = bSummary.totalChars > 0 ? bSummary.totalChars : 0;
+        const resetPeople = bSummary.totalChars > 0 ? bSummary.totalPeople : 0;
         updatedSource = {
           ...baseItem,
           publishedStart: baseItem.publishedStart || startTimeStr,
@@ -2098,10 +2567,17 @@ export const App: React.FC = () => {
           mergedIntoKey: undefined,
           mergedLabel: undefined,
           cycle1Status: 'published',
-          cycle2Status: existingCounts.totalChars > 0 ? 'confirmed' : 'awaiting_booking',
+          cycle2Status: resetChars > 0 ? 'confirmed' : 'awaiting_booking',
           status: 'valid',
           rejectReason: undefined,
+          monoCount: resetMono,
+          biCount: resetBi,
+          charsCount: resetChars,
+          pilotsCount: resetPeople,
+          rescheduledChars: undefined,
+          lostChars: undefined,
         };
+        notifySync('↩ Décision Cycle 2 annulée · créneau remis en attente');
       }
 
       nextItems = nextItems.some(it => it.k === slotKey)
@@ -2340,6 +2816,7 @@ export const App: React.FC = () => {
               onClearValidation={handleClearValidation}
               onSetSlotCycle1Action={handleSetSlotCycle1Action}
               onExcludeRemainingCycle1Slots={handleExcludeRemainingCycle1Slots}
+              onCycle2Action={handleCycle2Action}
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
               onNavigateDay={handleNavigateDay}
               canPrevDay={selectedDate > minDs}
@@ -2501,6 +2978,7 @@ export const App: React.FC = () => {
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
               onReclassifyValidationReason={handleReclassifyAbsentValidations}
               onObservationSaved={syncValidationFromRex}
+              onObservationDeleted={resetValidationAfterRexDeleted}
             />
           </div>
         )}
@@ -2655,6 +3133,22 @@ export const App: React.FC = () => {
             EX,
             windList
           );
+          const matchedValForObs = findMatchingValidationItem(
+            validations[activeObservationSlot.dateStr],
+            activeObservationSlot.slotKey,
+            activeObservationSlot.slotStart,
+            activeObservationSlot.slotEnd
+          );
+          const obsBookingKey =
+            matchedValForObs &&
+            (bookingsMap[
+              buildReservationKey(activeObservationSlot.dateStr, matchedValForObs.k)
+            ]?.length ?? 0) > 0
+              ? matchedValForObs.k
+              : activeObservationSlot.slotKey;
+          const agendaPeopleCount = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(activeObservationSlot.dateStr, obsBookingKey)] || []
+          ).totalPeople;
           return (
             <SlotObservationModal
               key={`${activeObservationSlot.dateStr}_${activeObservationSlot.slotKey}`}
@@ -2688,9 +3182,13 @@ export const App: React.FC = () => {
               defaultMonoCount={activeObservationSlot.defaultMonoCount}
               defaultBiCount={activeObservationSlot.defaultBiCount}
               defaultParticipantsCount={activeObservationSlot.defaultParticipantsCount}
-              defaultBookedParticipantsCount={activeObservationSlot.defaultBookedParticipantsCount}
+              defaultBookedParticipantsCount={
+                activeObservationSlot.defaultBookedParticipantsCount ??
+                (agendaPeopleCount > 0 ? agendaPeopleCount : undefined)
+              }
+              agendaBookedPeopleCount={agendaPeopleCount}
               forceIntent={activeObservationSlot.forceIntent}
-              onSaveSuccess={(updated, savedObs) => {
+              onSaveSuccess={(updated, savedObs, deletedObs) => {
                 setObservations(updated);
                 if (savedObs) {
                   syncValidationFromRex(savedObs);
@@ -2705,6 +3203,8 @@ export const App: React.FC = () => {
                   } else {
                     notifySync('⛔ Annulé (Vie 2) & REX enregistrés');
                   }
+                } else if (deletedObs) {
+                  resetValidationAfterRexDeleted(deletedObs);
                 }
                 setActiveObservationSlot(null);
               }}

@@ -30,8 +30,6 @@ export interface AppSettings {
   calculationMode?: 'theorique' | 'reel';
   empiricalOffsetCm?: number;
   customNonPublishReasons?: string[];
-  parkMaxMono?: number;
-  parkMaxBi?: number;
 }
 
 export interface TidePoint {
@@ -80,6 +78,8 @@ export interface SessionItem {
   b: number;
   opt: boolean;
   isCustom?: boolean;
+  isAdapted?: boolean;
+  isUnchangedTide?: boolean;
   customTitle?: string;
   ok: boolean | null;
   st: WindStat | null;
@@ -101,6 +101,7 @@ export interface CustomSlot {
   end: string;   // e.g. "15:00"
   title: string;
   places: number;
+  isAdapted?: boolean;
 }
 
 export interface CustomDaySlotsConfig {

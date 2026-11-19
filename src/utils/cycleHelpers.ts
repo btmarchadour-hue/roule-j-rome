@@ -47,7 +47,14 @@ export function normalizeClosureReason(raw?: string): {
     norm === 'cloture' ||
     norm === 'cloturee' ||
     norm === 'non publie' ||
-    norm === 'a ne pas publier'
+    norm === 'a ne pas publier' ||
+    norm === 'refuse' ||
+    norm === 'refusee' ||
+    norm === 'refus' ||
+    norm === 'annule' ||
+    norm === 'annulee' ||
+    norm === 'rejete' ||
+    norm === 'rejetee'
   ) {
     return {
       key: 'ferme',
@@ -131,9 +138,6 @@ export function normalizeClosureReason(raw?: string): {
   };
 }
 
-export const DEFAULT_PARK_MAX_MONO = 16;
-export const DEFAULT_PARK_MAX_BI = 6;
-
 export interface SecondaryInstructorPreset {
   name: string;
   qualification: 'CQP' | 'DE_BPJEPS';
@@ -185,22 +189,6 @@ export function getSlotMaxCapacity(item?: Pick<ValidationItem, 'secondaryInstruc
       ? 8
       : MAX_CHARS_PER_INSTRUCTOR;
   return MAX_CHARS_PER_INSTRUCTOR + extra;
-}
-
-export function getSlotFleetAlerts(
-  mono: number,
-  bi: number,
-  parkMaxMono: number = DEFAULT_PARK_MAX_MONO,
-  parkMaxBi: number = DEFAULT_PARK_MAX_BI
-): { monoOver: boolean; biOver: boolean; parkMaxMono: number; parkMaxBi: number } {
-  const safeMaxMono = Math.max(1, Number(parkMaxMono) || DEFAULT_PARK_MAX_MONO);
-  const safeMaxBi = Math.max(1, Number(parkMaxBi) || DEFAULT_PARK_MAX_BI);
-  return {
-    monoOver: mono > safeMaxMono,
-    biOver: bi > safeMaxBi,
-    parkMaxMono: safeMaxMono,
-    parkMaxBi: safeMaxBi,
-  };
 }
 
 export type Cycle1SlotAction = 'publish' | 'not_published' | 'excluded' | 'close_no_bookings' | 'reset';
@@ -404,27 +392,50 @@ export function getEffectiveCycle1Status(
 }
 
 /**
- * Détermine si le créneau a franchi le seuil d'entrée en Cycle 2 ("dès la première inscription")
+ * Détermine si le créneau est pilotable en Cycle 2 :
+ * Tout créneau validé « À publier » en Cycle 1 est d'office ouvert en Cycle 2, même avec 0 inscrit saisi.
  */
 export function hasCycle2Trigger(
   item?: ValidationItem,
   bookingChars = 0,
   obs?: SlotObservation | null
 ): boolean {
-  if (bookingChars > 0) return true;
   if (obs) return true;
   if (!item) return false;
+  const c1 = getEffectiveCycle1Status(item);
+  if (c1 === 'published') return true;
+  if (isExcludedCycle1(item) || isNotPublishedCycle1(item) || c1 === 'closed_no_bookings') return false;
+  if (bookingChars > 0) return true;
+  if (item.cycle2Status && item.cycle2Status !== 'awaiting_booking') return true;
+  if (getValidationItemChars(item).totalChars > 0) return true;
+  if (item.status === 'rejected' && !isNoBookingsReason(item.rejectReason)) return true;
+  return false;
+}
+
+/**
+ * Indique si le créneau comporte déjà une activité réelle Cycle 2 (inscrits, décalage, 2e moniteur, météo ou REX)
+ * qu'il ne faut pas écraser silencieusement lors d'une revalidation Cycle 1.
+ */
+export function hasCycle2Activity(
+  item?: ValidationItem,
+  bookingChars = 0,
+  obs?: SlotObservation | null
+): boolean {
+  if (bookingChars > 0 || Boolean(obs)) return true;
+  if (!item) return false;
   if (isExcludedCycle1(item) || isNotPublishedCycle1(item)) return false;
+  if (getValidationItemChars(item).totalChars > 0) return true;
+  if (Boolean(item.secondaryInstructor?.trim())) return true;
+  if (hasRecordedShift(item)) return true;
   if (
-    item.cycle2Status &&
-    item.cycle2Status !== 'awaiting_booking'
+    item.cycle2Status === 'shifted' ||
+    item.cycle2Status === 'merged' ||
+    item.cycle2Status === 'cancelled_weather' ||
+    item.cycle2Status === 'realized'
   ) {
     return true;
   }
-  const itemChars = getValidationItemChars(item).totalChars;
-  if (itemChars > 0) return true;
   if (item.status === 'rejected' && !isNoBookingsReason(item.rejectReason)) {
-    // Annulé météo / aléa avec historique
     return true;
   }
   return false;
@@ -483,48 +494,116 @@ export function findMatchingValidationItem(
   const items = valRecord?.items;
   if (!items || items.length === 0) return undefined;
 
+  const norm = (v?: string) => (v || '').trim().replace('h', ':');
+  const startNorm = norm(startTimeStr);
+  const endNorm = norm(endTimeStr);
+
   let found = items.find(it => it.k === slotKey);
   if (!found) {
     found = items.find(
       it =>
-        (it.publishedStart === startTimeStr && it.publishedEnd === endTimeStr) ||
-        (it.s === startTimeStr && it.e === endTimeStr)
+        (norm(it.publishedStart || it.s) === startNorm && norm(it.publishedEnd || it.e) === endNorm) ||
+        (Boolean(it.actualStart) &&
+          Boolean(it.actualEnd) &&
+          norm(it.actualStart) === startNorm &&
+          norm(it.actualEnd) === endNorm)
     );
   }
   if (!found) {
-    found = items.find(it => it.publishedStart === startTimeStr || it.s === startTimeStr);
+    found = items.find(
+      it =>
+        norm(it.publishedStart || it.s) === startNorm ||
+        (Boolean(it.actualStart) && norm(it.actualStart) === startNorm)
+    );
   }
   if (!found) {
-    const [sh, sm] = startTimeStr.replace('h', ':').split(':').map(Number);
-    const slotMin = sh * 60 + sm;
-    let closest: ValidationItem | undefined;
-    let minDiff = 45;
-    for (const item of items) {
-      const refTime = item.publishedStart || item.s;
-      if (!refTime || usedKeys?.has(item.k)) continue;
-      const [ih, im] = refTime.replace('h', ':').split(':').map(Number);
-      const diff = Math.abs(slotMin - (ih * 60 + im));
-      if (diff <= minDiff) {
-        minDiff = diff;
-        closest = item;
+    const slotMin = parseTimeMinutes(startTimeStr);
+    if (slotMin !== null) {
+      let closest: ValidationItem | undefined;
+      let minDiff = 90;
+      for (const item of items) {
+        if (usedKeys?.has(item.k)) continue;
+        const candidates = [item.publishedStart || item.s, item.actualStart].filter(Boolean) as string[];
+        for (const cand of candidates) {
+          const candMin = parseTimeMinutes(cand);
+          if (candMin === null) continue;
+          const diff = Math.abs(slotMin - candMin);
+          if (diff <= minDiff) {
+            minDiff = diff;
+            closest = item;
+          }
+        }
       }
+      found = closest;
     }
-    found = closest;
   }
   return found;
 }
 
 /**
- * Calcule un horaire décalé en minutes ("09:30" + 30 => "10:00")
+ * Parse un horaire "10h15" ou "10:15" en minutes depuis 00h00
+ */
+export function parseTimeMinutes(v?: string): number | null {
+  if (!v) return null;
+  const clean = v.trim().toLowerCase().replace('h', ':');
+  const m = clean.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+/**
+ * Normalise un horaire au format canonique "10h15"
+ */
+export function normalizeSlotTimeHHhMM(v?: string): string {
+  if (!v) return '';
+  const mins = parseTimeMinutes(v);
+  if (mins === null) return v.trim();
+  const hh = Math.floor(mins / 60);
+  const mm = mins % 60;
+  return `${String(hh).padStart(2, '0')}h${String(mm).padStart(2, '0')}`;
+}
+
+/**
+ * Calcule le décalage signé en minutes entre l'heure publiée d'origine et l'heure réelle
+ */
+export function computeShiftMinutes(publishedStart?: string, actualStart?: string): number | undefined {
+  const p = parseTimeMinutes(publishedStart);
+  const a = parseTimeMinutes(actualStart);
+  if (p === null || a === null || p === a) return undefined;
+  return a - p;
+}
+
+/**
+ * Indique si une fiche ValidationItem conserve la trace d'un décalage manuel de l'horaire
+ */
+export function hasRecordedShift(
+  item?: Pick<ValidationItem, 's' | 'e' | 'publishedStart' | 'publishedEnd' | 'actualStart' | 'actualEnd' | 'shiftMinutes' | 'cycle2Status'>
+): boolean {
+  if (!item) return false;
+  if (typeof item.shiftMinutes === 'number' && item.shiftMinutes !== 0) return true;
+  const norm = (s?: string) => (s || '').trim().replace('h', ':');
+  const pubS = norm(item.publishedStart || item.s);
+  const pubE = norm(item.publishedEnd || item.e);
+  const actS = norm(item.actualStart);
+  const actE = norm(item.actualEnd);
+  if (actS && pubS && actS !== pubS) return true;
+  if (actE && pubE && actE !== pubE) return true;
+  return item.cycle2Status === 'shifted';
+}
+
+/**
+ * Calcule un horaire décalé en minutes ("10h00" + 15 => "10h15")
  */
 export function shiftTimeString(hhmm: string, deltaMin: number): string {
-  const clean = hhmm.replace('h', ':');
-  const [h, m] = clean.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return hhmm;
-  const total = Math.max(0, Math.min(23 * 60 + 59, h * 60 + m + deltaMin));
+  const baseMin = parseTimeMinutes(hhmm);
+  if (baseMin === null) return hhmm;
+  const total = Math.max(0, Math.min(23 * 60 + 59, baseMin + deltaMin));
   const nh = Math.floor(total / 60);
   const nm = total % 60;
-  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+  return `${String(nh).padStart(2, '0')}h${String(nm).padStart(2, '0')}`;
 }
 
 export function formatSlotTime(slot: SessionItem, y: number, m: number, d: number): {

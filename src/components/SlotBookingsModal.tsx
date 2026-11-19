@@ -2,11 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { MAX_CHARS_PER_INSTRUCTOR } from '../types';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
-  DEFAULT_PARK_MAX_BI,
-  DEFAULT_PARK_MAX_MONO,
   getMonitorBadgeStyle,
   getSlotBookingsSummary,
-  getSlotFleetAlerts,
   parseBookingItemCounts,
 } from '../utils/cycleHelpers';
 
@@ -22,8 +19,6 @@ interface SlotBookingsModalProps {
   onSaveBookings: (slotKey: string, bookings: AgendaBookingItem[]) => void;
   isReadOnly?: boolean;
   maxChars?: number;
-  parkMaxMono?: number;
-  parkMaxBi?: number;
   primaryInstructor?: string;
   secondaryInstructor?: string;
   secondaryQualification?: 'CQP' | 'DE_BPJEPS';
@@ -43,8 +38,6 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
   onSaveBookings,
   isReadOnly = false,
   maxChars = MAX_CHARS_PER_INSTRUCTOR,
-  parkMaxMono = DEFAULT_PARK_MAX_MONO,
-  parkMaxBi = DEFAULT_PARK_MAX_BI,
   primaryInstructor = 'Jérôme',
   secondaryInstructor,
   secondaryQualification,
@@ -64,10 +57,6 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
   );
 
   const summary = useMemo(() => getSlotBookingsSummary(draftList, maxChars), [draftList, maxChars]);
-  const fleetAlerts = useMemo(
-    () => getSlotFleetAlerts(summary.monoCount, summary.biCount, parkMaxMono, parkMaxBi),
-    [summary.monoCount, summary.biCount, parkMaxMono, parkMaxBi]
-  );
 
   if (!isOpen) return null;
 
@@ -174,7 +163,7 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
         >
           <div>
             <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Gestion Numérique des Inscriptions · Déclencheur Cycle 2
+              Gestion des Inscriptions &amp; Volume Chars (Facultatif)
             </div>
             <h3 style={{ margin: '2px 0 0', fontSize: '1.05rem', fontWeight: 900, color: '#fff' }}>
               {dateStr} · {slotStart} – {slotEnd} {slotTitle ? `(${slotTitle})` : ''}
@@ -229,16 +218,15 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
           </button>
         </div>
 
-        {/* Jauge Chars / Moniteur(s) & Parc Matériel */}
+        {/* Jauge Chars / Moniteur(s) */}
         <div
           style={{
             padding: '12px 18px',
-            background:
-              summary.isOverCapacity || fleetAlerts.monoOver || fleetAlerts.biOver
-                ? '#fef2f2'
-                : summary.totalChars > 0
-                ? '#f0fdf4'
-                : '#f8fafc',
+            background: summary.isOverCapacity
+              ? '#fef2f2'
+              : summary.totalChars > 0
+              ? '#f0fdf4'
+              : '#f8fafc',
             borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             flexWrap: 'wrap',
@@ -261,21 +249,21 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
               {summary.totalChars} / {maxChars} chars
             </span>
             <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
-              ({summary.monoCount}/{fleetAlerts.parkMaxMono} mono + {summary.biCount}/{fleetAlerts.parkMaxBi} bi · {summary.totalPeople} pilote{summary.totalPeople > 1 ? 's' : ''}/pers.)
+              ({summary.monoCount} mono + {summary.biCount} bi · {summary.totalPeople} pilote{summary.totalPeople > 1 ? 's' : ''}/pers.)
             </span>
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
               {pct}% d&apos;encadrement{secondaryInstructor ? ' (2 moniteurs)' : ''}
             </span>
           </div>
 
-          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: summary.totalChars > 0 ? '#15803d' : '#64748b' }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: summary.totalChars > 0 ? '#15803d' : '#0369a1' }}>
             {summary.totalChars > 0
-              ? '⚡ ≥ 1 inscription : Créneau basculé en Cycle 2 (Pilotage Terrain)'
-              : '⏳ 0 inscrit : reste en Cycle 1 (offre commerciale)'}
+              ? `✓ ${summary.totalChars} char${summary.totalChars > 1 ? 's' : ''} renseigné${summary.totalChars > 1 ? 's' : ''} · Créneau actif en Cycle 2`
+              : '⚡ Créneau actif en Cycle 2 · Saisie client facultative avant connexion billetterie'}
           </div>
         </div>
 
-        {(summary.isOverCapacity || fleetAlerts.monoOver || fleetAlerts.biOver) && (
+        {summary.isOverCapacity && (
           <div
             style={{
               padding: '8px 18px',
@@ -289,25 +277,13 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
               gap: '3px',
             }}
           >
-            {summary.isOverCapacity && (
-              <div>
-                ⛔ Blocage encadrement : {summary.totalChars} chars engagés pour un plafond strict de {maxChars} chars
-                {secondaryInstructor
-                  ? ` (${primaryInstructor} + ${secondaryInstructor})`
-                  : ' (1 moniteur — doublez d’abord le créneau avec un 2e moniteur en Cycle 2 pour passer à 20 ou 24 chars)'}
-                . Réduisez le nombre de chars à {maxChars} max pour pouvoir enregistrer.
-              </div>
-            )}
-            {fleetAlerts.monoOver && (
-              <div>
-                ⚠️ Parc Monoplaces dépassé : {summary.monoCount} monoplaces réservés pour {fleetAlerts.parkMaxMono} utilisables au club.
-              </div>
-            )}
-            {fleetAlerts.biOver && (
-              <div>
-                ⚠️ Parc Biplaces dépassé : {summary.biCount} biplaces réservés pour {fleetAlerts.parkMaxBi} utilisables au club.
-              </div>
-            )}
+            <div>
+              ⛔ Blocage encadrement : {summary.totalChars} chars engagés pour un plafond strict de {maxChars} chars
+              {secondaryInstructor
+                ? ` (${primaryInstructor} + ${secondaryInstructor})`
+                : ' (1 moniteur — doublez d’abord le créneau avec un 2e moniteur en Cycle 2 pour passer à 20 ou 24 chars)'}
+              . Réduisez le nombre de chars à {maxChars} max pour pouvoir enregistrer.
+            </div>
           </div>
         )}
 
@@ -325,10 +301,10 @@ export const SlotBookingsModal: React.FC<SlotBookingsModalProps> = ({
                 fontSize: '0.82rem',
               }}
             >
-              Aucune inscription enregistrée sur ce créneau pour l&apos;instant.
+              Aucune inscription renseignée sur ce créneau pour l&apos;instant.
               {!isReadOnly && (
                 <div style={{ marginTop: '8px' }}>
-                  Cliquez sur <strong>« + Ajouter une inscription »</strong> ci-dessous : dès la 1ère inscription, ce créneau passera en <strong>Cycle 2</strong>.
+                  Saisie 100 % facultative : cliquez sur <strong>« + Ajouter une inscription »</strong> si vous souhaitez noter un volume (Mono/Bi) ou un groupe (ex. UNSS) en attendant la connexion à l&apos;outil de réservation.
                 </div>
               )}
             </div>

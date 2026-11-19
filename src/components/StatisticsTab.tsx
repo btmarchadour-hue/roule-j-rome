@@ -35,6 +35,7 @@ interface StatisticsTabProps {
   onAddCustomNonPublishReason?: (reason: string) => void;
   onReclassifyValidationReason?: (targets: { ds: string; slotKey: string }[], newReason: string) => void;
   onObservationSaved?: (savedObs: SlotObservation) => void;
+  onObservationDeleted?: (deletedObs: SlotObservation) => void;
 }
 
 export const StatisticsTab: React.FC<StatisticsTabProps> = ({
@@ -48,6 +49,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   onAddCustomNonPublishReason,
   onReclassifyValidationReason,
   onObservationSaved,
+  onObservationDeleted,
 }) => {
   // Liste des observations terrain enregistrées (données réelles uniquement)
   const [observations, setObservations] = useState<SlotObservation[]>(() =>
@@ -1902,10 +1904,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
             initialObservation={editingObservation}
             customNonPublishReasons={settings.customNonPublishReasons}
             isReadOnly={isReadOnly}
-            onSaveSuccess={(updated, savedObs) => {
+            onSaveSuccess={(updated, savedObs, deletedObs) => {
               setObservations(updated);
               if (savedObs) {
                 onObservationSaved?.(savedObs);
+              } else if (deletedObs) {
+                onObservationDeleted?.(deletedObs);
               }
             }}
           />
