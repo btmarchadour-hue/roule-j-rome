@@ -96,6 +96,13 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     initialObservation?.cancellationNote || defaultCancellationNote || ''
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setConfirmDelete(false);
+    }
+  }, [isOpen, initialObservation?.id]);
 
   // Écarts réels (vides par défaut si non mesurés)
   const [actualPassableTime, setActualPassableTime] = useState<string>(
@@ -303,15 +310,13 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
     onClose();
   };
 
-  const handleDelete = () => {
+  const executeDelete = () => {
     if (!initialObservation?.id) return;
-    if (window.confirm('Voulez-vous supprimer ce relevé terrain ?')) {
-      const deletedObs = initialObservation;
-      const updated = deleteSlotObservation(deletedObs.id);
-      deleteObservationFromFirestore(deletedObs.id).catch(err => console.warn('Erreur suppression Firestore observation:', err));
-      onSaveSuccess(updated, undefined, deletedObs);
-      onClose();
-    }
+    const deletedObs = initialObservation;
+    const updated = deleteSlotObservation(deletedObs.id);
+    deleteObservationFromFirestore(deletedObs.id).catch(err => console.warn('Erreur suppression Firestore observation:', err));
+    onSaveSuccess(updated, undefined, deletedObs);
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -1110,22 +1115,62 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
           {/* Boutons d'action */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }}>
             {!isReadOnly && initialObservation ? (
-              <button
-                type="button"
-                onClick={handleDelete}
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #fca5a5',
-                  background: '#fee2e2',
-                  color: '#dc2626',
-                  fontSize: '0.75rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                🗑️ Supprimer
-              </button>
+              confirmDelete ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.73rem', fontWeight: 800, color: '#991b1b' }}>
+                    Supprimer ce REX ?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={executeDelete}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: '#dc2626',
+                      color: '#fff',
+                      fontSize: '0.74rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✓ Confirmer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#fff',
+                      color: '#475569',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕ Garder
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #fca5a5',
+                    background: '#fee2e2',
+                    color: '#dc2626',
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  🗑️ Supprimer
+                </button>
+              )
             ) : (
               <div />
             )}

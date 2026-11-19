@@ -1018,31 +1018,33 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
                             ⛔ Annulée
                           </button>
 
-                          <button
-                            type="button"
-                            disabled={isReadOnly}
-                            onClick={() =>
-                              updateRow(row.slotKey, prev => ({
-                                ...prev,
-                                mode: 'pending',
-                              }))
-                            }
-                            style={{
-                              minHeight: '40px',
-                              padding: '6px 12px',
-                              borderRadius: '8px',
-                              border: row.mode === 'pending' ? '2px solid #64748b' : '1px solid #cbd5e1',
-                              background: row.mode === 'pending' ? '#f1f5f9' : '#ffffff',
-                              color: row.mode === 'pending' ? '#334155' : '#64748b',
-                              fontSize: '0.76rem',
-                              fontWeight: row.mode === 'pending' ? 800 : 600,
-                              cursor: isReadOnly ? 'not-allowed' : 'pointer',
-                              whiteSpace: 'nowrap',
-                            }}
-                            title="Laisser ce créneau en attente (aucun REX enregistré pour lui lors de la sauvegarde)"
-                          >
-                            ⏳ Ignorer
-                          </button>
+                          {!row.existingId && (
+                            <button
+                              type="button"
+                              disabled={isReadOnly}
+                              onClick={() =>
+                                updateRow(row.slotKey, prev => ({
+                                  ...prev,
+                                  mode: 'pending',
+                                }))
+                              }
+                              style={{
+                                minHeight: '40px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                border: row.mode === 'pending' ? '2px solid #64748b' : '1px solid #cbd5e1',
+                                background: row.mode === 'pending' ? '#f1f5f9' : '#ffffff',
+                                color: row.mode === 'pending' ? '#334155' : '#64748b',
+                                fontSize: '0.76rem',
+                                fontWeight: row.mode === 'pending' ? 800 : 600,
+                                cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title="Laisser ce créneau en attente (aucun REX enregistré pour lui lors de la sauvegarde)"
+                            >
+                              ⏳ Ignorer
+                            </button>
+                          )}
                         </div>
                       </div>
 

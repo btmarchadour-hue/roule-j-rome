@@ -6,22 +6,28 @@ import {
   computePeriodStats,
   computeCalibrationStats,
   getStoredObservations,
-  exportObservationsAsCsv,
   getFiscalYearStart,
   getFiscalYearBounds,
   upsertSlotObservation,
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { StatisticsComparator } from './StatisticsComparator';
-import { ImportLogbookModal } from './ImportLogbookModal';
-import { downloadExcelLogbookTemplate } from '../utils/excelImportExport';
 import {
+  AgendaBookingItem,
   subscribeToObservations,
-  deleteObservationFromFirestore,
   saveObservationToFirestore,
 } from '../utils/firebaseSync';
-import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
-import { minDs, maxDs, MOIS, p2, shf } from '../utils/tides';
+import {
+  buildReservationKey,
+  DEFAULT_NON_PUBLISH_REASONS,
+  findMatchingValidationItem,
+  getEffectiveCycle1Status,
+  getSlotBookingsSummary,
+  getSlotMaxCapacity,
+  MAX_CHARS_PER_INSTRUCTOR,
+  stripReasonAccents,
+} from '../utils/cycleHelpers';
+import { dayFocus, kOf, lc, minDs, maxDs, MOIS, p2, shf, tdy, win } from '../utils/tides';
 import { getSlotWeatherRexDefaults } from '../utils/slotWeatherRex';
 
 interface StatisticsTabProps {
@@ -29,8 +35,10 @@ interface StatisticsTabProps {
   EX: TidePoint[];
   windList: WindPoint[];
   validations: ValidationsMap;
+  bookingsMap?: Record<string, AgendaBookingItem[]>;
   customSlotsMap: CustomSlotsMap;
   selectedDate: string;
+  currentUserName?: string;
   isReadOnly?: boolean;
   onAddCustomNonPublishReason?: (reason: string) => void;
   onReclassifyValidationReason?: (targets: { ds: string; slotKey: string }[], newReason: string) => void;
@@ -43,8 +51,10 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   EX,
   windList,
   validations,
+  bookingsMap = {},
   customSlotsMap,
   selectedDate,
+  currentUserName,
   isReadOnly = false,
   onAddCustomNonPublishReason,
   onReclassifyValidationReason,
@@ -86,12 +96,28 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Modal de saisie / édition d'un relevé
+  // Modal de saisie / édition d'un relevé + sélecteur de date et vrai créneau (Option B)
+  const todayStr = tdy();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingObservation, setEditingObservation] = useState<SlotObservation | null>(null);
-
-  // Modal d'import groupé carnet / REX Excel & CSV
-  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [slotPickerOpen, setSlotPickerOpen] = useState(false);
+  const [pickerDate, setPickerDate] = useState<string>(() => {
+    const initial = selectedDate && selectedDate <= todayStr ? selectedDate : todayStr;
+    if (initial < minDs) return minDs;
+    if (initial > maxDs) return maxDs;
+    return initial;
+  });
+  const [selectedNewSlot, setSelectedNewSlot] = useState<{
+    ds: string;
+    slotKey: string;
+    slotStart: string;
+    slotEnd: string;
+    customTitle?: string;
+    isCustom?: boolean;
+    maxChars: number;
+    primaryInstructor?: string;
+    secondaryInstructor?: string;
+  } | null>(null);
 
   // Requalification rétroactive des motifs de fermeture / absentéisme
   const [expandedReasonKey, setExpandedReasonKey] = useState<string | null>(null);
@@ -311,25 +337,168 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     return computeCalibrationStats(observations, settings.L);
   }, [observations, settings.L]);
 
-  // Export CSV
-  const handleExportCsv = () => {
-    const csvContent = exportObservationsAsCsv(observations);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `releves_terrain_lestrevet_${startDateStr}_${endDateStr}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  // Carnet de bord trié du plus récent au plus ancien (date puis horaire de début décroissants)
+  const sortedObservations = useMemo(() => {
+    const normStart = (s?: string) => (s || '').replace('h', ':').padStart(5, '0');
+    return [...observations].sort((a, b) => {
+      const dateCmp = (b.ds || '').localeCompare(a.ds || '');
+      if (dateCmp !== 0) return dateCmp;
+      const timeCmp = normStart(b.slotStart).localeCompare(normStart(a.slotStart));
+      if (timeCmp !== 0) return timeCmp;
+      return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+    });
+  }, [observations]);
+
+  const pickerDaySlots = useMemo(() => {
+    if (!slotPickerOpen || !pickerDate) return [];
+    const isRealMode = settings.calculationMode === 'reel';
+    const empiricalOffsetM = isRealMode ? (settings.empiricalOffsetCm ?? 15) / 100 : 0;
+    const effThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
+    const tideW = win(EX, effThreshold);
+    const first = EX[0]?.t ?? 0;
+    const last = EX[EX.length - 1]?.t ?? 0;
+    const focusData = dayFocus(pickerDate, settings, tideW, first, last, windList, customSlotsMap);
+    const dayVal = validations[pickerDate];
+    const dayObs = observations.filter(o => o.ds === pickerDate);
+    const normT = (v?: string) => (v || '').replace('h', ':');
+
+    type PickerSlot = {
+      slotKey: string;
+      slotStart: string;
+      slotEnd: string;
+      customTitle?: string;
+      isCustom?: boolean;
+      maxChars: number;
+      primaryInstructor?: string;
+      secondaryInstructor?: string;
+      statusLabel: string;
+      statusColor: string;
+      statusBg: string;
+      bookedPeople: number;
+      existingObs: SlotObservation | null;
+    };
+
+    const items: PickerSlot[] = [];
+    const seenKeys = new Set<string>();
+
+    const buildStatusBadge = (valItem?: ReturnType<typeof findMatchingValidationItem>, existingObs?: SlotObservation | null) => {
+      if (existingObs) {
+        return existingObs.status === 'realized'
+          ? { label: '✓ REX : Réalisée', color: '#166534', bg: '#dcfce7' }
+          : { label: '⛔ REX : Annulée', color: '#b91c1c', bg: '#fee2e2' };
+      }
+      if (!valItem) {
+        return { label: 'Non validé C1', color: '#64748b', bg: '#f1f5f9' };
+      }
+      if (valItem.cycle2Status === 'realized') {
+        return { label: '🏁 Effectuée', color: '#166534', bg: '#dcfce7' };
+      }
+      if (valItem.cycle2Status === 'cancelled_weather') {
+        return { label: '⛔ Annulé météo', color: '#b91c1c', bg: '#fee2e2' };
+      }
+      const effC1 = getEffectiveCycle1Status(valItem);
+      if (effC1 === 'excluded') {
+        return { label: 'Hors offre C1', color: '#475569', bg: '#f1f5f9' };
+      }
+      if (effC1 === 'not_published') {
+        return { label: '🚫 Non publié C1', color: '#991b1b', bg: '#fef2f2' };
+      }
+      if (effC1 === 'closed_no_bookings') {
+        return { label: "Pas d'inscrit", color: '#92400e', bg: '#fef3c7' };
+      }
+      return { label: '✅ Publié C1', color: '#0369a1', bg: '#e0f2fe' };
+    };
+
+    focusData.list
+      .filter(s => s.txt !== 'n/a')
+      .forEach(s => {
+        const sKey = kOf(s);
+        const startStr = lc(s.a, focusData.y, focusData.m, focusData.d).replace('h', ':');
+        const endStr = lc(s.b, focusData.y, focusData.m, focusData.d).replace('h', ':');
+        const valItem = findMatchingValidationItem(dayVal, sKey, startStr, endStr);
+        const finalKey = valItem?.k || sKey;
+        seenKeys.add(finalKey);
+        seenKeys.add(sKey);
+        const displayStart = normT(valItem?.actualStart || valItem?.publishedStart || valItem?.s || startStr);
+        const displayEnd = normT(valItem?.actualEnd || valItem?.publishedEnd || valItem?.e || endStr);
+        const existingObs =
+          dayObs.find(o => o.slotKey === finalKey || o.slotKey === sKey) ||
+          dayObs.find(
+            o =>
+              normT(o.slotStart) === displayStart &&
+              normT(o.slotEnd) === displayEnd
+          ) ||
+          null;
+        const maxChars = valItem ? getSlotMaxCapacity(valItem) : MAX_CHARS_PER_INSTRUCTOR;
+        const bookings =
+          bookingsMap[buildReservationKey(pickerDate, finalKey)] ||
+          bookingsMap[buildReservationKey(pickerDate, sKey)] ||
+          [];
+        const bookedPeople = getSlotBookingsSummary(bookings, maxChars).totalPeople;
+        const badge = buildStatusBadge(valItem, existingObs);
+        items.push({
+          slotKey: finalKey,
+          slotStart: displayStart,
+          slotEnd: displayEnd,
+          customTitle: valItem?.customTitle || s.customTitle,
+          isCustom: Boolean(s.isCustom || finalKey.endsWith('c')),
+          maxChars,
+          primaryInstructor: valItem?.instructor || existingObs?.author || 'Jérôme',
+          secondaryInstructor: valItem?.secondaryInstructor || existingObs?.secondaryInstructor,
+          statusLabel: badge.label,
+          statusColor: badge.color,
+          statusBg: badge.bg,
+          bookedPeople,
+          existingObs,
+        });
+      });
+
+    // Inclure d'éventuels créneaux enregistrés en validation absents du calcul du jour
+    (dayVal?.items || []).forEach(valItem => {
+      if (seenKeys.has(valItem.k)) return;
+      const displayStart = normT(valItem.actualStart || valItem.publishedStart || valItem.s);
+      const displayEnd = normT(valItem.actualEnd || valItem.publishedEnd || valItem.e);
+      const existingObs =
+        dayObs.find(o => o.slotKey === valItem.k) ||
+        dayObs.find(
+          o => normT(o.slotStart) === displayStart && normT(o.slotEnd) === displayEnd
+        ) ||
+        null;
+      const maxChars = getSlotMaxCapacity(valItem);
+      const bookings = bookingsMap[buildReservationKey(pickerDate, valItem.k)] || [];
+      const bookedPeople = getSlotBookingsSummary(bookings, maxChars).totalPeople;
+      const badge = buildStatusBadge(valItem, existingObs);
+      items.push({
+        slotKey: valItem.k,
+        slotStart: displayStart,
+        slotEnd: displayEnd,
+        customTitle: valItem.customTitle,
+        isCustom: valItem.k.endsWith('c'),
+        maxChars,
+        primaryInstructor: valItem.instructor || existingObs?.author || 'Jérôme',
+        secondaryInstructor: valItem.secondaryInstructor || existingObs?.secondaryInstructor,
+        statusLabel: badge.label,
+        statusColor: badge.color,
+        statusBg: badge.bg,
+        bookedPeople,
+        existingObs,
+      });
+    });
+
+    return items.sort((a, b) => a.slotStart.localeCompare(b.slotStart));
+  }, [slotPickerOpen, pickerDate, settings, EX, windList, customSlotsMap, validations, observations, bookingsMap]);
 
   const handleOpenNewObservation = () => {
+    const defaultDate = selectedDate && selectedDate <= todayStr ? selectedDate : todayStr;
+    const clamped = defaultDate < minDs ? minDs : defaultDate > maxDs ? maxDs : defaultDate;
+    setPickerDate(clamped);
+    setSelectedNewSlot(null);
     setEditingObservation(null);
-    setModalOpen(true);
+    setSlotPickerOpen(true);
   };
 
   const handleEditObservation = (obs: SlotObservation) => {
+    setSelectedNewSlot(null);
     setEditingObservation(obs);
     setModalOpen(true);
   };
@@ -402,78 +571,6 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="fbtn"
-            onClick={downloadExcelLogbookTemplate}
-            style={{
-              margin: 0,
-              padding: '8px 12px',
-              fontSize: '0.78rem',
-              fontWeight: 800,
-              background: '#f0fdf4',
-              color: '#166534',
-              border: '1px solid #bbf7d0',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            title="Télécharger le modèle Excel pré-formaté à compléter pour vos imports groupés ou carnets papier"
-          >
-            <span>📥</span>
-            <span>Modèle Excel Vierge</span>
-          </button>
-
-          <button
-            type="button"
-            className="fbtn"
-            onClick={() => setImportModalOpen(true)}
-            style={{
-              margin: 0,
-              padding: '8px 12px',
-              fontSize: '0.78rem',
-              fontWeight: 800,
-              background: '#eff6ff',
-              color: '#1d4ed8',
-              border: '1px solid #bfdbfe',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            title="Importer un carnet ou historique REX (fichiers .xlsx, .xls ou .csv)"
-          >
-            <span>📂</span>
-            <span>Importer Carnet / REX</span>
-          </button>
-
-          <button
-            type="button"
-            className="fbtn"
-            onClick={handleExportCsv}
-            style={{
-              margin: 0,
-              padding: '8px 12px',
-              fontSize: '0.78rem',
-              fontWeight: 800,
-              background: '#f8fafc',
-              color: '#334155',
-              border: '1px solid #cbd5e1',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            title="Exporter l'ensemble des relevés et statistiques au format CSV"
-          >
-            <span>📊</span>
-            <span>Exporter CSV</span>
-          </button>
-
           <button
             type="button"
             className="fbtn"
@@ -837,6 +934,37 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           <span style={{ fontWeight: 800, fontSize: '0.82rem', color: '#0f172a', marginLeft: '6px' }}>
             {periodTitle}
           </span>
+          {periodStats.isCappedToToday && (
+            <span
+              style={{
+                fontSize: '0.70rem',
+                fontWeight: 700,
+                color: '#0369a1',
+                background: '#e0f2fe',
+                border: '1px solid #bae6fd',
+                borderRadius: '6px',
+                padding: '2px 7px',
+              }}
+              title="Les statistiques et taux ne prennent en compte que les jours déjà écoulés jusqu'à aujourd'hui"
+            >
+              ⏱️ Calculé jusqu&apos;au {periodStats.effectiveEndDateStr.split('-').reverse().join('/')} (passé uniquement)
+            </span>
+          )}
+          {periodStats.isFuturePeriod && (
+            <span
+              style={{
+                fontSize: '0.70rem',
+                fontWeight: 700,
+                color: '#92400e',
+                background: '#fef3c7',
+                border: '1px solid #fde68a',
+                borderRadius: '6px',
+                padding: '2px 7px',
+              }}
+            >
+              ⏳ Période future (taux non calculés avant échéance)
+            </span>
+          )}
         </div>
 
         {/* Filtre contextuel : Tous les jours / Vacances / Week-ends */}
@@ -892,14 +1020,16 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
             <span style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
-              {periodStats.realizationRate}%
+              {periodStats.isFuturePeriod ? '—' : `${periodStats.realizationRate}%`}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#16a34a', fontWeight: 700 }}>
               réalisées
             </span>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--mu)', marginTop: '4px' }}>
-            {periodStats.totalRealizedSlots > 0 ? (
+            {periodStats.isFuturePeriod ? (
+              'Période à venir : les taux seront calculés au fur et à mesure des séances échues.'
+            ) : periodStats.totalRealizedSlots > 0 ? (
               <>
                 <strong>{periodStats.totalRealizedSlots}</strong> réalisées sur <strong>{periodStats.totalPossibleSlots}</strong> créneaux {periodStats.excludedSlotsCount > 0 ? 'retenus' : 'possibles'}
               </>
@@ -999,7 +1129,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '6px' }}>
             <span style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', fontFamily: 'monospace' }}>
-              {periodStats.instructorAbsenteeismRate}%
+              {periodStats.isFuturePeriod ? '—' : `${periodStats.instructorAbsenteeismRate}%`}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#475569', fontWeight: 700 }}>
               non publiés
@@ -1625,22 +1755,67 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               Seuil effectif moyen : <strong>{calibrationStats.suggestedThresholdM.toFixed(2)} m</strong> (nominal {settings.L.toFixed(2)} m)
             </div>
             <div style={{ fontSize: '0.72rem', color: '#334155', marginTop: '2px' }}>
-              Surcote moyenne constatée : <strong>{calibrationStats.avgWaterDeltaCm > 0 ? `+${calibrationStats.avgWaterDeltaCm}` : calibrationStats.avgWaterDeltaCm} cm</strong> ({calibrationStats.totalLogged} relevés)
+              Surcote moyenne constatée :{' '}
+              {calibrationStats.waterDeltaCount > 0 ? (
+                <>
+                  <strong>
+                    {calibrationStats.avgWaterDeltaCm > 0
+                      ? `+${calibrationStats.avgWaterDeltaCm}`
+                      : calibrationStats.avgWaterDeltaCm}{' '}
+                    cm
+                  </strong>{' '}
+                  ({calibrationStats.waterDeltaCount} mesure{calibrationStats.waterDeltaCount > 1 ? 's' : ''})
+                </>
+              ) : (
+                <strong>— (aucune mesure de surcote)</strong>
+              )}
             </div>
             <div style={{ fontSize: '0.68rem', color: '#166534', marginTop: '4px', fontStyle: 'italic' }}>
-              ℹ️ Seuil théorique (4.50 m) diminué de la surcote pour maintenir la même largeur de roulage.
+              ℹ️ Seuil théorique ({settings.L.toFixed(2)} m) diminué de la surcote pour maintenir la même largeur de roulage.
             </div>
           </div>
 
           <div style={{ fontSize: '0.72rem', color: '#166534', borderLeft: '2px solid #86efac', paddingLeft: '12px' }}>
             <div>
-              • <strong>Basse pression (&lt; 1005 hPa)</strong> : surcote moy. <strong>{calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm > 0 ? `+${calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm}` : calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm} cm</strong>
+              • <strong>Basse pression (&lt; 1005 hPa)</strong> : surcote moy.{' '}
+              {calibrationStats.pressureCorrelation.lowPressureCount > 0 ? (
+                <strong>
+                  {calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm > 0
+                    ? `+${calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm}`
+                    : calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm}{' '}
+                  cm ({calibrationStats.pressureCorrelation.lowPressureCount})
+                </strong>
+              ) : (
+                <strong>—</strong>
+              )}
             </div>
             <div style={{ marginTop: '2px' }}>
-              • <strong>Vents d'Ouest (portant mer)</strong> : surcote moy. <strong>{calibrationStats.windDirCorrelation.westSectorAvgDeltaCm > 0 ? `+${calibrationStats.windDirCorrelation.westSectorAvgDeltaCm}` : calibrationStats.windDirCorrelation.westSectorAvgDeltaCm} cm</strong>
+              • <strong>Vents d&apos;Ouest (portant mer)</strong> : surcote moy.{' '}
+              {calibrationStats.windDirCorrelation.westSectorCount > 0 ? (
+                <strong>
+                  {calibrationStats.windDirCorrelation.westSectorAvgDeltaCm > 0
+                    ? `+${calibrationStats.windDirCorrelation.westSectorAvgDeltaCm}`
+                    : calibrationStats.windDirCorrelation.westSectorAvgDeltaCm}{' '}
+                  cm ({calibrationStats.windDirCorrelation.westSectorCount})
+                </strong>
+              ) : (
+                <strong>—</strong>
+              )}
             </div>
             <div style={{ marginTop: '2px' }}>
-              • <strong>Décalage moyen au roulage</strong> : <strong>{calibrationStats.avgTimeDeltaMin > 0 ? `+${calibrationStats.avgTimeDeltaMin} min` : `${calibrationStats.avgTimeDeltaMin} min`}</strong>
+              • <strong>Décalage moyen au roulage</strong> :{' '}
+              {calibrationStats.timeDeltaCount > 0 ? (
+                <>
+                  <strong>
+                    {calibrationStats.avgTimeDeltaMin > 0
+                      ? `+${calibrationStats.avgTimeDeltaMin} min`
+                      : `${calibrationStats.avgTimeDeltaMin} min`}
+                  </strong>{' '}
+                  ({calibrationStats.timeDeltaCount} mesure{calibrationStats.timeDeltaCount > 1 ? 's' : ''})
+                </>
+              ) : (
+                <strong>— (aucune mesure)</strong>
+              )}
             </div>
           </div>
         </div>
@@ -1738,7 +1913,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         {/* Tableau des relevés réels enregistrés */}
         <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
           <div style={{ padding: '8px 12px', background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', fontSize: '0.74rem', fontWeight: 800, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-            <span>📋 Carnet de bord des relevés terrain ({observations.length} entrées)</span>
+            <span>📋 Carnet de bord des relevés terrain ({sortedObservations.length} entrées · du plus récent au plus ancien)</span>
             <span style={{ fontSize: '0.68rem', color: '#64748b' }}>Cliquez sur une ligne pour modifier</span>
           </div>
 
@@ -1759,7 +1934,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {observations.length === 0 ? (
+                {sortedObservations.length === 0 ? (
                   <tr>
                     <td colSpan={10} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
                       <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>📝</div>
@@ -1774,7 +1949,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  observations.map((obs, idx) => {
+                  sortedObservations.map((obs, idx) => {
                     const isRealized = obs.status === 'realized';
                     return (
                       <tr
@@ -1880,29 +2055,292 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     </>
   )}
 
+      {/* SÉLECTEUR DE DATE ET CRÉNEAU RÉEL AVANT OUVERTURE DE LA FICHE REX (OPTION B) */}
+      {slotPickerOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            zIndex: 9998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={() => setSlotPickerOpen(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '520px',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 50px rgba(15, 23, 42, 0.35)',
+              border: '1px solid #cbd5e1',
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 900, color: '#0f172a' }}>
+                  📝 Noter un relevé terrain · Choisir la séance
+                </h3>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                  Sélectionnez la date puis le créneau réel concerné pour ouvrir sa fiche REX.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSlotPickerOpen(false)}
+                style={{
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  padding: '4px 9px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  color: '#475569',
+                  cursor: 'pointer',
+                }}
+                aria-label="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                disabled={shf(pickerDate, -1) < minDs}
+                onClick={() => {
+                  const prev = shf(pickerDate, -1);
+                  if (prev >= minDs) setPickerDate(prev);
+                }}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: shf(pickerDate, -1) < minDs ? '#f1f5f9' : '#fff',
+                  cursor: shf(pickerDate, -1) < minDs ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.76rem',
+                }}
+              >
+                ‹ Jour préc.
+              </button>
+
+              <input
+                type="date"
+                value={pickerDate}
+                min={minDs}
+                max={todayStr < maxDs ? todayStr : maxDs}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v && v >= minDs && v <= maxDs) setPickerDate(v);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '140px',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #0284c7',
+                  fontWeight: 800,
+                  fontSize: '0.82rem',
+                  color: '#0f172a',
+                  background: '#fff',
+                }}
+              />
+
+              <button
+                type="button"
+                disabled={shf(pickerDate, 1) > todayStr || shf(pickerDate, 1) > maxDs}
+                onClick={() => {
+                  const next = shf(pickerDate, 1);
+                  if (next <= todayStr && next <= maxDs) setPickerDate(next);
+                }}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: shf(pickerDate, 1) > todayStr || shf(pickerDate, 1) > maxDs ? '#f1f5f9' : '#fff',
+                  cursor: shf(pickerDate, 1) > todayStr || shf(pickerDate, 1) > maxDs ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.76rem',
+                }}
+              >
+                Jour suiv. ›
+              </button>
+            </div>
+
+            {pickerDaySlots.length === 0 ? (
+              <div
+                style={{
+                  padding: '20px 14px',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px dashed #cbd5e1',
+                  color: '#64748b',
+                  fontSize: '0.8rem',
+                }}
+              >
+                <strong>Aucune séance prévue le {pickerDate.split('-').reverse().join('/')}</strong>
+                <div style={{ marginTop: '4px', fontSize: '0.74rem' }}>
+                  Marée haute ou hors plage d&apos;ouverture. Choisissez une autre date ci-dessus.
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {pickerDaySlots.map(slot => (
+                  <button
+                    key={`${pickerDate}_${slot.slotKey}`}
+                    type="button"
+                    onClick={() => {
+                      setSlotPickerOpen(false);
+                      if (slot.existingObs) {
+                        setSelectedNewSlot(null);
+                        setEditingObservation(slot.existingObs);
+                      } else {
+                        setEditingObservation(null);
+                        setSelectedNewSlot({
+                          ds: pickerDate,
+                          slotKey: slot.slotKey,
+                          slotStart: slot.slotStart,
+                          slotEnd: slot.slotEnd,
+                          customTitle: slot.customTitle,
+                          isCustom: slot.isCustom,
+                          maxChars: slot.maxChars,
+                          primaryInstructor: slot.primaryInstructor,
+                          secondaryInstructor: slot.secondaryInstructor,
+                        });
+                      }
+                      setModalOpen(true);
+                    }}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      background: '#ffffff',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '8px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '0.86rem', color: '#0f172a' }}>
+                        🕒 {slot.slotStart} – {slot.slotEnd}
+                        {slot.customTitle ? ` · ${slot.customTitle}` : ''}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                        {slot.bookedPeople > 0
+                          ? `👥 ${slot.bookedPeople} inscrit${slot.bookedPeople > 1 ? 's' : ''} dans l'agenda`
+                          : 'Aucun inscrit enregistré'}
+                        {slot.secondaryInstructor ? ` · ${slot.primaryInstructor} + ${slot.secondaryInstructor}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.70rem',
+                          fontWeight: 800,
+                          color: slot.statusColor,
+                          background: slot.statusBg,
+                        }}
+                      >
+                        {slot.statusLabel}
+                      </span>
+                      <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0284c7' }}>
+                        {slot.existingObs ? 'Modifier →' : 'Noter →'}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* MODAL DE SAISIE / ÉDITION D'OBSERVATION */}
-      {modalOpen && (() => {
-        const obsDate = editingObservation?.ds || selectedDate;
-        const obsStart = editingObservation?.slotStart || '10:00';
-        const obsEnd = editingObservation?.slotEnd || '11:00';
+      {modalOpen && (editingObservation || selectedNewSlot) && (() => {
+        const obsDate = editingObservation?.ds || selectedNewSlot!.ds;
+        const obsStart = editingObservation?.slotStart || selectedNewSlot!.slotStart;
+        const obsEnd = editingObservation?.slotEnd || selectedNewSlot!.slotEnd;
+        const obsSlotKey = editingObservation?.slotKey || selectedNewSlot!.slotKey;
+        const matchedValItem = findMatchingValidationItem(
+          validations[obsDate],
+          obsSlotKey,
+          obsStart,
+          obsEnd
+        );
+        const modalMaxChars = matchedValItem
+          ? getSlotMaxCapacity(matchedValItem)
+          : selectedNewSlot?.maxChars ??
+            (editingObservation?.secondaryInstructor
+              ? MAX_CHARS_PER_INSTRUCTOR * 2
+              : MAX_CHARS_PER_INSTRUCTOR);
+        const bookingKey =
+          matchedValItem &&
+          (bookingsMap[buildReservationKey(obsDate, matchedValItem.k)]?.length ?? 0) > 0
+            ? matchedValItem.k
+            : obsSlotKey;
+        const agendaBookedPeopleCount = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(obsDate, bookingKey)] || [],
+          modalMaxChars
+        ).totalPeople;
         const weatherDefaults = getSlotWeatherRexDefaults(obsDate, obsStart, obsEnd, EX, windList);
         return (
           <SlotObservationModal
+            key={`${obsDate}_${obsSlotKey}`}
             isOpen={modalOpen}
-            onClose={() => setModalOpen(false)}
+            onClose={() => {
+              setModalOpen(false);
+              setSelectedNewSlot(null);
+            }}
             dateStr={obsDate}
-            slotKey={editingObservation?.slotKey || 's0'}
+            slotKey={obsSlotKey}
             slotStart={obsStart}
             slotEnd={obsEnd}
-            slotTitle={editingObservation?.customTitle}
-            isCustom={editingObservation?.isCustom}
+            slotTitle={editingObservation?.customTitle || selectedNewSlot?.customTitle}
+            isCustom={editingObservation?.isCustom ?? selectedNewSlot?.isCustom}
+            maxChars={modalMaxChars}
+            primaryInstructor={
+              matchedValItem?.instructor ||
+              editingObservation?.author ||
+              selectedNewSlot?.primaryInstructor ||
+              'Jérôme'
+            }
+            secondaryInstructor={
+              matchedValItem?.secondaryInstructor ||
+              editingObservation?.secondaryInstructor ||
+              selectedNewSlot?.secondaryInstructor
+            }
             defaultPressure={weatherDefaults.pressureHpa ?? null}
             defaultWindKts={weatherDefaults.windKts ?? null}
             defaultGustKts={weatherDefaults.gustKts ?? null}
             defaultWindDir={weatherDefaults.windDir ?? null}
             defaultWaveH={weatherDefaults.waveH ?? null}
             initialObservation={editingObservation}
+            currentUserName={currentUserName}
             customNonPublishReasons={settings.customNonPublishReasons}
+            defaultBookedParticipantsCount={
+              agendaBookedPeopleCount > 0 ? agendaBookedPeopleCount : undefined
+            }
+            agendaBookedPeopleCount={agendaBookedPeopleCount}
             isReadOnly={isReadOnly}
             onSaveSuccess={(updated, savedObs, deletedObs) => {
               setObservations(updated);
@@ -1911,19 +2349,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               } else if (deletedObs) {
                 onObservationDeleted?.(deletedObs);
               }
+              setModalOpen(false);
+              setSelectedNewSlot(null);
             }}
           />
         );
       })()}
-
-      {/* MODAL D'IMPORT GROUPÉ CARNET / REX EXCEL & CSV */}
-      {importModalOpen && (
-        <ImportLogbookModal
-          isOpen={importModalOpen}
-          onClose={() => setImportModalOpen(false)}
-          onImportSuccess={updated => setObservations(updated)}
-        />
-      )}
     </div>
   );
 };

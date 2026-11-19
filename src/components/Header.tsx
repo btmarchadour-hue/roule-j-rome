@@ -32,27 +32,93 @@ export const Header: React.FC<HeaderProps> = ({
     document.documentElement.setAttribute('data-theme', next);
   };
 
+  interface BeforeInstallPromptEvent extends Event {
+    prompt: () => Promise<void>;
+    userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+  }
+
   const [showInstallGuide, setShowInstallGuide] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInIframe, setIsInIframe] = useState(false);
+  const [platform, setPlatform] = useState<'ios' | 'android' | 'desktop'>('desktop');
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    setIsInstalled(standalone);
+
+    try {
+      setIsInIframe(window.self !== window.top);
+    } catch {
+      setIsInIframe(true);
+    }
+
+    const ua = window.navigator.userAgent.toLowerCase();
+    if (/iphone|ipad|ipod/.test(ua) || (ua.includes('mac') && 'ontouchend' in document)) {
+      setPlatform('ios');
+    } else if (/android/.test(ua)) {
+      setPlatform('android');
+    } else {
+      setPlatform('desktop');
+    }
+
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      setShowInstallGuide(false);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
   }, []);
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
-      deferredPrompt.prompt();
+      await deferredPrompt.prompt();
       const choice = await deferredPrompt.userChoice;
       if (choice.outcome === 'accepted') {
+        setIsInstalled(true);
         setDeferredPrompt(null);
+        return;
       }
-    } else {
-      setShowInstallGuide(true);
+    }
+    setLinkCopied(false);
+    setShowInstallGuide(true);
+  };
+
+  const handleCopyAppUrl = async () => {
+    const url = window.location.origin + '/';
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 3000);
+    } catch {
+      // Fallback textarea si clipboard API bloquée dans un iframe
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 3000);
+      } catch {
+        // ignore
+      }
     }
   };
 
@@ -128,28 +194,34 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleInstallClick}
-            title="Installer le raccourci « Ça roule ? » sur iPhone ou Android"
-            style={{
-              background: '#0284c7',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '6px 11px',
-              color: '#ffffff',
-              fontSize: '0.74rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)',
-            }}
-          >
-            <span>📲</span>
-            <span className="header-btn-text">Raccourci</span>
-          </button>
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={handleInstallClick}
+              title={
+                deferredPrompt
+                  ? 'Installer directement l’application « Ça roule ? » en 1 clic'
+                  : 'Installer le raccourci « Ça roule ? » sur iPhone, Android ou PC'
+              }
+              style={{
+                background: deferredPrompt ? '#0f766e' : '#0284c7',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '6px 11px',
+                color: '#ffffff',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)',
+              }}
+            >
+              <span>📲</span>
+              <span className="header-btn-text">{deferredPrompt ? 'Installer l’app' : 'Raccourci'}</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -206,7 +278,7 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '14px' }}>
               <img
                 src="/apple-touch-icon.png"
                 alt="Icône Ça roule ?"
@@ -219,35 +291,128 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
               />
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
-                  Raccourci « Ça roule ? »
+                <h3 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: '#0f172a' }}>
+                  Installer « Ça roule ? »
                 </h3>
-                <p style={{ margin: '3px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-                  Installer sur l'écran d'accueil de votre smartphone
+                <p style={{ margin: '3px 0 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+                  Accès plein écran depuis l&apos;écran d&apos;accueil (smartphone ou ordinateur)
                 </p>
               </div>
             </div>
 
-            <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '0.83rem', lineHeight: 1.55 }}>
-              <strong style={{ color: '#0284c7', display: 'block', marginBottom: '6px' }}>
-                🍏 Sur iPhone / iPad (Safari) :
-              </strong>
-              <ol style={{ margin: '0 0 12px 18px', padding: 0 }}>
-                <li>Appuyez sur le bouton <strong>Partager</strong> en bas de Safari (icône carré avec une flèche vers le haut ⬆️).</li>
-                <li>Faites défiler vers le bas et touchez <strong>« Sur l'écran d'accueil »</strong>.</li>
-                <li>Le nom <strong>« Ça roule ? »</strong> et l'icône apparaissent. Touchez <strong>Ajouter</strong> en haut à droite.</li>
-              </ol>
+            {isInIframe && (
+              <div
+                style={{
+                  background: '#fffbeb',
+                  border: '1.5px solid #fcd34d',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  marginBottom: '12px',
+                  fontSize: '0.78rem',
+                  color: '#92400e',
+                  lineHeight: 1.45,
+                }}
+              >
+                <strong>⚠️ Vous êtes actuellement dans un aperçu intégré :</strong> le bouton d&apos;installation du navigateur ne peut pas apparaître ici. Copiez le lien direct ci-dessous et ouvrez-le directement dans <strong>Safari</strong> (iPhone) ou <strong>Chrome / Edge</strong> (Android / PC).
+              </div>
+            )}
 
-              <strong style={{ color: '#0284c7', display: 'block', marginBottom: '6px' }}>
-                🤖 Sur Android (Chrome) :
-              </strong>
-              <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
-                <li>Appuyez sur les <strong>3 petits points ⋮</strong> en haut à droite.</li>
-                <li>Touchez <strong>« Installer l'application »</strong> ou <strong>« Ajouter à l'écran d'accueil »</strong>.</li>
-              </ol>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                padding: '8px 10px',
+                marginBottom: '14px',
+              }}
+            >
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: '0.73rem',
+                  fontFamily: 'monospace',
+                  color: '#334155',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {typeof window !== 'undefined' ? `${window.location.origin}/` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyAppUrl}
+                style={{
+                  background: linkCopied ? '#16a34a' : '#0f172a',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '5px 10px',
+                  fontSize: '0.73rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {linkCopied ? '✓ Lien copié !' : '📋 Copier le lien'}
+              </button>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '0.80rem', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ order: platform === 'ios' ? 0 : 1 }}>
+                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
+                  🍏 Sur iPhone / iPad (obligatoirement dans Safari) :
+                </strong>
+                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
+                  <li>Ouvrez le lien direct dans <strong>Safari</strong> (pas dans Chrome ni dans un aperçu mail/WhatsApp).</li>
+                  <li>Touchez le bouton <strong>Partager</strong> (carré avec une flèche vers le haut ⬆️, en bas de l&apos;écran).</li>
+                  <li>Descendez (ou touchez <em>Plus</em>) puis choisissez <strong>« Sur l&apos;écran d&apos;accueil »</strong> → <strong>Ajouter</strong>.</li>
+                </ol>
+              </div>
+
+              <div style={{ order: platform === 'android' ? 0 : 2 }}>
+                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
+                  🤖 Sur Android (Chrome) :
+                </strong>
+                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
+                  <li>Ouvrez le lien direct dans <strong>Google Chrome</strong>.</li>
+                  <li>Touchez les <strong>3 points ⋮</strong> en haut à droite → <strong>« Ajouter à l&apos;écran d&apos;accueil »</strong> → <strong>Installer</strong>.</li>
+                </ol>
+              </div>
+
+              <div style={{ order: platform === 'desktop' ? 0 : 3 }}>
+                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
+                  💻 Sur ordinateur (Chrome ou Edge) :
+                </strong>
+                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
+                  <li>Ouvrez le lien direct dans un onglet <strong>Chrome</strong> ou <strong>Edge</strong>.</li>
+                  <li>Cliquez sur l&apos;icône <strong>Installer</strong> (écran avec une flèche ⬇️) à droite de la barre d&apos;adresse, ou menu <strong>⋮ → Enregistrer et partager → Installer la page en tant qu&apos;application</strong>.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              {deferredPrompt && (
+                <button
+                  type="button"
+                  onClick={handleInstallClick}
+                  style={{
+                    background: '#0f766e',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '9px 16px',
+                    fontWeight: 800,
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  📲 Installer maintenant
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowInstallGuide(false)}
@@ -258,11 +423,11 @@ export const Header: React.FC<HeaderProps> = ({
                   borderRadius: '8px',
                   padding: '9px 18px',
                   fontWeight: 700,
-                  fontSize: '0.85rem',
+                  fontSize: '0.84rem',
                   cursor: 'pointer',
                 }}
               >
-                Compris !
+                Fermer
               </button>
             </div>
           </div>

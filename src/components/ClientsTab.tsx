@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ClientProfile, ClientSkillLevel } from '../types';
-import {
-  downloadClientExcelTemplate,
-  exportClientsToCsv,
-} from '../utils/excelImportExport';
+import { ClientProfile } from '../types';
 import {
   batchSaveClientsToFirestore,
   subscribeToClients,
@@ -127,22 +123,59 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
     }
   };
 
+  // Normalisation sans accents pour une recherche tolérante
+  const normalizeText = (val?: string) =>
+    (val || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+
+  const normalizeDigits = (val?: string) => (val || '').replace(/[^\d+]/g, '');
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() || selectedLevel !== 'all' || selectedGear !== 'all'
+  );
+
   // Filtrage et recherche dynamique
   const filteredClients = useMemo(() => {
     let result = [...clients];
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        c =>
-          (c.lastName || '').toLowerCase().includes(q) ||
-          (c.firstName || '').toLowerCase().includes(q) ||
-          (c.phone || '').replace(/\s+/g, '').includes(q.replace(/\s+/g, '')) ||
-          (c.email || '').toLowerCase().includes(q) ||
-          (c.city || '').toLowerCase().includes(q) ||
-          (c.notes || '').toLowerCase().includes(q) ||
-          (c.tags || []).some(t => t.toLowerCase().includes(q))
-      );
+      const qNorm = normalizeText(searchQuery);
+      const qTokens = qNorm.split(/\s+/).filter(Boolean);
+      const qDigits = normalizeDigits(searchQuery);
+
+      result = result.filter(c => {
+        const searchableText = normalizeText(
+          [
+            c.firstName,
+            c.lastName,
+            c.email,
+            c.city,
+            c.postalCode,
+            c.notes,
+            ...(c.tags || []),
+          ]
+            .filter(Boolean)
+            .join(' ')
+        );
+        const phoneDigits = normalizeDigits(c.phone);
+
+        // Tous les mots tapés doivent correspondre (gère "Prénom Nom", "Nom Prénom", "Nom Ville", etc.)
+        const matchesAllTokens =
+          qTokens.length > 0 &&
+          qTokens.every(tok => {
+            const tokDigits = normalizeDigits(tok);
+            return (
+              searchableText.includes(tok) ||
+              (tokDigits.length >= 2 && phoneDigits.includes(tokDigits))
+            );
+          });
+
+        const matchesPhoneDirect = qDigits.length >= 2 && phoneDigits.includes(qDigits);
+        return matchesAllTokens || matchesPhoneDirect;
+      });
     }
 
     if (selectedLevel !== 'all') {
@@ -162,7 +195,10 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
         return (b.updatedAt || 0) - (a.updatedAt || 0);
       }
       // Par défaut : Nom alphabétique
-      return (a.lastName || '').localeCompare(b.lastName || '', 'fr') || (a.firstName || '').localeCompare(b.firstName || '', 'fr');
+      return (
+        (a.lastName || '').localeCompare(b.lastName || '', 'fr') ||
+        (a.firstName || '').localeCompare(b.firstName || '', 'fr')
+      );
     });
 
     return result;
@@ -283,46 +319,6 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
                 📤 Importer Fichier (Excel / CSV)
               </button>
             </>
-          )}
-
-          <button
-            type="button"
-            className="fbtn"
-            style={{
-              margin: 0,
-              background: 'var(--cell, #f1f5f9)',
-              color: 'var(--tx, #0f172a)',
-              border: '1px solid var(--bd, #cbd5e1)',
-              fontWeight: 700,
-              fontSize: '0.76rem',
-              padding: '8px 12px',
-              borderRadius: '6px',
-            }}
-            onClick={downloadClientExcelTemplate}
-            title="Télécharger le modèle Excel type pré-formaté"
-          >
-            📥 Modèle Excel Vierge
-          </button>
-
-          {clients.length > 0 && (
-            <button
-              type="button"
-              className="fbtn"
-              style={{
-                margin: 0,
-                background: 'var(--cell, #f1f5f9)',
-                color: 'var(--tx, #0f172a)',
-                border: '1px solid var(--bd, #cbd5e1)',
-                fontWeight: 700,
-                fontSize: '0.76rem',
-                padding: '8px 12px',
-                borderRadius: '6px',
-              }}
-              onClick={() => exportClientsToCsv(filteredClients)}
-              title="Exporter la liste filtrée au format CSV pour Excel ou publipostage"
-            >
-              📊 Exporter CSV ({filteredClients.length})
-            </button>
           )}
         </div>
       </div>
@@ -470,107 +466,176 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
         style={{
           marginBottom: '16px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '12px',
+          flexDirection: 'column',
+          gap: '10px',
           background: 'var(--card, #fff)',
           padding: '12px 16px',
           borderRadius: '8px',
           border: '1px solid var(--bd, #e2e8f0)',
         }}
       >
-        {/* Champ de recherche */}
-        <div style={{ flex: '1 1 260px', position: 'relative' }}>
-          <input
-            type="text"
-            placeholder="🔍 Rechercher par nom, prénom, téléphone, ville, tag..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 12px 8px 32px',
-              fontSize: '0.82rem',
-              borderRadius: '6px',
-              border: '1px solid var(--bd, #cbd5e1)',
-              background: 'var(--cell, #f8fafc)',
-            }}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          {/* Champ de recherche */}
+          <div style={{ flex: '1 1 260px', minWidth: '200px', position: 'relative' }}>
+            <span
+              aria-hidden="true"
               style={{
                 position: 'absolute',
-                right: '10px',
+                left: '10px',
                 top: '50%',
                 transform: 'translateY(-50%)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: '#94a3b8',
-                fontWeight: 800,
+                fontSize: '0.82rem',
+                pointerEvents: 'none',
+                opacity: 0.7,
               }}
             >
-              ✕
+              🔍
+            </span>
+            <input
+              type="text"
+              placeholder="Rechercher par prénom, nom, téléphone, ville, CP, tag..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '8px 32px 8px 32px',
+                fontSize: '0.82rem',
+                borderRadius: '6px',
+                border: '1px solid var(--bd, #cbd5e1)',
+                background: 'var(--cell, #f8fafc)',
+                color: 'var(--tx, #0f172a)',
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                aria-label="Effacer la recherche"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontWeight: 800,
+                  padding: '2px 4px',
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Filtres secondaires */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              value={selectedLevel}
+              onChange={e => setSelectedLevel(e.target.value)}
+              style={{
+                padding: '7px 10px',
+                fontSize: '0.78rem',
+                borderRadius: '6px',
+                border: '1px solid var(--bd, #cbd5e1)',
+                background: 'var(--cell, #fff)',
+                color: 'var(--tx, #0f172a)',
+              }}
+            >
+              <option value="all">Tous les niveaux</option>
+              <option value="debutant">Débutant</option>
+              <option value="initie">Initié</option>
+              <option value="perfectionnement">Perfectionnement</option>
+              <option value="autonome">Autonome</option>
+            </select>
+
+            <select
+              value={selectedGear}
+              onChange={e => setSelectedGear(e.target.value)}
+              style={{
+                padding: '7px 10px',
+                fontSize: '0.78rem',
+                borderRadius: '6px',
+                border: '1px solid var(--bd, #cbd5e1)',
+                background: 'var(--cell, #fff)',
+                color: 'var(--tx, #0f172a)',
+              }}
+            >
+              <option value="all">Tous les matériels</option>
+              <option value="monoplace">Monoplace</option>
+              <option value="biplace">Biplace</option>
+              <option value="standart">Standard</option>
+              <option value="promo">Promo</option>
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as any)}
+              style={{
+                padding: '7px 10px',
+                fontSize: '0.78rem',
+                borderRadius: '6px',
+                border: '1px solid var(--bd, #cbd5e1)',
+                background: 'var(--cell, #fff)',
+                color: 'var(--tx, #0f172a)',
+              }}
+            >
+              <option value="name">Tri : Nom (A-Z)</option>
+              <option value="sessions">Tri : Nb Séances</option>
+              <option value="recent">Tri : Modifié récent</option>
+            </select>
+          </div>
+        </div>
+
+        {hasActiveFilters && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              paddingTop: '8px',
+              borderTop: '1px dashed var(--bd, #e2e8f0)',
+              fontSize: '0.75rem',
+              color: 'var(--mu, #64748b)',
+            }}
+          >
+            <span>
+              <strong>{filteredClients.length}</strong> fiche{filteredClients.length > 1 ? 's' : ''} affichée{filteredClients.length > 1 ? 's' : ''} sur <strong>{clients.length}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedLevel('all');
+                setSelectedGear('all');
+              }}
+              style={{
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                borderRadius: '6px',
+                padding: '3px 9px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                color: '#334155',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Réinitialiser les filtres
             </button>
-          )}
-        </div>
-
-        {/* Filtres secondaires */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            value={selectedLevel}
-            onChange={e => setSelectedLevel(e.target.value)}
-            style={{
-              padding: '7px 10px',
-              fontSize: '0.78rem',
-              borderRadius: '6px',
-              border: '1px solid var(--bd, #cbd5e1)',
-              background: 'var(--cell, #fff)',
-            }}
-          >
-            <option value="all">Tous les niveaux</option>
-            <option value="debutant">Débutant</option>
-            <option value="initie">Initié</option>
-            <option value="perfectionnement">Perfectionnement</option>
-            <option value="autonome">Autonome</option>
-          </select>
-
-          <select
-            value={selectedGear}
-            onChange={e => setSelectedGear(e.target.value)}
-            style={{
-              padding: '7px 10px',
-              fontSize: '0.78rem',
-              borderRadius: '6px',
-              border: '1px solid var(--bd, #cbd5e1)',
-              background: 'var(--cell, #fff)',
-            }}
-          >
-            <option value="all">Tous les matériels</option>
-            <option value="monoplace">Monoplace</option>
-            <option value="biplace">Biplace</option>
-            <option value="standart">Standart</option>
-            <option value="promo">Promo</option>
-          </select>
-
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value as any)}
-            style={{
-              padding: '7px 10px',
-              fontSize: '0.78rem',
-              borderRadius: '6px',
-              border: '1px solid var(--bd, #cbd5e1)',
-              background: 'var(--cell, #fff)',
-            }}
-          >
-            <option value="name">Tri : Nom (A-Z)</option>
-            <option value="sessions">Tri : Nb Séances</option>
-            <option value="recent">Tri : Modifié récent</option>
-          </select>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Liste des Fiches Clients */}
@@ -596,7 +661,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
           <p style={{ margin: '0 0 16px', fontSize: '0.82rem', color: 'var(--mu, #64748b)' }}>
             {clients.length === 0
               ? 'Créez votre première fiche client ou importez votre fichier de contacts pour commencer.'
-              : `Aucun contact ne correspond à votre recherche "${searchQuery}".`}
+              : searchQuery.trim()
+              ? `Aucun contact ne correspond à "${searchQuery.trim()}" avec les filtres sélectionnés.`
+              : 'Aucun contact ne correspond aux filtres sélectionnés.'}
           </p>
           {clients.length === 0 ? (
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>

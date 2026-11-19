@@ -17,7 +17,6 @@ import { SyncStatusBar } from './components/SyncStatusBar';
 import { AppLockScreen } from './components/AppLockScreen';
 import { UserManagementModal } from './components/UserManagementModal';
 import { TeamExchangeModal } from './components/TeamExchangeModal';
-import { ValidatedSlotsExportCard } from './components/ValidatedSlotsExportCard';
 import { ExpressRexModal } from './components/ExpressRexModal';
 import { getSlotWeatherRexDefaults } from './utils/slotWeatherRex';
 import {
@@ -63,7 +62,7 @@ import {
   ValidationsMap,
   WindPoint,
 } from './types';
-import { getActiveUser, clearActiveUser } from './utils/authUtils';
+import { getActiveUser, clearActiveUser, canAccessNotesAndHypotheses } from './utils/authUtils';
 import {
   build,
   dayFocus,
@@ -304,6 +303,13 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<ActiveUserSession | null>(() => getActiveUser());
   const isReadOnly = Boolean(currentUser?.isReadOnly);
   const isAdminLocked = isReadOnly || currentUser?.role === 'moniteur';
+  const canAccessHypothesesTab = canAccessNotesAndHypotheses(currentUser);
+
+  useEffect(() => {
+    if (activeTab === 6 && !canAccessHypothesesTab) {
+      setActiveTab(2);
+    }
+  }, [activeTab, canAccessHypothesesTab]);
 
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
@@ -758,6 +764,7 @@ export const App: React.FC = () => {
   );
 
   const handleTabChange = (tab: number) => {
+    if (tab === 6 && !canAccessHypothesesTab) return;
     setActiveTab(tab);
   };
 
@@ -2541,6 +2548,12 @@ export const App: React.FC = () => {
           notifySync(`⛔ Annulé météo (Vie 2) : ${payload.reason}`);
         }
       } else if (payload.type === 'reset_to_cycle1') {
+        if (ds < tdy()) {
+          notifySync(
+            '🔒 Date passée : impossible de revenir en Cycle 1 (utilisez la fiche REX pour corriger une séance passée).'
+          );
+          return;
+        }
         const existingSlotObs = findObservationForSlot(
           ds,
           baseItem.k,
@@ -2752,13 +2765,15 @@ export const App: React.FC = () => {
           >
             📅 Validation des créneaux de roulage
           </button>
-          <button
-            type="button"
-            className={activeTab === 6 ? 'on' : ''}
-            onClick={() => handleTabChange(6)}
-          >
-            💡 Hypothèses &amp; Notes
-          </button>
+          {canAccessHypothesesTab && (
+            <button
+              type="button"
+              className={activeTab === 6 ? 'on' : ''}
+              onClick={() => handleTabChange(6)}
+            >
+              💡 Hypothèses &amp; Notes
+            </button>
+          )}
           <button
             type="button"
             className={activeTab === 5 ? 'on' : ''}
@@ -2828,13 +2843,6 @@ export const App: React.FC = () => {
               isReadOnly={isAdminLocked}
             />
 
-            <ValidatedSlotsExportCard
-              year={year}
-              month={month}
-              validations={validations}
-              bookingsMap={bookingsMap}
-            />
-
             <TableView
               year={year}
               month={month}
@@ -2873,60 +2881,62 @@ export const App: React.FC = () => {
               userName={currentUser?.displayName || currentUser?.username || 'Jérôme'}
             />
 
-            {/* Lien d'accès direct vers l'onglet Hypothèses & Notes */}
-            <div
-              className="card nop"
-              style={{
-                marginTop: '14px',
-                background: 'var(--card)',
-                border: '1.5px dashed var(--bd)',
-                borderRadius: '12px',
-                padding: '14px 18px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '1.5rem' }}>💡</span>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--tx)' }}>
-                    Réglages validés et hypothèses du moniteur &amp; notes de calcul
-                  </div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
-                    Règles d&apos;enchaînement, pauses, surcote barométrique détaillée et explications techniques.
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                className="fbtn"
-                onClick={() => {
-                  handleTabChange(6);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+            {/* Lien d'accès direct vers l'onglet Hypothèses & Notes (réservé à Jérôme et Benoît) */}
+            {canAccessHypothesesTab && (
+              <div
+                className="card nop"
                 style={{
-                  margin: 0,
-                  padding: '8px 16px',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  borderRadius: '8px',
-                  background: 'var(--cell, #f1f5f9)',
-                  color: 'var(--tx, #111)',
-                  border: '1.5px solid var(--bd, #cbd5e1)',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
+                  marginTop: '14px',
+                  background: 'var(--card)',
+                  border: '1.5px dashed var(--bd)',
+                  borderRadius: '12px',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: '8px',
+                  flexWrap: 'wrap',
+                  gap: '12px',
                 }}
               >
-                <span>Consulter les Hypothèses &amp; Notes</span>
-                <span style={{ fontSize: '0.95rem' }}>➔</span>
-              </button>
-            </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '1.5rem' }}>💡</span>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--tx)' }}>
+                      Réglages validés et hypothèses du moniteur &amp; notes de calcul
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
+                      Règles d&apos;enchaînement, pauses, surcote barométrique détaillée et explications techniques.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="fbtn"
+                  onClick={() => {
+                    handleTabChange(6);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  style={{
+                    margin: 0,
+                    padding: '8px 16px',
+                    fontSize: '0.8rem',
+                    fontWeight: 800,
+                    borderRadius: '8px',
+                    background: 'var(--cell, #f1f5f9)',
+                    color: 'var(--tx, #111)',
+                    border: '1.5px solid var(--bd, #cbd5e1)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <span>Consulter les Hypothèses &amp; Notes</span>
+                  <span style={{ fontSize: '0.95rem' }}>➔</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -2972,8 +2982,10 @@ export const App: React.FC = () => {
               EX={EX}
               windList={windList}
               validations={validations}
+              bookingsMap={bookingsMap}
               customSlotsMap={customSlotsMap}
               selectedDate={selectedDate}
+              currentUserName={currentUser?.username}
               isReadOnly={isAdminLocked}
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
               onReclassifyValidationReason={handleReclassifyAbsentValidations}
@@ -3003,8 +3015,8 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 6: Réglages validés, Hypothèses & Notes */}
-        {activeTab === 6 && (
+        {/* Tab 6: Réglages validés, Hypothèses & Notes (strictement réservé à Jérôme et Benoît) */}
+        {activeTab === 6 && canAccessHypothesesTab && (
           <div id="tab6">
             <div
               className="card nop"
@@ -3111,7 +3123,6 @@ export const App: React.FC = () => {
             )}
 
             <NotesAndHypotheses
-              onLock={handleLock}
               validations={validations}
               bookingsMap={bookingsMap}
               customSlotsMap={customSlotsMap}

@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db, ensureAuth } from '../firebase';
 import { APP_VERSION_INFO } from '../version';
 import {
   AgendaBookingItem,
@@ -31,7 +29,6 @@ import { DataAuditReconciliationModal } from './DataAuditReconciliationModal';
 import { TECH_NOTE_QCMS, TechNoteQcmDefinition } from '../data/techNoteQcms';
 
 interface NotesAndHypothesesProps {
-  onLock?: () => void;
   validations?: ValidationsMap;
   bookingsMap?: Record<string, AgendaBookingItem[]>;
   customSlotsMap?: CustomSlotsMap;
@@ -84,7 +81,6 @@ const resolveDocUrl = (url: string): string => {
 };
 
 export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
-  onLock,
   validations = {},
   bookingsMap = {},
   customSlotsMap = {},
@@ -94,10 +90,6 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
   onSaveDayValidation,
   onAddCustomNonPublishReason,
 }) => {
-  const [customPassword, setCustomPassword] = useState('');
-  const [currentCloudPassword, setCurrentCloudPassword] = useState<string | null>(null);
-  const [isSavingPwd, setIsSavingPwd] = useState(false);
-  const [pwdStatus, setPwdStatus] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -136,30 +128,6 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
   const [resolutionNote, setResolutionNote] = useState<string>('');
   const [isSubmittingResolution, setIsSubmittingResolution] = useState<boolean>(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
-
-  // Charger le mot de passe cloud actif
-  useEffect(() => {
-    let isMounted = true;
-    const loadCurrentPwd = async () => {
-      try {
-        await ensureAuth();
-        const docRef = doc(db, 'app_config', 'security');
-        const snap = await getDoc(docRef);
-        if (snap.exists() && isMounted) {
-          const data = snap.data();
-          if (data?.schoolPassword || data?.clubPassword) {
-            setCurrentCloudPassword(data.schoolPassword || data.clubPassword);
-          }
-        }
-      } catch {
-        // ignore
-      }
-    };
-    loadCurrentPwd();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   // Écoute temps réel Firestore du statut des notes traitées
   useEffect(() => {
@@ -240,30 +208,6 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [viewingNote, activeQcmDef, isSavingQcm, resolvingNote, isSubmittingResolution, isAuditModalOpen]);
-
-  const handleSavePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customPassword.trim()) return;
-    setIsSavingPwd(true);
-    setPwdStatus('');
-    try {
-      await ensureAuth();
-      const newPwd = customPassword.trim().toLowerCase();
-      const docRef = doc(db, 'app_config', 'security');
-      await setDoc(docRef, {
-        schoolPassword: newPwd,
-        clubPassword: newPwd,
-        updatedAt: Date.now(),
-      });
-      setCurrentCloudPassword(newPwd);
-      setPwdStatus('✓ Nouveau mot de passe enregistré et synchronisé pour Benoît et Jérôme !');
-      setCustomPassword('');
-    } catch {
-      setPwdStatus('Erreur lors de l’enregistrement du mot de passe dans le cloud.');
-    } finally {
-      setIsSavingPwd(false);
-    }
-  };
 
   // Les Notes Techniques et Documents Structurés par Thème
   const notesList = useMemo<TechNoteItem[]>(() => {
@@ -542,22 +486,22 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         categoryLabel: 'Réservation',
         categoryColor: '#8b5cf6',
         icon: '🛒',
-        title: 'Note Stratégique : Choix du Gestionnaire de Réservation',
-        subtitle: 'Remplacement de Booking Activities & Architecture des « Deux Ponts »',
+        title: 'Note Stratégique : Choix de l’Outil de Réservation & Retour d’Essai anny.co',
+        subtitle: 'Remplacement de Booking Activities, Deux Ponts, vigilance synchro & piste anny.co en Plan B',
         summary:
-          'Notre application reste le cerveau métier exclusif (calcul des marées glissantes, règle de 50, AROME, inscriptions numériques). L’outil de vente externe assure la billetterie, le paiement sécurisé et l’automatisation future des SMS.',
+          'Cahier des charges à jour : « Ça roule ? » reste le cerveau métier (marées glissantes, Cycle 1 / Cycle 2, 12 chars/moniteur, 2e moniteur été). La note détaille les 3 niveaux d’intégration possibles, la vigilance sur la communication bidirectionnelle, le retour d’essai d’anny.co (API/sur-mesure, gardé en Plan B) et la grille de critères pour les démos prestataires.',
         keyPoints: [
-          'Pont 1 (Amont) : Publication automatique des bons créneaux calculés (Cycle 1) dans l’agenda de vente.',
-          'Pont 2 (Aval) : Rapatriement automatique des inscrits pour déclencher le Cycle 2 et pré-remplir les séances en numérique.',
-          'Comparatif 4 solutions : Activiti.fr (spécialiste voile/marées), RésaMinute, Billetweb (0 € abonnement), Regiondo.',
-          'Question clé : Choix entre forfait fixe sans commission (Activiti) ou commission à la vente (Billetweb).',
+          'Deux Ponts & 3 niveaux : de l’ouverture simple au couplage API/Webhooks (Pont 1 offre C1 → Pont 2 inscrits C2) + paiement/SMS délégués.',
+          'Retour d’essai anny.co (Plan B) : points forts API + sur-mesure + WordPress, mais vigilance sur la fiabilité/maintenance de la communication entre les 2 outils.',
+          'Grille de critères démo : horaires glissants quotidiens, flotte mono/bi (12/24 chars), annulation/report météo 1 clic, résa téléphone, ANCV et coût sur 12 mois.',
+          'Comparatif & arbitrages Jérôme : Activiti (métier nautisme), anny.co (Plan B), Yoplanning/RésaMinute, Billetweb, Regiondo/Elloha.',
         ],
         docUrl: '/note_reservation_deux_ponts.html',
-        docBtnLabel: '📄 Ouvrir la Note Réservation (A4 / Word)',
+        docBtnLabel: '📄 Ouvrir la Note Réservation à jour (A4 / Word)',
         statusBadge: {
-          label: 'Cahier des charges prêt',
-          bg: '#e0e7ff',
-          color: '#3730a3',
+          label: 'Mise à jour · Plan B anny.co',
+          bg: '#ede9fe',
+          color: '#5b21b6',
         },
       },
       {
@@ -842,136 +786,6 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
   return (
     <div style={{ maxWidth: '1240px', margin: '0 auto', paddingBottom: '60px' }}>
       {/* 1. ZONE EN ÉCRITURE : MOT DE PASSE & CONTRÔLE D'ACCÈS CLOUD (CONSERVÉE 100%) */}
-      <div
-        className="card nop"
-        style={{
-          marginBottom: '20px',
-          background: '#ffffff',
-          borderRadius: '14px',
-          border: '1.5px solid #0284c7',
-          padding: '18px 20px',
-          boxShadow: '0 4px 16px rgba(2, 132, 199, 0.08)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-          <div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase' }}>
-              <span>🔒</span> Sécurité de l'application & Accès Cloud
-            </div>
-            <h3 style={{ margin: '6px 0 2px', fontSize: '1.20rem', fontWeight: 900, color: '#0f172a' }}>
-              Mot de Passe & Protection des Données École
-            </h3>
-            <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
-              Gestion de l'accès sécurisé à l'application et synchronisation immédiate du mot de passe entre Benoît et Jérôme.
-            </p>
-          </div>
-
-          {onLock && (
-            <button
-              type="button"
-              className="fbtn"
-              onClick={onLock}
-              style={{
-                margin: 0,
-                background: '#fef2f2',
-                border: '1.5px solid #fecaca',
-                color: '#b91c1c',
-                fontWeight: 800,
-                padding: '8px 14px',
-                borderRadius: '8px',
-                fontSize: '0.76rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              title="Tester le verrouillage immédiat de l'écran"
-            >
-              <span>🔒</span>
-              <span>Verrouiller maintenant</span>
-            </button>
-          )}
-        </div>
-
-        <div style={{ marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-          {/* Colonne gauche : Fonctionnement et mots de passe reconnus */}
-          <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '0.76rem', color: '#334155', lineHeight: 1.5 }}>
-            <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
-              🛡️ Comment fonctionne la protection ?
-            </div>
-            <div>
-              • <strong>Toute personne extérieure</strong> qui ouvre l'adresse tombe sur un écran de verrouillage strict, sans affichage des plannings ni des clients, avec un lien de redirection vers le site public.
-            </div>
-            <div style={{ marginTop: '4px' }}>
-              • <strong>Mots de passe reconnus par défaut :</strong>{' '}
-              <code style={{ background: '#e2e8f0', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0f172a' }}>
-                lestrevet
-              </code>{' '}
-              ou{' '}
-              <code style={{ background: '#e2e8f0', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0f172a' }}>
-                boutdumonde
-              </code>
-            </div>
-            {currentCloudPassword && (
-              <div style={{ marginTop: '4px', color: '#0369a1' }}>
-                • <strong>Mot de passe personnalisé actif :</strong>{' '}
-                <code style={{ background: '#bae6fd', padding: '2px 5px', borderRadius: '4px', fontWeight: 800, color: '#0369a1' }}>
-                  {currentCloudPassword}
-                </code>
-              </div>
-            )}
-            <div style={{ marginTop: '4px', color: '#64748b', fontSize: '0.72rem' }}>
-              • La case <i>« Mémoriser cet appareil »</i> vous évite de retaper le mot de passe à chaque ouverture sur vos téléphones ou ordinateurs personnels.
-            </div>
-          </div>
-
-          {/* Colonne droite : Formulaire pour définir un nouveau mot de passe */}
-          <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.76rem', marginBottom: '6px' }}>
-              ✏️ Définir ou modifier le mot de passe partagé
-            </div>
-            <form onSubmit={handleSavePassword} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Nouveau mot de passe..."
-                value={customPassword}
-                onChange={e => setCustomPassword(e.target.value)}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  border: '1.5px solid #cbd5e1',
-                  fontSize: '0.82rem',
-                  outline: 'none',
-                  background: '#fff',
-                }}
-              />
-              <button
-                type="submit"
-                disabled={isSavingPwd || !customPassword.trim()}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: customPassword.trim() ? '#0284c7' : '#94a3b8',
-                  color: '#ffffff',
-                  fontSize: '0.76rem',
-                  fontWeight: 800,
-                  cursor: customPassword.trim() ? 'pointer' : 'not-allowed',
-                }}
-              >
-                {isSavingPwd ? 'Enregistrement dans le Cloud…' : 'Enregistrer le nouveau mot de passe'}
-              </button>
-            </form>
-
-            {pwdStatus && (
-              <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#166534', fontWeight: 800 }}>
-                {pwdStatus}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* 2. HUB DES NOTES TECHNIQUES & SUPPORTS PAR THÈME */}
       <div style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>

@@ -1,5 +1,5 @@
 import { AppSettings, CancellationReason, CustomSlotsMap, MAX_CHARS_PER_INSTRUCTOR, SessionItem, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
-import { dayFocus, win } from './tides';
+import { dayFocus, tdy, win } from './tides';
 import {
   getObservationChars,
   getSlotMaxCapacity,
@@ -222,6 +222,9 @@ export interface PeriodStatsResult {
   periodLabel: string;
   startDateStr: string;
   endDateStr: string;
+  effectiveEndDateStr: string;
+  isCappedToToday: boolean;
+  isFuturePeriod: boolean;
   totalDays: number;
   totalPossibleSlots: number;
   theoreticalCalculatedSlots: number;
@@ -275,18 +278,25 @@ export interface AbsentSlotRef {
 
 export interface CalibrationStatsResult {
   totalLogged: number;
+  waterDeltaCount: number;
+  timeDeltaCount: number;
   avgWaterDeltaCm: number;
   avgTimeDeltaMin: number;
   // Corrélation selon la pression atmosphérique
   pressureCorrelation: {
     lowPressureAvgDeltaCm: number; // < 1005 hPa
+    lowPressureCount: number;
     midPressureAvgDeltaCm: number; // 1005 - 1015 hPa
+    midPressureCount: number;
     highPressureAvgDeltaCm: number; // > 1015 hPa
+    highPressureCount: number;
   };
   // Corrélation selon le secteur de vent (Ouest = mer, Est = terre)
   windDirCorrelation: {
     westSectorAvgDeltaCm: number; // O, SO, ONO, NO
+    westSectorCount: number;
     eastSectorAvgDeltaCm: number; // E, NE, SE
+    eastSectorCount: number;
   };
   suggestedThresholdM: number; // Seuil théorique ajusté
 }
@@ -302,9 +312,15 @@ export function computePeriodStats(
   observations: SlotObservation[],
   filterScope: 'all' | 'holidays_only' | 'weekends_only' = 'all'
 ): PeriodStatsResult {
+  // Borner strictement le calcul au passé (dates <= aujourd'hui) pour ne pas fausser les taux avec le futur
+  const todayStr = tdy();
+  const isFuturePeriod = startDateStr > todayStr;
+  const isCappedToToday = !isFuturePeriod && endDateStr > todayStr;
+  const effectiveEndDateStr = endDateStr > todayStr ? todayStr : endDateStr;
+
   // Parsing des dates
   const startD = new Date(`${startDateStr}T00:00:00`);
-  const endD = new Date(`${endDateStr}T23:59:59`);
+  const endD = new Date(`${effectiveEndDateStr}T23:59:59`);
 
   let totalDays = 0;
   let totalPossibleSlots = 0;
@@ -358,7 +374,9 @@ export function computePeriodStats(
     other: 0,
   };
 
-  const effThreshold = settings.L - (settings.mg || 0) / 100;
+  const isRealMode = settings.calculationMode === 'reel';
+  const empiricalOffsetM = isRealMode ? (settings.empiricalOffsetCm ?? 15) / 100 : 0;
+  const effThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
   const tideW = win(EX, effThreshold);
   const first = EX[0]?.t ?? 0;
   const last = EX[EX.length - 1]?.t ?? 0;
@@ -384,11 +402,8 @@ export function computePeriodStats(
 
     totalDays++;
 
-    // 1. Séances possibles (théoriques par calcul de marée & lumière + personnalisées)
-    const possibleFromCalc = focusData.list.filter((s: SessionItem) => s.txt !== 'n/a').length;
-    const customConfig = customSlotsMap[ds];
-    const customCount = customConfig?.slots?.length || 0;
-    const dayPossible = customConfig?.replaceDefault ? customCount : possibleFromCalc + customCount;
+    // 1. Séances possibles (théoriques par calcul de marée & lumière + personnalisées déjà incluses dans focusData.list)
+    const dayPossible = focusData.list.filter((s: SessionItem) => s.txt !== 'n/a').length;
     theoreticalCalculatedSlots += dayPossible;
     let dayExcluded = 0;
 
@@ -442,24 +457,23 @@ export function computePeriodStats(
           return;
         }
 
-        // Si créneau publié en Cycle 1 mais sans aucune inscription et non encore clôturé/réalisé
+        // Si créneau publié / confirmé / décalé mais pas encore clôturé en Réalisée ni Annulée :
+        // ne pas le compter prématurément dans les séances réalisées (notamment pour les dates futures).
         const itemCharsInfo = getValidationItemChars(item);
-        const isAwaitingCycle1Only =
-          item.cycle1Status === 'published' &&
-          item.cycle2Status === 'awaiting_booking' &&
-          itemCharsInfo.totalChars === 0 &&
-          !matchedObs;
+        const isLegacyPastValid =
+          !item.cycle1Status && !item.cycle2Status && item.status === 'valid' && ds < todayStr;
+        const isExplicitlyRealized =
+          matchedObs?.status === 'realized' ||
+          (item.status === 'valid' &&
+            matchedObs?.status !== 'cancelled' &&
+            (item.cycle2Status === 'realized' || isLegacyPastValid));
 
-        if (isAwaitingCycle1Only) {
-          cycle1PublishedCount++;
+        if (item.cycle2Status === 'merged' && !matchedObs) {
+          // Créneau fusionné dans un autre : ses chars sont déjà portés par la séance cible
           return;
         }
 
-        if (item.status === 'valid' && matchedObs?.status !== 'cancelled') {
-          if (item.cycle2Status === 'merged') {
-            // Créneau fusionné dans un autre : ses chars sont déjà portés par la séance cible
-            return;
-          }
+        if (isExplicitlyRealized) {
           totalRealizedSlots++;
           const slotParticipants = matchedObs?.participantsCount ?? item.pilotsCount ?? 0;
           if (slotParticipants) {
@@ -475,6 +489,9 @@ export function computePeriodStats(
           const slotChars = obsChars > 0 ? obsChars : itemCharsInfo.totalChars;
           totalRealizedChars += slotChars;
           totalRealizedCapacity += getSlotMaxCapacity(item);
+        } else if (item.status === 'valid' && matchedObs?.status !== 'cancelled') {
+          cycle1PublishedCount++;
+          return;
         } else if (item.status === 'rejected' || matchedObs?.status === 'cancelled') {
           totalCancelledSlots++;
           // Recherche motif
@@ -514,6 +531,23 @@ export function computePeriodStats(
               currentReason: rawReason,
               observationId: matchedObs?.id,
             });
+            const booked =
+              matchedObs?.bookedParticipantsCount ??
+              (item.cycle2Status === 'cancelled_weather' ? item.pilotsCount ?? 0 : 0);
+            if (
+              booked > 0 ||
+              (matchedObs?.rescheduledCount ?? 0) > 0 ||
+              (matchedObs?.lostCount ?? 0) > 0
+            ) {
+              const resched = matchedObs?.rescheduledCount ?? item.rescheduledChars ?? 0;
+              const lost =
+                matchedObs?.lostCount != null
+                  ? matchedObs.lostCount
+                  : item.lostChars ?? Math.max(0, booked - resched);
+              totalCancelledParticipants += booked;
+              totalRescheduledParticipants += resched;
+              totalLostParticipants += lost;
+            }
           } else {
             weatherCancelledSlotsCount++;
             const booked = matchedObs?.bookedParticipantsCount ?? item.pilotsCount ?? 0;
@@ -559,6 +593,14 @@ export function computePeriodStats(
             currentReason: rawReason,
             observationId: obs.id,
           });
+          const booked = obs.bookedParticipantsCount || 0;
+          if (booked > 0 || (obs.rescheduledCount ?? 0) > 0 || (obs.lostCount ?? 0) > 0) {
+            const resched = obs.rescheduledCount || 0;
+            const lost = obs.lostCount != null ? obs.lostCount : Math.max(0, booked - resched);
+            totalCancelledParticipants += booked;
+            totalRescheduledParticipants += resched;
+            totalLostParticipants += lost;
+          }
         } else {
           weatherCancelledSlotsCount++;
           const booked = obs.bookedParticipantsCount || 0;
@@ -637,9 +679,12 @@ export function computePeriodStats(
     .sort((a, b) => b.count - a.count);
 
   return {
-    periodLabel: `${startDateStr} au ${endDateStr}`,
+    periodLabel: `${startDateStr} au ${effectiveEndDateStr}`,
     startDateStr,
     endDateStr,
+    effectiveEndDateStr,
+    isCappedToToday,
+    isFuturePeriod,
     totalDays,
     totalPossibleSlots: effectivePossibleSlots,
     theoreticalCalculatedSlots,
@@ -683,16 +728,23 @@ export function computeCalibrationStats(
   if (validObservations.length === 0) {
     return {
       totalLogged: 0,
+      waterDeltaCount: 0,
+      timeDeltaCount: 0,
       avgWaterDeltaCm: 0,
       avgTimeDeltaMin: 0,
       pressureCorrelation: {
         lowPressureAvgDeltaCm: 0,
+        lowPressureCount: 0,
         midPressureAvgDeltaCm: 0,
+        midPressureCount: 0,
         highPressureAvgDeltaCm: 0,
+        highPressureCount: 0,
       },
       windDirCorrelation: {
         westSectorAvgDeltaCm: 0,
+        westSectorCount: 0,
         eastSectorAvgDeltaCm: 0,
+        eastSectorCount: 0,
       },
       suggestedThresholdM: nominalThresholdM,
     };
@@ -764,16 +816,23 @@ export function computeCalibrationStats(
 
   return {
     totalLogged: validObservations.length,
+    waterDeltaCount,
+    timeDeltaCount,
     avgWaterDeltaCm,
     avgTimeDeltaMin,
     pressureCorrelation: {
       lowPressureAvgDeltaCm: lowPCount > 0 ? Math.round((lowPDeltaSum / lowPCount) * 10) / 10 : 0,
+      lowPressureCount: lowPCount,
       midPressureAvgDeltaCm: midPCount > 0 ? Math.round((midPDeltaSum / midPCount) * 10) / 10 : 0,
+      midPressureCount: midPCount,
       highPressureAvgDeltaCm: highPCount > 0 ? Math.round((highPDeltaSum / highPCount) * 10) / 10 : 0,
+      highPressureCount: highPCount,
     },
     windDirCorrelation: {
       westSectorAvgDeltaCm: westCount > 0 ? Math.round((westDeltaSum / westCount) * 10) / 10 : 0,
+      westSectorCount: westCount,
       eastSectorAvgDeltaCm: eastCount > 0 ? Math.round((eastDeltaSum / eastCount) * 10) / 10 : 0,
+      eastSectorCount: eastCount,
     },
     suggestedThresholdM,
   };

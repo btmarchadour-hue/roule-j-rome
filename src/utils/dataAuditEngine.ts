@@ -446,6 +446,9 @@ export const buildDataAuditReport = ({
                 (obs.cancellationNote || '').toLowerCase().includes('non pertinent'));
             const obsReasonLabel = formatObsReasonFr(obs.cancellationReason);
 
+            const hasBookedClientsForCancel =
+              bookingSummary.totalChars > 0 || (obs.bookedParticipantsCount ?? 0) > 0;
+
             if (c1 === 'excluded' && !obsIsHorsOffre && obs.cancellationReason !== 'other') {
               issues.push({
                 code: 'reason_mismatch_excluded',
@@ -467,7 +470,10 @@ export const buildDataAuditReport = ({
                 label: 'Motif REX différent d’une fermeture école (Cycle 1)',
                 detail: `Le planning indique « À ne pas publier » (motif perso/école), mais le REX indique « ${obsReasonLabel} ». Aligne la vraie cause.`,
               });
-            } else if (c2 === 'cancelled_weather' && (obsIsNoClients || obsIsInstructor || obsIsHorsOffre)) {
+            } else if (
+              c2 === 'cancelled_weather' &&
+              (obsIsNoClients || (obsIsInstructor && !hasBookedClientsForCancel) || obsIsHorsOffre)
+            ) {
               if (isLegacyGenericRejection) {
                 issues.push({
                   code: 'legacy_rejection_to_align_with_rex',
@@ -649,7 +655,10 @@ export const buildDataAuditReport = ({
         ) {
           summaryStatusLabel = `⛔ Ancien refus / fermeture (« ${valItem.rejectReason || 'sans motif'} » — à classer)`;
         } else if (c2 === 'cancelled_weather') {
-          summaryStatusLabel = `⛔ Annulée · Météo / Plage (${valItem.rejectReason || 'météo'})`;
+          summaryStatusLabel =
+            obs?.cancellationReason === 'instructor'
+              ? `⛔ Annulée · Indisponibilité moniteur (${obs.cancellationNote || valItem.rejectReason || 'moniteur'})`
+              : `⛔ Annulée · Météo / Plage (${valItem.rejectReason || 'météo'})`;
         } else if (c2 === 'merged') {
           summaryStatusLabel = `🔗 Regroupé → ${valItem.mergedLabel || valItem.mergedIntoKey || ''}`;
         } else if (c2 === 'shifted') {

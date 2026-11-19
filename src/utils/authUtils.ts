@@ -125,3 +125,14 @@ export function canCurrentUserEditSettings(): boolean {
   const current = getActiveUser();
   return current?.role === 'admin' && !current?.isReadOnly;
 }
+
+export function canAccessNotesAndHypotheses(session: ActiveUserSession | null): boolean {
+  if (!session || session.isReadOnly) return false;
+  if (session.id === 'usr_jerome' || session.id === 'usr_benoit') return true;
+  const norm = (session.username || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return session.role === 'admin' && (norm === 'jerome' || norm === 'benoit');
+}

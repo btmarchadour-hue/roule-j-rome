@@ -3,171 +3,340 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Note Stratégique · Choix Gestionnaire de Réservation & Architecture Deux Ponts</title>
+  <title>Note Stratégique · Outil de Réservation, Deux Ponts & Retour d’essai anny.co</title>
   <style>
-    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
+    @page { size: A4 portrait; margin: 11mm 13mm 11mm 13mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.45; font-size: 11px;
+      margin: 0; padding: 0; background: #f1f5f9; color: #0f172a; line-height: 1.42; font-size: 10.5px;
     }
     .toolbar {
       position: sticky; top: 0; background: #0f172a; color: #fff; padding: 10px 20px;
-      display: flex; justify-content: space-between; align-items: center; z-index: 1000;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; z-index: 1000;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .btn {
       background: #0284c7; color: #fff; border: none; padding: 7px 14px; border-radius: 6px;
       font-weight: 800; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
     }
+    .btn:hover { opacity: 0.92; }
     .btn-secondary { background: #334155; }
+    .copy-feedback {
+      font-size: 11px; font-weight: 800; color: #86efac; display: none;
+    }
     .sheet {
-      background: #ffffff; width: 210mm; min-height: 297mm; margin: 15px auto; padding: 14mm 16mm;
+      background: #ffffff; width: 210mm; min-height: 297mm; margin: 14px auto; padding: 12mm 14mm;
       box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 4px; display: flex;
       flex-direction: column; justify-content: space-between;
     }
     @media print {
       body { background: #fff; }
       .toolbar { display: none !important; }
-      .sheet { margin: 0; padding: 0; width: 100%; min-height: 100%; box-shadow: none; border-radius: 0; }
+      .sheet { margin: 0; padding: 0; width: 100%; min-height: auto; box-shadow: none; border-radius: 0; }
+      .page-break { page-break-before: always; break-before: page; }
     }
-    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px; }
+    .header-table { width: 100%; border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 10px; border-collapse: collapse; }
     .title-badge {
       display: inline-block; background: #e0f2fe; color: #0369a1; padding: 2px 7px;
-      border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+      border-radius: 4px; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
     }
-    h1 { margin: 4px 0 2px; font-size: 16px; font-weight: 900; color: #0f172a; }
+    h1 { margin: 4px 0 2px; font-size: 15.5px; font-weight: 900; color: #0f172a; }
     .sub { color: #475569; font-size: 10px; }
     .meta-box {
       background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px;
       margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9.5px;
     }
     .section-box {
-      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 12px; margin-bottom: 10px;
+      background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 6px; padding: 9px 11px; margin-bottom: 9px;
+      break-inside: avoid;
     }
     .section-title {
-      font-size: 11px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
-      align-items: center; gap: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+      font-size: 10.8px; font-weight: 900; color: #0284c7; margin-bottom: 6px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;
     }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
+    .card-soft {
+      border-radius: 6px; padding: 7px 9px; font-size: 9.4px; line-height: 1.38;
+    }
+    .alert-box {
+      background: #fffbeb; border: 1.5px solid #f59e0b; border-radius: 6px; padding: 7px 10px;
+      margin-top: 7px; font-size: 9.4px; color: #78350f;
+    }
+    .anny-box {
+      background: #f5f3ff; border: 1.5px solid #8b5cf6; border-radius: 6px; padding: 8px 10px; margin-bottom: 9px;
+      break-inside: avoid;
+    }
+    .badge {
+      display: inline-block; padding: 1.5px 6px; border-radius: 4px; font-size: 8.2px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    ul.compact { margin: 4px 0 0; padding-left: 16px; }
+    ul.compact li { margin-bottom: 3px; }
+    table.comp { width: 100%; border-collapse: collapse; font-size: 9.1px; text-align: left; }
+    table.comp th {
+      background: #0f172a; color: #fff; text-transform: uppercase; font-size: 8.1px; padding: 5px 7px;
+      letter-spacing: 0.03em;
+    }
+    table.comp td { padding: 5.5px 7px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    .check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 9.4px; }
+    .check-item {
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 5px 8px;
+    }
+    .arbitrage-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      padding: 4.5px 0; border-bottom: 1px dashed #e2e8f0; font-size: 9.5px;
+    }
+    .arbitrage-row:last-of-type { border-bottom: none; }
+    .choices { display: flex; gap: 10px; flex-wrap: wrap; color: #334155; font-weight: 700; font-size: 9px; }
     .handwriting-box {
-      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 4px; padding: 6px; height: 38px; position: relative;
+      border: 1px solid #cbd5e1; background: #fcfcfc; border-radius: 5px; padding: 6px 8px; margin-top: 7px;
     }
-    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 14px; }
-    .handwriting-label { font-size: 8.5px; color: #94a3b8; font-style: italic; position: absolute; top: 3px; left: 6px; }
-    .footer { border-top: 1px solid #e2e8f0; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+    .handwriting-label { font-size: 8.5px; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
+    .handwriting-box .line { border-bottom: 1px dotted #cbd5e1; height: 15px; }
+    .footer {
+      border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 8px; font-size: 8.8px; color: #64748b;
+      display: flex; justify-content: space-between; align-items: center;
+    }
   </style>
 </head>
 <body>
 
   <div class="toolbar">
     <div style="font-weight: 800; font-size: 13px;">
-      🛒 Char à Voile du Bout du Monde · Note Stratégique Réservation
+      🛒 Char à Voile du Bout du Monde · Note Outil de Réservation
     </div>
-    <div style="display: flex; gap: 8px;">
-      <button class="btn btn-secondary" onclick="window.print()">🖨️ Imprimer la Note (PDF / A4)</button>
-      <button class="btn" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
+    <div class="toolbar-actions">
+      <span id="copy-feedback" class="copy-feedback">✓ Note copiée !</span>
+      <button class="btn btn-secondary" type="button" onclick="window.print()">🖨️ Imprimer / PDF A4</button>
+      <button class="btn" type="button" onclick="copyDocumentForWord()">📋 Copier pour Word / Email</button>
     </div>
   </div>
 
   <div class="sheet" id="printable-note">
     <div>
+      <!-- En-tête -->
       <table class="header-table">
         <tr>
           <td>
-            <span class="title-badge">Cahier des Charges & Stratégie Digitale</span>
-            <h1>Choix du Nouveau Gestionnaire de Réservation</h1>
-            <div class="sub">Remplacement de Booking Activities & Liaison bidirectionnelle des « Deux Ponts »</div>
+            <span class="title-badge">Cahier des Charges &amp; Aide à la Décision</span>
+            <h1>Choix du Gestionnaire de Réservation &amp; Liaison « Deux Ponts »</h1>
+            <div class="sub">Remplacement de Booking Activities · Critères métier, retour d’essai anny.co (Plan B) et arbitrages Jérôme</div>
           </td>
-          <td style="text-align: right; vertical-align: bottom;">
-            <div style="font-weight: 900; color: #0284c7; font-size: 12px;">Char à Voile du Bout du Monde</div>
-            <div style="font-size: 9.5px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
+          <td style="text-align: right; vertical-align: bottom; white-space: nowrap;">
+            <div style="font-weight: 900; color: #0284c7; font-size: 11.5px;">Char à Voile du Bout du Monde</div>
+            <div style="font-size: 9.2px; color: #64748b;">Plage de Lestrevet · 29550 Plomodiern</div>
           </td>
         </tr>
       </table>
 
       <div class="meta-box">
         <div><strong>Destinataire :</strong> Jérôme (Moniteur titulaire)</div>
-        <div><strong>Auteurs :</strong> Concepteur : Benoît Marchadour &amp; Sheldon</div>
-        <div><strong>Date :</strong> Réunion de travail du 12 Nov. 2026</div>
+        <div><strong>Auteur :</strong> Benoît Marchadour</div>
+        <div><strong>Statut :</strong> Cahier des charges à jour · Arbitrage ouvert</div>
       </div>
 
-      <!-- 1. Le principe des Deux Ponts -->
+      <!-- 1. Rôle de notre appli & Architecture des Deux Ponts -->
       <div class="section-box" style="background: #f8fafc;">
         <div class="section-title">
           <span>🔄</span>
-          <span>1. L'Architecture des Deux Ponts (Cerveau Métier + Paiements)</span>
+          <span>1. Répartition des rôles : « Ça roule ? » + Outil de réservation</span>
         </div>
-        <p style="margin: 0 0 6px; font-size: 10px; color: #334155; line-height: 1.45;">
-          Notre application reste le <strong>cerveau métier</strong> (calcul marée glissante, seuil 50, météo AROME, fiches numériques Cycle 1 / Cycle 2) et s'articule avec le logiciel de vente :
+        <p style="margin: 0 0 6px; font-size: 9.6px; color: #334155;">
+          <strong>« Ça roule ? » reste le cerveau métier de l’école</strong> : calcul des créneaux marées glissantes (+45/50 min/jour, règle 09h, coef ≤ 50), météo AROME/Winds-Up &amp; surcote, validation <strong>Cycle 1</strong> (12 chars/moniteur + 2<sup>e</sup> moniteur été), pilotage terrain <strong>Cycle 2</strong>, Bilan Express et Répertoire Clients. Le gestionnaire externe assure la <strong>vente, le paiement et les notifications clients</strong>.
         </p>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 9.5px;">
-          <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 6px 8px; border-radius: 6px;">
-            <strong style="color: #166534;">Pont 1 (Amont - L'Offre Cycle 1) :</strong><br>
-            L'application calcule les bons créneaux et les publie automatiquement dans l'outil de vente (via API ou flux iCal synchronisé).
+
+        <div class="grid-2">
+          <div class="card-soft" style="background: #f0fdf4; border: 1px solid #86efac;">
+            <strong style="color: #166534;">Pont 1 (Amont · Offre Cycle 1 → Vente) :</strong><br>
+            Seuls les créneaux validés <strong>« À publier »</strong> par Jérôme en Cycle 1 sont envoyés vers l’outil de réservation avec leurs horaires exacts et leur jauge (12 ou 24 chars).
           </div>
-          <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 6px 8px; border-radius: 6px;">
-            <strong style="color: #1e40af;">Pont 2 (Aval - La Demande Cycle 2) :</strong><br>
-            L'outil de vente renvoie les inscrits (noms, téléphones, chars mono/bi, paiements) : le Cycle 2 terrain se déclenche sans double saisie (et prendra en charge les SMS clients).
+          <div class="card-soft" style="background: #eff6ff; border: 1px solid #bfdbfe;">
+            <strong style="color: #1e40af;">Pont 2 (Aval · Inscrits Vente → Cycle 2) :</strong><br>
+            Les réservations (noms, tél., chars mono/bi, statut paiement) redescendent dans « Ça roule ? » pour piloter la séance en Cycle 2 sans double saisie.
+          </div>
+        </div>
+
+        <div class="grid-3" style="margin-top: 7px;">
+          <div class="card-soft" style="background: #fff; border: 1px solid #cbd5e1;">
+            <strong style="color: #0f172a;">Niveau 1 · Simple</strong><br>
+            Ouverture manuelle ou import périodique des créneaux validés. Zéro risque de panne technique, mais un peu de saisie.
+          </div>
+          <div class="card-soft" style="background: #fff; border: 1px solid #cbd5e1;">
+            <strong style="color: #0369a1;">Niveau 2 · Connecté (API)</strong><br>
+            Synchro automatique des créneaux (Pont 1) et remontée des inscrits via Webhooks (Pont 2). Confort maximal si la liaison est fiable.
+          </div>
+          <div class="card-soft" style="background: #fff; border: 1px solid #cbd5e1;">
+            <strong style="color: #7c3aed;">Niveau 3 · Paiement &amp; SMS</strong><br>
+            L’outil de vente gère acomptes, CB/ANCV, avoirs météo et SMS automatiques (confirmation, décalage, annulation).
+          </div>
+        </div>
+
+        <div class="alert-box">
+          <strong>⚠️ Point de vigilance n°1 (Communication entre les deux outils) :</strong>
+          Plus le couplage est automatisé, plus il faut sécuriser les cas limites : modification d’horaire en Cycle 1, annulation ou report météo en Cycle 2, réservation téléphone prise sur la plage en même temps qu’une vente web. La <strong>source de vérité du stock de chars</strong> doit être unique pour éviter tout surbooking ou désynchronisation.
+        </div>
+      </div>
+
+      <!-- 2. Retour d'essai : anny.co -->
+      <div class="anny-box">
+        <div class="section-title" style="color: #6d28d9; border-bottom-color: #ddd6fe;">
+          <span>🧪</span>
+          <span>2. Retour d’essai déjà mené : anny.co</span>
+          <span class="badge" style="background: #ede9fe; color: #5b21b6; margin-left: auto;">Plan B à conserver</span>
+        </div>
+        <div class="grid-2">
+          <div class="card-soft" style="background: #ffffff; border: 1px solid #ddd6fe;">
+            <strong style="color: #166534;">✅ Ce qui a plu lors du test :</strong>
+            <ul class="compact">
+              <li><strong>API moderne &amp; Webhooks natifs</strong> : permet techniquement d’envisager une vraie liaison sur mesure avec « Ça roule ? ».</li>
+              <li><strong>Approche très sur-mesure</strong> : gestion flexible par ressources (chars / séances / moniteurs) et intégration WordPress disponible.</li>
+              <li><strong>Prise en main progressive</strong> : formule gratuite jusqu’à 5 ressources pour prototyper avant d’engager un budget.</li>
+            </ul>
+          </div>
+          <div class="card-soft" style="background: #ffffff; border: 1px solid #fcd34d;">
+            <strong style="color: #b45309;">⚠️ Ce qui inquiète / reste à sécuriser :</strong>
+            <ul class="compact">
+              <li><strong>Communication entre « Ça roule ? » et anny</strong> : risque de complexité et de maintenance pour garder synchronisés créneaux glissants, jauges chars et annulations météo.</li>
+              <li><strong>Outil générique (pas métier nautique)</strong> : gestion des marées, reports météo collectifs et spécificités école à construire ou contourner.</li>
+              <li><strong>Coût à l’échelle</strong> : vérifier la facturation réelle selon le nombre de ressources (12–24 chars) et les options de paiement/SMS.</li>
+            </ul>
+          </div>
+        </div>
+        <div style="margin-top: 6px; font-size: 9.3px; color: #4c1d95; font-weight: 700;">
+          → Positionnement actuel : garder <strong>anny.co en Plan B</strong> (solution sur-mesure via API) si les outils métier nautisme/outdoor se révèlent trop chers, trop rigides ou impossibles à connecter.
+        </div>
+      </div>
+
+      <!-- 3. Critères métier indispensables pour évaluer un prestataire -->
+      <div class="section-box">
+        <div class="section-title">
+          <span>📋</span>
+          <span>3. Grille de critères métier (questions à poser en démo)</span>
+        </div>
+        <div class="check-grid">
+          <div class="check-item">
+            <strong>1. Horaires glissants (Marées)</strong><br>
+            Peut-on créer/importer facilement des créneaux qui décalent de +45/50 min chaque jour sans recréer un produit par jour ?
+          </div>
+          <div class="check-item">
+            <strong>2. Flotte &amp; 2<sup>e</sup> moniteur</strong><br>
+            Distinction monoplace / biplace dans un plafond commun de <strong>12 chars/moniteur</strong> (et 24 chars si 2<sup>e</sup> moniteur l’été) ?
+          </div>
+          <div class="check-item">
+            <strong>3. Annulation / report météo</strong><br>
+            Peut-on annuler ou décaler une séance en 1 clic avec SMS/email groupé + avoir ou remboursement sans frais cachés ?
+          </div>
+          <div class="check-item">
+            <strong>4. Téléphone plage &amp; encaissement</strong><br>
+            Saisie rapide sur smartphone (client au téléphone), acompte ou paiement intégral CB, gestion espèces / chèques vacances ANCV ?
+          </div>
+          <div class="check-item">
+            <strong>5. Ouverture technique (Deux Ponts)</strong><br>
+            Existe-t-il une API / Webhooks fiables (ou au minimum un import/export propre) pour dialoguer avec « Ça roule ? » sans double saisie ?
+          </div>
+          <div class="check-item">
+            <strong>6. Coût réel sur 12 mois</strong><br>
+            Comparer abonnement fixe (0 % commission l’été, coût fixe l’hiver) vs commission à la vente (0 € l’hiver, % sur CA l’été) + coût des SMS.
           </div>
         </div>
       </div>
 
-      <!-- 2. Comparatif des 4 prestataires identifiés -->
+      <!-- 4. Comparatif des pistes -->
       <div class="section-box">
         <div class="section-title">
           <span>⚖️</span>
-          <span>2. Comparatif des Prestataires Candidats pour Jérôme</span>
+          <span>4. Panorama des pistes à comparer avec Jérôme</span>
         </div>
-
-        <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: left;">
+        <table class="comp">
           <thead>
-            <tr style="background: #0f172a; color: #fff; text-transform: uppercase; font-size: 8.5px;">
-              <th style="padding: 5px 8px;">Solution</th>
-              <th style="padding: 5px 8px;">Spécificité Outdoor / Nautisme</th>
-              <th style="padding: 5px 8px;">Modèle Tarifaire</th>
-              <th style="padding: 5px 8px;">Avis Technique Sheldon</th>
+            <tr>
+              <th style="width: 19%;">Solution &amp; Rôle</th>
+              <th style="width: 31%;">Adéquation Char à Voile / Marées</th>
+              <th style="width: 24%;">Modèle tarifaire indicatif*</th>
+              <th style="width: 26%;">Lien avec « Ça roule ? »</th>
             </tr>
           </thead>
           <tbody>
-            <tr style="border-bottom: 1px solid #e2e8f0; background: #f0fdf4;">
-              <td style="padding: 6px 8px; font-weight: 800; color: #166534;">1. Activiti.fr</td>
-              <td style="padding: 6px 8px;">Spécialiste voile & char à voile (FFV/FFCV). Gère nativement les marées glissantes et flotte de chars.</td>
-              <td style="padding: 6px 8px;">~49 € à 89 € / mois (0% commission CA)</td>
-              <td style="padding: 6px 8px; font-weight: 700; color: #166534;">⭐ Le plus robuste pour le nautisme breton</td>
+            <tr style="background: #f0fdf4;">
+              <td>
+                <strong style="color: #166534;">Activiti.fr</strong><br>
+                <span class="badge" style="background: #dcfce7; color: #166534;">Piste métier A</span>
+              </td>
+              <td>Spécialiste nautisme / voile / char à voile (FFV/FFCV). Pensé pour marées glissantes, flotte matériel et reports météo.</td>
+              <td>Abonnement fixe (~49 à 89 €/mois, 0 % commission CA)</td>
+              <td>Solution la plus proche du métier ; vérifier en démo les possibilités d’import créneaux / export inscrits ou API.</td>
             </tr>
-            <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 6px 8px; font-weight: 800; color: #0284c7;">2. RésaMinute</td>
-              <td style="padding: 6px 8px;">Conçu pour indépendants. Prise de résa express au téléphone en 15s sur mobile, lien SMS instantané.</td>
-              <td style="padding: 6px 8px;">~29 € à 49 € / mois (support FR ultra-réactif)</td>
-              <td style="padding: 6px 8px; font-weight: 700;">Simple, direct, zéro usine à gaz</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-              <td style="padding: 6px 8px; font-weight: 800; color: #d97706;">3. Billetweb.fr</td>
-              <td style="padding: 6px 8px;">0 € d'abonnement fixe. Idéal hors saison quand l'école roule moins l'hiver.</td>
-              <td style="padding: 6px 8px;">0,29 € + 1% par vente (frais CB inclus)</td>
-              <td style="padding: 6px 8px; font-weight: 700;">Le champion économique à l'acte</td>
+            <tr style="background: #f5f3ff;">
+              <td>
+                <strong style="color: #6d28d9;">anny.co</strong><br>
+                <span class="badge" style="background: #ede9fe; color: #5b21b6;">Plan B · Testé</span>
+              </td>
+              <td>Outil générique de ressources très modulable + plugin WordPress. Demande un paramétrage sur-mesure pour les marées.</td>
+              <td>Gratuit ≤ 5 ressources, puis facturation par ressource/mois</td>
+              <td><strong>Point fort :</strong> API + Webhooks.<br><strong>Vigilance :</strong> fiabilité et maintenance de la synchro bidirectionnelle.</td>
             </tr>
             <tr>
-              <td style="padding: 6px 8px; font-weight: 800; color: #7c3aed;">4. Yootil / Regiondo</td>
-              <td style="padding: 6px 8px;">Passerelle offices de tourisme & plateformes glisse (GetYourGuide, Manawa).</td>
-              <td style="padding: 6px 8px;">Abonnement fixe + 3% à 4% de commission</td>
-              <td style="padding: 6px 8px;">Rentable si Jérôme cherche des touristes externes</td>
+              <td>
+                <strong style="color: #0369a1;">Yoplanning / RésaMinute</strong><br>
+                <span class="badge" style="background: #e0f2fe; color: #0369a1;">Outdoor / Terrain</span>
+              </td>
+              <td>Orientés moniteurs outdoor &amp; indépendants : prise de résa téléphone express sur mobile, liens de paiement SMS, multi-moniteurs.</td>
+              <td>Abonnement mensuel (~29 à 60 €/mois selon options/utilisateurs)</td>
+              <td>Très fluide sur le terrain ; vérifier la facilité d’import des créneaux marées et l’ouverture API/Webhooks.</td>
+            </tr>
+            <tr style="background: #f8fafc;">
+              <td>
+                <strong style="color: #b45309;">Billetweb.fr</strong><br>
+                <span class="badge" style="background: #fef3c7; color: #92400e;">Éco hors saison</span>
+              </td>
+              <td>Billetterie sans abonnement fixe (intéressant l’hiver), mais moins pensé pour une flotte mono/bi et les reports météo terrain.</td>
+              <td>0 € fixe + ~0,29 € + 1 % par billet (hors frais CB)</td>
+              <td>API / export disponibles, mais risque de limites ergonomiques sur les créneaux glissants quotidiens.</td>
+            </tr>
+            <tr>
+              <td>
+                <strong style="color: #475569;">Regiondo / Elloha</strong><br>
+                <span class="badge" style="background: #f1f5f9; color: #334155;">Distribution OT</span>
+              </td>
+              <td>Intéressant surtout si l’école veut vendre via offices de tourisme et plateformes (GetYourGuide, Manawa…).</td>
+              <td>Abonnement fixe + 3 % à 4 % de commission</td>
+              <td>Pertinent uniquement si besoin fort d’apport d’affaires externe ; sinon marge entamée l’été.</td>
             </tr>
           </tbody>
         </table>
+        <div style="font-size: 8.3px; color: #64748b; margin-top: 4px;">
+          * Tarifs indicatifs à confirmer par devis / démo à jour auprès de chaque prestataire.
+        </div>
       </div>
 
-      <!-- 3. Points à arbitrer avec Jérôme -->
+      <!-- 5. Arbitrages Jérôme -->
       <div class="section-box">
         <div class="section-title">
           <span>✍️</span>
-          <span>3. Arbitrages & Choix de Jérôme</span>
+          <span>5. Arbitrages à trancher avec Jérôme</span>
         </div>
-        <p style="margin: 0 0 6px; font-size: 10px; color: #475569;">
-          <strong>Questions clés :</strong> Préfères-tu un abonnement fixe pour garder 100% de ta marge l'été (ex: Activiti), ou une formule sans abonnement l'hiver (ex: Billetweb) ? Quelle est la part de réservations prises au téléphone vs sur le site web ?
-        </p>
+        <div class="arbitrage-row">
+          <span><strong>1. Modèle économique préféré :</strong></span>
+          <span class="choices">☐ Forfait fixe (0 % comm. l’été) &nbsp; ☐ À la commission (0 € l’hiver) &nbsp; ☐ À chiffrer sur CA réel</span>
+        </div>
+        <div class="arbitrage-row">
+          <span><strong>2. Répartition actuelle des résas :</strong></span>
+          <span class="choices">Téléphone : _____% &nbsp;|&nbsp; Site web : _____% &nbsp;|&nbsp; Sur place / Groupes : _____%</span>
+        </div>
+        <div class="arbitrage-row">
+          <span><strong>3. Priorité n°1 pour le nouvel outil :</strong></span>
+          <span class="choices">☐ Paiement en ligne / ANCV &nbsp; ☐ SMS météo auto &nbsp; ☐ Zéro double saisie &nbsp; ☐ Résa téléphone rapide</span>
+        </div>
+        <div class="arbitrage-row">
+          <span><strong>4. Stratégie d’intégration :</strong></span>
+          <span class="choices">☐ Progressif (Niveau 1 puis API) &nbsp; ☐ Deux Ponts dès le départ &nbsp; ☐ Tester Activiti + garder anny en Plan B</span>
+        </div>
+
         <div class="handwriting-box">
-          <span class="handwriting-label">Décision de Jérôme (Solution retenue & calendrier de transition) :</span>
+          <span class="handwriting-label">Décision retenue, prestataires à contacter en démo &amp; calendrier cible :</span>
           <div class="line"></div>
           <div class="line"></div>
         </div>
@@ -175,26 +344,36 @@
     </div>
 
     <div class="footer">
-      <span>Application « Ça roule ? » · Char à Voile Lestrevet · Document Stratégique Interne</span>
-      <span>Échange Jérôme (Moniteur) &amp; Concepteur : Benoît · Novembre 2026</span>
+      <span>Application « Ça roule ? » · Char à Voile du Bout du Monde (Lestrevet)</span>
+      <span>Note Stratégique Réservation · Mise à jour avec retour d’essai anny.co</span>
     </div>
   </div>
 
   <script>
+    function showCopyFeedback(msg) {
+      const el = document.getElementById('copy-feedback');
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = 'inline';
+      setTimeout(function() { el.style.display = 'none'; }, 3000);
+    }
+
     function copyDocumentForWord() {
       const doc = document.getElementById('printable-note');
       if (!doc) return;
       const range = document.createRange();
       range.selectNode(doc);
-      window.getSelection().removeAllRanges();
-      window.getSelection().addRange(range);
+      const sel = window.getSelection();
+      if (!sel) return;
+      sel.removeAllRanges();
+      sel.addRange(range);
       try {
-        const successful = document.execCommand('copy');
-        if (successful) alert('✓ Note copiée dans le presse-papiers !');
+        const ok = document.execCommand('copy');
+        showCopyFeedback(ok ? '✓ Note copiée pour Word / Email' : 'Utilisez Ctrl+A puis Ctrl+C');
       } catch (err) {
-        alert('Utilisez Ctrl+A puis Ctrl+C.');
+        showCopyFeedback('Utilisez Ctrl+A puis Ctrl+C');
       }
-      window.getSelection().removeAllRanges();
+      sel.removeAllRanges();
     }
   </script>
 </body>

@@ -48,7 +48,6 @@ import {
 import { CalendarGrid } from './CalendarGrid';
 import { CurveChart } from './CurveChart';
 import { MarnageChart } from './MarnageChart';
-import { TableView } from './TableView';
 import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
@@ -1036,7 +1035,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       </button>
                     )}
 
-                    {(hasTerminalC2Decision || c2Status === 'shifted') && (
+                    {!isPastDay && (hasTerminalC2Decision || c2Status === 'shifted') && (
                       <button
                         type="button"
                         className="fbtn"
@@ -1586,21 +1585,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     return (
       <div className="note" style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div>{msg}</div>
-        <button
-          type="button"
-          className="fbtn"
-          style={{
-            margin: 0,
-            background: '#f8fafc',
-            color: '#0369a1',
-            border: '1px solid #bae6fd',
-            fontWeight: 800,
-          }}
-          onClick={() => onSelectDayInCalendar(f.ds)}
-          title="Ouvrir cette journée dans l'onglet Validation des créneaux de roulage (Cycle 1)"
-        >
-          📅 Ouvrir en Validation C1
-        </button>
       </div>
     );
   };
@@ -2106,22 +2090,24 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                         {hiddenSlotsCount > 1 ? 's' : ''} en Cycle 1 masqué
                         {hiddenSlotsCount > 1 ? 's' : ''}.
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => onSelectDayInCalendar(currentDs)}
-                        style={{
-                          background: '#ffffff',
-                          border: '1px solid #cbd5e1',
-                          color: '#0369a1',
-                          borderRadius: '6px',
-                          padding: '3px 9px',
-                          fontSize: '0.72rem',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Gérer en Cycle 1 ➔
-                      </button>
+                      {currentDs >= tdRaw && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectDayInCalendar(currentDs)}
+                          style={{
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            color: '#0369a1',
+                            borderRadius: '6px',
+                            padding: '3px 9px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Gérer en Cycle 1 ➔
+                        </button>
+                      )}
                     </div>
                   )}
                 </>
@@ -2147,25 +2133,27 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       Seuls les créneaux préalablement publiés/validés en Cycle 1 apparaissent en Cycle 2 ({currentFocus.list.length} créneau{currentFocus.list.length > 1 ? 'x' : ''} non validé{currentFocus.list.length > 1 ? 's' : ''} ou fermé{currentFocus.list.length > 1 ? 's' : ''} ce jour).
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className="fbtn"
-                    style={{
-                      margin: 0,
-                      background: '#0284c7',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '8px 14px',
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
-                    }}
-                    onClick={() => onSelectDayInCalendar(currentDs)}
-                  >
-                    📅 Valider les créneaux en Cycle 1
-                  </button>
+                  {currentDs >= tdRaw && (
+                    <button
+                      type="button"
+                      className="fbtn"
+                      style={{
+                        margin: 0,
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 14px',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+                      }}
+                      onClick={() => onSelectDayInCalendar(currentDs)}
+                    >
+                      📅 Valider les créneaux en Cycle 1
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="fs">
@@ -2284,18 +2272,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         )}
       </div>
 
-      {/* Tableau mensuel et courbe de marnage cliquable */}
-      <TableView
-        year={year}
-        month={month}
-        settings={settings}
-        EX={EX}
-        W={tideW}
-        first={first}
-        last={last}
-        windList={windList}
-      />
-
+      {/* Courbe de marnage cliquable */}
       <div className="card nop">
         <MarnageChart
           year={year}
