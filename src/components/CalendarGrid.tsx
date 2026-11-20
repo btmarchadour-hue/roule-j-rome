@@ -112,7 +112,9 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       if (validations && validations[ds]) {
         const fDay = dayFocus(ds, settings, tideW, first, last, windList, customSlotsMap);
         const vInfo = vstat(fDay, validations);
-        valStatus = isPast && vInfo.st === 'chg' ? 'ok' : vInfo.st;
+        // On n'affiche plus le triangle ⚠️ sur le calendrier (les prévisions sont suivies en direct) :
+        // on montre directement le vrai statut de la journée (⚡ inscrits, C1 publié, 🚫 fermé, OFF hors offre, ✕ annulé).
+        valStatus = vInfo.st === 'chg' ? 'ok' : vInfo.st;
         valCount = vInfo.valCount;
         rejCount = vInfo.rejCount;
         notPublishedCount = vInfo.notPublishedCount || 0;
@@ -148,8 +150,6 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         dayTooltip += ` · ${cycle2Count > 0 ? '✓' : '📅'} ${valCount} ouvert${valCount > 1 ? 's' : ''}${
           rejCount ? `, ${rejCount} fermé${rejCount > 1 ? 's' : ''}` : ''
         }${isPast ? ' (passé)' : ''}`;
-      } else if (!isPast && valStatus === 'chg') {
-        dayTooltip += ' · ⚠️ Cycle 2 : météo/créneaux modifiés depuis validation';
       }
     }
 
@@ -201,36 +201,49 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             ⚡
           </span>
         )}
-        {valStatus === 'ok' && valCount === 0 && rejCount > 0 && (
-          <span
-            className="cal-val-tag rej"
-            style={
-              excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
-                ? { background: '#64748b' }
-                : notPublishedCount > 0
-                ? { background: '#475569' }
-                : undefined
-            }
-            title={
-              excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
-                ? `${excludedCount} créneau${excludedCount > 1 ? 'x' : ''} hors offre en Cycle 1 (exclu des stats)`
-                : notPublishedCount > 0
-                ? `${notPublishedCount} créneau${notPublishedCount > 1 ? 'x' : ''} non publié${notPublishedCount > 1 ? 's' : ''} en Cycle 1`
-                : `${rejCount} créneau${rejCount > 1 ? 'x' : ''} fermé${rejCount > 1 ? 's' : ''}`
-            }
-          >
-            {excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount
-              ? '➖'
-              : notPublishedCount > 0
-              ? '🚫'
-              : '✕'}
-          </span>
-        )}
-        {!isPast && valStatus === 'chg' && (
-          <span className="cal-val-tag warn" title="Cycle 2 : prévisions modifiées sur journée engagée">
-            ⚠️
-          </span>
-        )}
+        {valStatus === 'ok' && valCount === 0 && rejCount > 0 && (() => {
+          const isAllExcluded = excludedCount > 0 && notPublishedCount === 0 && excludedCount === rejCount;
+          if (isAllExcluded) {
+            return (
+              <span
+                className="cal-val-tag"
+                style={
+                  isSelected
+                    ? {
+                        background: 'rgba(255, 255, 255, 0.14)',
+                        color: '#cbd5e1',
+                        border: '1px solid rgba(255, 255, 255, 0.28)',
+                        fontSize: '0.46rem',
+                        letterSpacing: '0.03em',
+                      }
+                    : {
+                        background: '#f1f5f9',
+                        color: '#64748b',
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.46rem',
+                        letterSpacing: '0.03em',
+                      }
+                }
+                title={`Aucun créneau ouvert en Cycle 1 (${excludedCount} hors offre · exclu des stats)`}
+              >
+                OFF
+              </span>
+            );
+          }
+          return (
+            <span
+              className="cal-val-tag rej"
+              style={notPublishedCount > 0 ? { background: '#475569' } : undefined}
+              title={
+                notPublishedCount > 0
+                  ? `${notPublishedCount} créneau${notPublishedCount > 1 ? 'x' : ''} non publié${notPublishedCount > 1 ? 's' : ''} en Cycle 1 (choix école)`
+                  : `${rejCount} créneau${rejCount > 1 ? 'x' : ''} fermé${rejCount > 1 ? 's' : ''} / non roulé${rejCount > 1 ? 's' : ''}`
+              }
+            >
+              {notPublishedCount > 0 ? '🚫' : '✕'}
+            </span>
+          );
+        })()}
         <span style={{ lineHeight: 1 }}>{d}</span>
         {!isPast && <i />}
         {badgeText && <small>{badgeText}</small>}
@@ -359,6 +372,46 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         ))}
         {emptyCells}
         {dayCells}
+      </div>
+
+      <div className="cal-holiday-legend" style={{ marginBottom: '4px' }}>
+        <span style={{ fontWeight: 700 }}>Statuts (haut gauche) :</span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#0284c7', color: '#fff', width: 'auto', padding: '0 4px' }}>
+            C1
+          </span>
+          <span>Publié (sans inscrit)</span>
+        </span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff' }}>
+            ⚡
+          </span>
+          <span>Inscrits confirmés (Cycle 2)</span>
+        </span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff', width: 'auto', padding: '0 4px' }}>
+            1/3
+          </span>
+          <span>Ouverture partielle</span>
+        </span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', width: 'auto', padding: '0 4px', boxShadow: 'none' }}>
+            OFF
+          </span>
+          <span>Aucun créneau C1 (hors offre)</span>
+        </span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#475569', color: '#fff' }}>
+            🚫
+          </span>
+          <span>Fermé (choix école)</span>
+        </span>
+        <span className="cal-holiday-legend-item">
+          <span className="cal-holiday-swatch" style={{ backgroundColor: '#dc2626', color: '#fff' }}>
+            ✕
+          </span>
+          <span>Non roulé / annulé</span>
+        </span>
       </div>
 
       <div className="cal-holiday-legend">
