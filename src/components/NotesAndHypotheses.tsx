@@ -218,23 +218,23 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         categoryLabel: 'Audit & Conformité Données',
         categoryColor: '#d97706',
         icon: '🩺',
-        title: 'Note de Mise en Conformité pour Jérôme · Pourquoi & Comment Vérifier nos Données',
+        title: 'Note de Mise en Conformité pour Jérôme · État de la Base & Arbitrage Novembre 2026',
         subtitle:
-          'Explication claire : pourquoi cet audit existe, ce qui a changé dans l’appli, et quoi vérifier/valider sur les séances passées et le GPS',
+          'Octobre purgé · Tout le planning après le 30 novembre 2026 est 100 % conforme (0 rouge, 0 orange) · Seul novembre 2026 reste à arbitrer',
         summary:
-          'Pourquoi on fait ce point ? Pour éviter qu’un ancien créneau « Fermé » soit compté comme un manque de clients, et pour partir sur des statistiques, un export vers le futur prestataire de réservation (strictement les créneaux validés « À publier » par Jérôme) et une calibration plage 100 % fiables. Ce qui a changé : on sépare désormais l’Offre mise en vente (Cycle 1), le pilotage terrain (Cycle 2) et le bilan réel (Temps 1 via Bilan Express + Temps 2 GPS hors-ligne consolidé H+2 sans GPX). Voici concrètement ce qu’il faut vérifier et valider ensemble.',
+          'Mise à jour de conformité : les anciennes données de démonstration d’octobre 2026 ont été supprimées et l’ensemble des créneaux futurs après le 30 novembre 2026 (décembre 2026 → septembre 2027, soit 1 464 créneaux) a été remis massivement en cohérence (0 contradiction rouge, 0 alerte orange ; clés optionnelles réalignées et 11 journées de fév./mars 2027 recalées sur la règle automatique Début 09h00). L’export futur prestataire est donc 100 % propre. Il ne reste plus qu’à arbitrer ensemble l’historique de novembre 2026 (anciens créneaux pré-Cycle 1/2 et écarts Planning vs REX) pour figer définitivement les statistiques Vie 1 / Vie 2 et le seuil de Lestrevet.',
         keyPoints: [
-          '1. Pourquoi c’est important : tant que l’historique contient d’anciens « Fermé » vagues ou des séances passées sans bilan, les % d’annulation (météo vs manque de clients) et la surcote moyenne sont faussés.',
-          '2. Ce qui a changé (plus simple) : pour le quotidien, le Temps 1 se boucle en 30 sec le soir via le Bilan Express (pré-rempli Winds-Up/AROME, rattrapable avec ◀ Jour préc.) et le Temps 2 GPS fonctionne en 1 clic sans réseau plage (file hors-ligne + réel H+2, sans GPX).',
-          '3. Ce que tu vérifies dans l’outil ci-dessous : 🔴 Contradictions (ex. REX effectué mais planning resté fermé) ➔ cliquer « ✏️ Corriger » ; 🟠 Anciens « Fermé » vagues ou journées passées en attente ➔ préciser (Vacances / Réunion / Hors offre) ou passer au Bilan Express ; 🟢 Lignes propres ➔ cliquer « ✅ Valider » pour signer.',
-          '4. À la clé (Exploitation) : des bilans justes par motif Vie 1 / Vie 2, de meilleurs créneaux validés « À publier » à ouvrir chez le futur prestataire, la courbe surcote vs pression pour régler le seuil de Lestrevet et les preuves chiffrées Litto3D (300 pts GPS → Mode Réel).',
+          '1. Déjà réglé (Base propre post-30 novembre) : purge complète d’octobre 2026 + remise en cohérence massive de tous les créneaux orange après le 30/11/2026 (1 464/1 464 créneaux 🟢 verts, 0 🔴, 0 🟠, 0 REX futur parasite).',
+          '2. Ce qui a changé au quotidien : séparation claire Cycle 1 (Offre « À publier ») / Cycle 2 (Terrain) / REX (Bilan Express 30 sec le soir avec ◀ Jour préc.) + GPS Temps 2 hors-ligne consolidé H+2 sans GPX.',
+          '3. Seul périmètre à vérifier avec Jérôme (Novembre 2026 uniquement) : filtre le mois « Novembre 2026 » dans l’outil ci-dessous ➔ 🔴 Contradictions Planning vs REX (« ⚖️ Trancher ») ; 🟠 Anciens créneaux pré-Cycle 1/2 ou motifs « Fermé » vagues (« ✏️ Corriger ») ; 🟢 Lignes propres (« ✅ Valider »).',
+          '4. Bénéfice immédiat : des statistiques Vie 1 / Vie 2 irréprochables dès novembre 2026, un export prestataire de réservation 100 % cohérent jusqu’en septembre 2027 et une calibration Lestrevet sans biais.',
         ],
         docUrl: '',
         docBtnLabel: '🩺 Ouvrir l’outil de vérification & correction',
         statusBadge: {
-          label: 'Pédagogie Jérôme · À vérifier',
-          bg: '#fef3c7',
-          color: '#92400e',
+          label: 'Post-30/11 100 % OK · Reste Nov. 2026',
+          bg: '#dcfce7',
+          color: '#166534',
         },
       },
       {

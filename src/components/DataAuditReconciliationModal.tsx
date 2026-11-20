@@ -1010,10 +1010,10 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         }
         nextItemsMap.set(targetSlotKey, nextItem);
 
-        // Si un REX existe déjà, toujours le garder aligné pour ne jamais créer de contradiction
+        // Si un REX existe déjà, le garder aligné — mais ne JAMAIS créer de bilan REX "effectué" sur une séance "À venir / Ouvert"
         const shouldSyncObs =
-          Boolean(entry.obs) ||
-          bulkDraft.syncObservationsMode === 'all_slots';
+          bulkDraft.situation !== 'open_active' &&
+          (Boolean(entry.obs) || bulkDraft.syncObservationsMode === 'all_slots');
 
         if (shouldSyncObs) {
           const obsStatus: 'realized' | 'cancelled' = isRejected ? 'cancelled' : 'realized';
@@ -1062,6 +1062,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             updatedAt: now,
           };
           await saveObservationToFirestore(updatedObs);
+        } else if (bulkDraft.situation === 'open_active' && entry.obs?.id) {
+          await deleteObservationFromFirestore(entry.obs.id);
         }
 
         const nextKey = `${ds}__${targetSlotKey}`;
@@ -1083,7 +1085,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
       );
 
       onSaveDayValidation(ds, {
-        sig: prevDayRecord?.sig || `audit_${ds}`,
+        sig: sortedItems.map(it => it.k).join('|') || prevDayRecord?.sig || `audit_${ds}`,
         ts: now,
         k: prevDayRecord?.k || 'g',
         cycle1PublishedAt: prevDayRecord?.cycle1PublishedAt || now,
@@ -1864,30 +1866,30 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             >
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
                 <div style={{ fontWeight: 900, color: '#0369a1', marginBottom: '4px' }}>
-                  1. Pourquoi on vérifie la cohérence ?
+                  1. État de la base (Mise à jour)
                 </div>
                 <div>
-                  Pour partir sur une base <strong>100 % propre</strong> : éviter qu’un ancien créneau « Fermé » passe pour un manque de clients, fiabiliser vos <strong>stats Vie 1 / Vie 2</strong>, sécuriser l’export vers le <strong>futur prestataire de réservation</strong> (seuls les créneaux validés « À publier » par Jérôme) et caler juste le seuil de Lestrevet.
+                  <strong>Déjà assaini :</strong> l’historique de test d’octobre a été supprimé et <strong>100 % du planning futur après le 30 novembre 2026</strong> (déc. 2026 → sept. 2027) a été remis massivement en cohérence (<strong>0 rouge, 0 orange</strong> sur 1 464 créneaux, recalés sur la règle <em>Début 09h00</em>).
                 </div>
               </div>
 
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
                 <div style={{ fontWeight: 900, color: '#6d28d9', marginBottom: '4px' }}>
-                  2. Ce qui a changé (Avant → Aujourd’hui)
+                  2. Périmètre restant : Novembre 2026 uniquement
                 </div>
                 <div>
-                  Avant, un créneau était juste <em>Validé</em> ou <em>Fermé</em>. Aujourd’hui on distingue : <strong>Cycle 1</strong> (validé « À publier » pour le futur prestataire / fermeture école / <em>Hors offre</em>), <strong>Cycle 2</strong> (terrain, décalage, 2e moniteur) et le <strong>REX</strong> (bilan final, simplifié par le <strong>Bilan Express</strong>).
+                  Utilise le filtre mois <strong>« Novembre 2026 »</strong> : seuls les anciens créneaux saisis avant la séparation <strong>Cycle 1</strong> (offre publiée / fermeture école / <em>Hors offre</em>) vs <strong>Cycle 2</strong> (terrain) vs <strong>REX</strong> restent à arbitrer pour fiabiliser les stats Vie 1 / Vie 2 et le seuil de Lestrevet.
                 </div>
               </div>
 
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
                 <div style={{ fontWeight: 900, color: '#b45309', marginBottom: '4px' }}>
-                  3. Ce qu’il faut vérifier &amp; valider
+                  3. Comment arbitrer Novembre 2026
                 </div>
                 <div>
                   <strong>🔴 Rouge :</strong> contradiction Planning vs REX ➔ clique <em>⚖️ Trancher</em>.<br />
-                  <strong>🟠 Orange :</strong> motif « Fermé » vague, horaire décalé ou séance passée en attente ➔ précise ou valide si c’était réel.<br />
-                  <strong>🟢 Vert :</strong> déjà juste ➔ clique <em>✅ Valider</em> pour signer.
+                  <strong>🟠 Orange :</strong> ancien enregistrement pré-Cycle 1/2 ou motif « Fermé » vague ➔ précise ou aligne en 1 clic.<br />
+                  <strong>🟢 Vert :</strong> déjà conforme ➔ clique <em>✅ Valider</em> pour signer.
                 </div>
               </div>
             </div>
