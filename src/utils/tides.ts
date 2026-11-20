@@ -805,22 +805,7 @@ export function dayFocus(
   const glob = list.some(x => x.st && x.st.src === 'G');
   const minOpen = settings.fmin;
 
-  const s = live.map(x => x.st).filter(Boolean) as WindStat[];
-  let rng = '';
-  if (s.length) {
-    const lo = Math.min(...s.map(x => x.lo));
-    const hi = Math.max(...s.map(x => x.hi));
-    const g = Math.max(...s.map(x => x.g || 0));
-    let sx = 0;
-    let sy = 0;
-    for (const x of s) {
-      sx += Math.sin(x.dir * R);
-      sy += Math.cos(x.dir * R);
-    }
-    rng = Math.round(lo) + '–' + Math.round(hi) + ' nds' +
-      (g ? ', raf. ' + Math.round(g) : '') + ', ' +
-      comp(((Math.atan2(sx, sy) / R + 360) % 360));
-  }
+  const { rng } = summarizeSlotsWind(live);
 
   let k: 'g' | 'o' | 'r' | 'x';
   let why: string;
@@ -841,7 +826,7 @@ export function dayFocus(
     why = 'Vent hors plage sur toutes les séances (' + rng + ')';
   } else if (nOK >= minOpen && nBad === 0) {
     k = 'g';
-    why = nOK + ' séances · vent ' + rng;
+    why = nOK + ' séance' + (nOK > 1 ? 's' : '') + ' · vent ' + rng;
   } else {
     k = 'o';
     why = nOK + ' séance' + (nOK > 1 ? 's' : '') + ' avec vent OK sur ' +
@@ -849,6 +834,30 @@ export function dayFocus(
   }
 
   return { ds, y, m, d, list, live, k, why, glob, hasW, rng, pl };
+}
+
+export function summarizeSlotsWind(slots: SessionItem[]): { rng: string; glob: boolean } {
+  const s = slots.map(x => x.st).filter(Boolean) as WindStat[];
+  const glob = slots.some(x => x.st && x.st.src === 'G');
+  if (!s.length) return { rng: '', glob };
+  const lo = Math.min(...s.map(x => x.lo));
+  const hi = Math.max(...s.map(x => x.hi));
+  const g = Math.max(...s.map(x => x.g || 0));
+  let sx = 0;
+  let sy = 0;
+  for (const x of s) {
+    sx += Math.sin(x.dir * R);
+    sy += Math.cos(x.dir * R);
+  }
+  const rng =
+    Math.round(lo) +
+    '–' +
+    Math.round(hi) +
+    ' nds' +
+    (g ? ', raf. ' + Math.round(g) : '') +
+    ', ' +
+    comp((Math.atan2(sx, sy) / R + 360) % 360);
+  return { rng, glob };
 }
 
 export const kOf = (x: SessionItem) => Math.round(x.a) + (x.opt ? 'o' : '') + (x.isCustom ? 'c' : '');

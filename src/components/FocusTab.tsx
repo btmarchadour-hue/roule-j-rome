@@ -23,6 +23,7 @@ import {
   maxDs,
   minDs,
   plan,
+  summarizeSlotsWind,
   tdy,
   toU,
   VC,
@@ -204,9 +205,125 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const ad = EX.filter(p => p.t >= dayStartU && p.t < dayEndU && p.adj).map(p => p.adj as number);
   const holiday = getFrenchHolidayInfo(currentDs);
 
+  const valRecordForDay = validations[currentFocus.ds];
+  const cycle1ValidatedSlots = (() => {
+    const matchedValKeys = new Set<string>();
+    const out: Array<{
+      x: SessionItem;
+      slotKey: string;
+      valItem: ReturnType<typeof findMatchingValidationItem>;
+    }> = [];
+    for (const x of currentFocus.list) {
+      const startTimeStr = lc(x.a, currentFocus.y, currentFocus.m, currentFocus.d);
+      const endTimeStr = lc(x.b, currentFocus.y, currentFocus.m, currentFocus.d);
+      const slotKey = kOf(x);
+      const valItem = findMatchingValidationItem(
+        valRecordForDay,
+        slotKey,
+        startTimeStr,
+        endTimeStr,
+        matchedValKeys
+      );
+      if (valItem) {
+        matchedValKeys.add(valItem.k);
+      }
+      const effectiveBookingKey =
+        valItem && (bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)]?.length ?? 0) > 0
+          ? valItem.k
+          : slotKey;
+      const bookingSummary = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(currentFocus.ds, effectiveBookingKey)] || []
+      );
+      const c1Status = getEffectiveCycle1Status(valItem);
+      const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+
+      if (c1Status === 'published' || inCycle2) {
+        out.push({ x, slotKey, valItem });
+      }
+    }
+    return out;
+  })();
+
+  const activeOpenSlots = cycle1ValidatedSlots
+    .filter(({ valItem }) => valItem?.status !== 'rejected' && valItem?.cycle2Status !== 'cancelled_weather')
+    .map(item => item.x);
+
+  const verdictDisplay = (() => {
+    // Si la journée est déjà gérée en Cycle 1 / Cycle 2, le verdict porte sur les vrais créneaux ouverts
+    if (valRecordForDay || cycle1ValidatedSlots.length > 0) {
+      if (activeOpenSlots.length === 0) {
+        const hasWeatherCancel = (valRecordForDay?.items || []).some(
+          it => it.cycle2Status === 'cancelled_weather'
+        );
+        return {
+          bg: hasWeatherCancel ? VC.r[0] : '#64748b',
+          title: hasWeatherCancel ? 'JOURNÉE ANNULÉE' : 'AUCUNE SÉANCE OUVERTE',
+          why: hasWeatherCancel
+            ? 'Séances annulées pour raison météo'
+            : currentFocus.list.length > 0
+            ? `Aucun créneau ouvert (${currentFocus.list.length} créneau${currentFocus.list.length > 1 ? 'x' : ''} fermé${currentFocus.list.length > 1 ? 's' : ''} / hors offre)`
+            : 'Aucune séance prévue ce jour-là',
+          rng: currentFocus.rng,
+          glob: currentFocus.glob,
+        };
+      }
+
+      const isTodayFocus = currentFocus.ds === tdy();
+      const liveOpen = isTodayFocus ? activeOpenSlots.filter(x => !x.past) : activeOpenSlots;
+
+      if (isTodayFocus && liveOpen.length === 0) {
+        const { rng, glob } = summarizeSlotsWind(activeOpenSlots);
+        return {
+          bg: VC.x[0],
+          title: VC.x[1],
+          why: `Plus de séance à venir aujourd'hui (${activeOpenSlots.length} séance${activeOpenSlots.length > 1 ? 's' : ''} ouverte${activeOpenSlots.length > 1 ? 's' : ''} ce jour)`,
+          rng,
+          glob,
+        };
+      }
+
+      const nOK = liveOpen.filter(x => x.ok === true).length;
+      const nBad = liveOpen.filter(x => x.ok === false).length;
+      const hasW = liveOpen.some(x => x.ok !== null);
+      const { rng, glob } = summarizeSlotsWind(liveOpen);
+      const countLabel =
+        isTodayFocus && liveOpen.length < activeOpenSlots.length
+          ? `${liveOpen.length} séance${liveOpen.length > 1 ? 's' : ''} restante${liveOpen.length > 1 ? 's' : ''} (sur ${activeOpenSlots.length})`
+          : `${liveOpen.length} séance${liveOpen.length > 1 ? 's' : ''}`;
+
+      let k: 'g' | 'o' | 'r' = 'g';
+      let why = '';
+      if (!hasW) {
+        k = 'o';
+        why = `${countLabel} · météo indisponible, vent non vérifié`;
+      } else if (nOK === 0) {
+        k = 'r';
+        why = `Vent hors plage sur ${liveOpen.length > 1 ? `les ${liveOpen.length} séances` : 'la séance'} (${rng})`;
+      } else if (nOK >= settings.fmin && nBad === 0) {
+        k = 'g';
+        why = `${countLabel} · vent ${rng}`;
+      } else {
+        k = 'o';
+        why = `${nOK} séance${nOK > 1 ? 's' : ''} avec vent OK sur ${liveOpen.length}${nBad ? ` · vent hors plage sur ${nBad}` : ''} (${rng})`;
+      }
+
+      return { bg: VC[k][0], title: VC[k][1], why, rng, glob };
+    }
+
+    // Journée non encore validée en Cycle 1 : verdict théorique habituel
+    return {
+      bg: VC[currentFocus.k][0],
+      title: VC[currentFocus.k][1],
+      why: currentFocus.why,
+      rng: currentFocus.rng,
+      glob: currentFocus.glob,
+    };
+  })();
+
   const dayWindSectors: WindSectorInfo[] = (() => {
     const seen = new Map<string, WindSectorInfo>();
-    for (const s of currentFocus.list) {
+    const sectorSource = activeOpenSlots.length > 0 ? activeOpenSlots : currentFocus.list;
+    for (const s of sectorSource) {
       if (s.st) {
         const info = classifyWindSector(s.st.dir);
         if (info && !seen.has(info.sector)) seen.set(info.sector, info);
@@ -1880,20 +1997,20 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           </div>
         )}
 
-        <div className="vd" style={{ background: VC[currentFocus.k][0] }}>
-          <b>{VC[currentFocus.k][1]}</b>
+        <div className="vd" style={{ background: verdictDisplay.bg }}>
+          <b>{verdictDisplay.title}</b>
           <span>
-            {currentFocus.why}
-            {currentFocus.glob ? ' (modèle global, indicatif)' : ''}
+            {verdictDisplay.why}
+            {verdictDisplay.glob ? ' (modèle global, indicatif)' : ''}
           </span>
         </div>
 
         <div className="note" style={{ marginTop: '10px', marginBottom: '10px', lineHeight: 1.4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
           <div>
-            {currentFocus.rng ? (
+            {verdictDisplay.rng ? (
               <>
-                💨 <b>Vent prévu sur les créneaux :</b> {currentFocus.rng}{' '}
-                {currentFocus.glob ? '(modèle global)' : '(AROME Météo-France)'}
+                💨 <b>Vent prévu sur les créneaux :</b> {verdictDisplay.rng}{' '}
+                {verdictDisplay.glob ? '(modèle global)' : '(AROME Météo-France)'}
               </>
             ) : (
               'Pas de données de vent prévues sur cette plage horaire.'
@@ -1980,43 +2097,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
         )}
 
         {(() => {
-          const valRecordForDay = validations[currentFocus.ds];
-          const matchedValKeys = new Set<string>();
-          const cycle1ValidatedSlots: Array<{
-            x: SessionItem;
-            slotKey: string;
-            valItem: ReturnType<typeof findMatchingValidationItem>;
-          }> = [];
-
-          for (const x of currentFocus.list) {
-            const startTimeStr = lc(x.a, currentFocus.y, currentFocus.m, currentFocus.d);
-            const endTimeStr = lc(x.b, currentFocus.y, currentFocus.m, currentFocus.d);
-            const slotKey = kOf(x);
-            const valItem = findMatchingValidationItem(
-              valRecordForDay,
-              slotKey,
-              startTimeStr,
-              endTimeStr,
-              matchedValKeys
-            );
-            if (valItem) {
-              matchedValKeys.add(valItem.k);
-            }
-            const effectiveBookingKey =
-              valItem && (bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)]?.length ?? 0) > 0
-                ? valItem.k
-                : slotKey;
-            const bookingSummary = getSlotBookingsSummary(
-              bookingsMap[buildReservationKey(currentFocus.ds, effectiveBookingKey)] || []
-            );
-            const c1Status = getEffectiveCycle1Status(valItem);
-            const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
-
-            if (c1Status === 'published' || inCycle2) {
-              cycle1ValidatedSlots.push({ x, slotKey, valItem });
-            }
-          }
-
           const validatedKeySet = new Set(cycle1ValidatedSlots.map(item => item.slotKey));
           const hiddenSlotsCount = currentFocus.list.length - cycle1ValidatedSlots.length;
           const anySlotNeedsSmsNotice = cycle1ValidatedSlots.some(({ valItem, slotKey }) => {

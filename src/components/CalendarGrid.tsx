@@ -45,6 +45,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
   onValidateRange,
 }) => {
   const [confirmScope, setConfirmScope] = useState<'week' | 'month' | null>(null);
+  const [showLegend, setShowLegend] = useState(false);
   const dayNames = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
   const firstDayOffset = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
   const numDays = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
@@ -374,86 +375,128 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
         {dayCells}
       </div>
 
-      <div className="cal-holiday-legend" style={{ marginBottom: '4px' }}>
-        <span style={{ fontWeight: 700 }}>Statuts (haut gauche) :</span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#0284c7', color: '#fff', width: 'auto', padding: '0 4px' }}>
-            C1
+      <div
+        style={{
+          marginTop: '10px',
+          paddingTop: '8px',
+          borderTop: '1px solid var(--bd, #e2e8f0)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setShowLegend(v => !v)}
+          aria-expanded={showLegend}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'transparent',
+            border: 'none',
+            padding: '2px 0',
+            cursor: 'pointer',
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            color: '#475569',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              fontSize: '0.65rem',
+              transition: 'transform 0.15s ease',
+              transform: showLegend ? 'rotate(90deg)' : 'rotate(0deg)',
+            }}
+          >
+            ▸
           </span>
-          <span>Publié (sans inscrit)</span>
-        </span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff' }}>
-            ⚡
-          </span>
-          <span>Inscrits confirmés (Cycle 2)</span>
-        </span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff', width: 'auto', padding: '0 4px' }}>
-            1/3
-          </span>
-          <span>Ouverture partielle</span>
-        </span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', width: 'auto', padding: '0 4px', boxShadow: 'none' }}>
-            OFF
-          </span>
-          <span>Aucun créneau C1 (hors offre)</span>
-        </span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#475569', color: '#fff' }}>
-            🚫
-          </span>
-          <span>Fermé (choix école)</span>
-        </span>
-        <span className="cal-holiday-legend-item">
-          <span className="cal-holiday-swatch" style={{ backgroundColor: '#dc2626', color: '#fff' }}>
-            ✕
-          </span>
-          <span>Non roulé / annulé</span>
-        </span>
-      </div>
+          <span>Légende du calendrier (statuts &amp; repères)</span>
+        </button>
 
-      <div className="cal-holiday-legend">
-        <span style={{ fontWeight: 700 }}>Repères (bas droit) :</span>
-        {(['B', 'C', 'A'] as const).map(z => {
-          const zoneStyle = HOLIDAY_ZONE_COLORS[z];
-          return (
-            <span key={z} className="cal-holiday-legend-item">
-              <span
-                className="cal-holiday-swatch"
-                style={{
-                  backgroundColor: zoneStyle.bg,
-                  color: zoneStyle.text,
-                }}
-              >
-                {z}
+        {showLegend && (
+          <div style={{ marginTop: '4px' }}>
+            <div className="cal-holiday-legend" style={{ marginTop: 0, paddingTop: '4px', borderTop: 'none', marginBottom: '4px' }}>
+              <span style={{ fontWeight: 700 }}>Statuts (haut gauche) :</span>
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#0284c7', color: '#fff', width: 'auto', padding: '0 4px' }}>
+                  C1
+                </span>
+                <span>Publié (sans inscrit)</span>
               </span>
-              <span>
-                {zoneStyle.colorName} · {zoneStyle.cities} (Zone {z})
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff' }}>
+                  ⚡
+                </span>
+                <span>Inscrits confirmés (Cycle 2)</span>
               </span>
-            </span>
-          );
-        })}
-        {(['F', 'P'] as const).map(code => {
-          const ind = CALENDAR_INDICATOR_COLORS[code];
-          return (
-            <span key={code} className="cal-holiday-legend-item">
-              <span
-                className="cal-holiday-swatch"
-                style={{
-                  backgroundColor: ind.bg,
-                  color: ind.text,
-                }}
-              >
-                {ind.code}
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#16a34a', color: '#fff', width: 'auto', padding: '0 4px' }}>
+                  1/3
+                </span>
+                <span>Ouverture partielle</span>
               </span>
-              <span>
-                {ind.colorName} · {ind.label}
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', width: 'auto', padding: '0 4px', boxShadow: 'none' }}>
+                  OFF
+                </span>
+                <span>Aucun créneau C1 (hors offre)</span>
               </span>
-            </span>
-          );
-        })}
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#475569', color: '#fff' }}>
+                  🚫
+                </span>
+                <span>Fermé (choix école)</span>
+              </span>
+              <span className="cal-holiday-legend-item">
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#dc2626', color: '#fff' }}>
+                  ✕
+                </span>
+                <span>Non roulé / annulé</span>
+              </span>
+            </div>
+
+            <div className="cal-holiday-legend" style={{ marginTop: 0 }}>
+              <span style={{ fontWeight: 700 }}>Repères (bas droit) :</span>
+              {(['B', 'C', 'A'] as const).map(z => {
+                const zoneStyle = HOLIDAY_ZONE_COLORS[z];
+                return (
+                  <span key={z} className="cal-holiday-legend-item">
+                    <span
+                      className="cal-holiday-swatch"
+                      style={{
+                        backgroundColor: zoneStyle.bg,
+                        color: zoneStyle.text,
+                      }}
+                    >
+                      {z}
+                    </span>
+                    <span>
+                      {zoneStyle.colorName} · {zoneStyle.cities} (Zone {z})
+                    </span>
+                  </span>
+                );
+              })}
+              {(['F', 'P'] as const).map(code => {
+                const ind = CALENDAR_INDICATOR_COLORS[code];
+                return (
+                  <span key={code} className="cal-holiday-legend-item">
+                    <span
+                      className="cal-holiday-swatch"
+                      style={{
+                        backgroundColor: ind.bg,
+                        color: ind.text,
+                      }}
+                    >
+                      {ind.code}
+                    </span>
+                    <span>
+                      {ind.colorName} · {ind.label}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {!isReadOnly && onValidateRange && (
