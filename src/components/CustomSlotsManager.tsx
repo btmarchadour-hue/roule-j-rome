@@ -8,18 +8,38 @@ interface ProtectedSlotReason {
   reason: string;
 }
 
+export interface SlotActivityConflict {
+  start: string;
+  end: string;
+  chars: number;
+  hasRex: boolean;
+  hasC2Decision: boolean;
+  isClassic: boolean;
+  label?: string;
+}
+
+export interface CreateCustomSlotOptions {
+  replaceDefault?: boolean;
+  dropAdaptedClassics?: boolean;
+}
+
 interface CustomSlotsManagerProps {
   dateStr: string;
   settings: AppSettings;
   windList: WindPoint[];
   customSlotsMap: CustomSlotsMap;
   onUpdateCustomSlots: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
-  onCreateAndPublishSlot?: (dateStr: string, slot: CustomSlot) => void;
+  onCreateAndPublishSlot?: (
+    dateStr: string,
+    slot: CustomSlot,
+    options?: CreateCustomSlotOptions
+  ) => void;
   defaultSlots?: { start: string; end: string; title?: string }[];
   isOpenControlled?: boolean;
   onToggleOpen?: () => void;
   isReadOnly?: boolean;
   protectedSlotReasons?: ProtectedSlotReason[];
+  slotActivityList?: SlotActivityConflict[];
   dayResetLockReason?: string | null;
 }
 
@@ -35,6 +55,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   onToggleOpen,
   isReadOnly = false,
   protectedSlotReasons = [],
+  slotActivityList = [],
   dayResetLockReason = null,
 }) => {
   const onUpdateCustomSlots = (ds: string, rep: boolean, slots: CustomSlot[]) => {
@@ -51,6 +72,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   const [placesInput, setPlacesInput] = useState<number>(settings.cap || 1);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formNotice, setFormNotice] = useState<string | null>(null);
 
   const [y, m0, d] = dateStr.split('-').map(Number);
 
@@ -59,16 +81,35 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   const replaceDefault = currentConfig.replaceDefault;
 
   const normHHMM = (v: string) => v.trim().replace('h', ':');
+  const fmtHHhMM = (v: string) => normHHMM(v).replace(':', 'h');
   const toMinHHMM = (v: string) => {
     const [hh, mm] = normHHMM(v).split(':').map(Number);
     return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
   };
+  const rangesOverlap = (aStart: number, aEnd: number, bStart: number, bEnd: number) =>
+    aStart < bEnd && aEnd > bStart;
+
+  const isAdaptedClassicSlot = (cs: CustomSlot) =>
+    Boolean(cs.isAdapted) || cs.id.startsWith('c1-');
+
+  const activeClassicConflicts = slotActivityList.filter(
+    s => s.isClassic && (s.chars > 0 || s.hasRex || s.hasC2Decision)
+  );
+
+  const formatConflictItem = (c: SlotActivityConflict) => {
+    const parts: string[] = [];
+    if (c.chars > 0) parts.push(`${c.chars} char${c.chars > 1 ? 's' : ''} inscrit${c.chars > 1 ? 's' : ''}`);
+    if (c.hasRex) parts.push('REX enregistré');
+    if (!c.chars && !c.hasRex && c.hasC2Decision) parts.push('décision Cycle 2 active');
+    return `${fmtHHhMM(c.start)}–${fmtHHhMM(c.end)} (${parts.join(', ')})`;
+  };
+
   const getSlotLockReason = (cs: CustomSlot): string | null => {
     const prot = protectedSlotReasons.find(
       p => normHHMM(p.start) === normHHMM(cs.start) && normHHMM(p.end) === normHHMM(cs.end)
     );
     if (prot) return prot.reason;
-    const [sh, sm] = cs.start.split(':').map(Number);
+    const [sh, sm] = normHHMM(cs.start).split(':').map(Number);
     const startUtcMin = toU(y, m0 - 1, d, sh * 60 + sm);
     if (startUtcMin - Date.now() / 60000 < 48 * 60) {
       return '< 48h avant début';
@@ -81,14 +122,131 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
       ? 'au moins un créneau est verrouillé (< 48h ou avec activité/inscrits)'
       : null);
 
+  /**
+   * Validation commune anti-chevauchement & anti-corruption pour toute création/modif sur mesure.
+   * Retourne soit une erreur bloquante explicite, soit le mode de remplacement propre des créneaux classiques.
+   */
+  const validateCandidateSlot = (
+    candStart: string,
+    candEnd: string,
+    excludeId: string | null
+  ): {
+    error: string | null;
+    shouldReplaceDefault: boolean;
+    dropAdaptedClassics: boolean;
+    notice: string | null;
+  } => {
+    const sMin = toMinHHMM(candStart);
+    const eMin = toMinHHMM(candEnd);
+    if (eMin <= sMin) {
+      return {
+        error: 'L’heure de fin doit être postérieure à l’heure de début.',
+        shouldReplaceDefault: replaceDefault,
+        dropAdaptedClassics: false,
+        notice: null,
+      };
+    }
+
+    // 1. Vérifier tout chevauchement avec un autre créneau sur mesure déjà défini
+    const trueCustomOthers = customSlots.filter(
+      cs => cs.id !== excludeId && !isAdaptedClassicSlot(cs)
+    );
+    const overlappingCustom = trueCustomOthers.find(cs =>
+      rangesOverlap(sMin, eMin, toMinHHMM(cs.start), toMinHHMM(cs.end))
+    );
+    if (overlappingCustom) {
+      return {
+        error: `Chevauchement interdit avec le créneau sur mesure ${fmtHHhMM(overlappingCustom.start)} – ${fmtHHhMM(overlappingCustom.end)}. Modifiez ou supprimez d’abord ce créneau.`,
+        shouldReplaceDefault: replaceDefault,
+        dropAdaptedClassics: false,
+        notice: null,
+      };
+    }
+
+    // 2. Vérifier tout chevauchement avec un créneau déjà engagé (inscrits / REX / Cycle 2)
+    const overlappingBusy = slotActivityList.filter(act => {
+      if (act.chars <= 0 && !act.hasRex && !act.hasC2Decision) return false;
+      if (excludeId) {
+        const edited = customSlots.find(cs => cs.id === excludeId);
+        if (
+          edited &&
+          normHHMM(edited.start) === normHHMM(act.start) &&
+          normHHMM(edited.end) === normHHMM(act.end)
+        ) {
+          return false;
+        }
+      }
+      return rangesOverlap(sMin, eMin, toMinHHMM(act.start), toMinHHMM(act.end));
+    });
+    if (overlappingBusy.length > 0) {
+      return {
+        error: `Incohérence détectée : cet horaire chevauche un créneau ayant déjà des inscrits ou un bilan (${overlappingBusy.map(formatConflictItem).join(' ; ')}). Déplacez ou annulez d’abord ces inscriptions dans Cycle 2 pour ne pas créer de doublon ni biaiser les statistiques.`,
+        shouldReplaceDefault: replaceDefault,
+        dropAdaptedClassics: false,
+        notice: null,
+      };
+    }
+
+    // 3. Vérifier si des créneaux classiques (auto ou adaptés C1) coexistent et doivent être remplacés proprement
+    const hasAdaptedClassics = customSlots.some(
+      cs => cs.id !== excludeId && isAdaptedClassicSlot(cs)
+    );
+    const overlapsDefaultClassic =
+      !replaceDefault &&
+      defaultSlots.some(ds =>
+        rangesOverlap(sMin, eMin, toMinHHMM(ds.start), toMinHHMM(ds.end))
+      );
+    const overlapsAdaptedClassic = customSlots.some(
+      cs =>
+        cs.id !== excludeId &&
+        isAdaptedClassicSlot(cs) &&
+        rangesOverlap(sMin, eMin, toMinHHMM(cs.start), toMinHHMM(cs.end))
+    );
+
+    if (overlapsDefaultClassic || overlapsAdaptedClassic || (!replaceDefault && defaultSlots.length > 0 && !excludeId)) {
+      // Dès qu'on crée un créneau sur mesure sur une journée avec créneaux classiques,
+      // on impose le remplacement propre des créneaux classiques (pour éviter tout doublon/chevauchement
+      // et ne pas laisser des créneaux classiques fantômes biaiser les statistiques).
+      if (activeClassicConflicts.length > 0) {
+        return {
+          error: `Impossible de basculer en mode Sur mesure et supprimer les créneaux classiques : certains ont encore des inscrits ou un REX (${activeClassicConflicts.map(formatConflictItem).join(' ; ')}). Traitez d’abord ces créneaux dans Cycle 2.`,
+          shouldReplaceDefault: replaceDefault,
+          dropAdaptedClassics: false,
+          notice: null,
+        };
+      }
+      return {
+        error: null,
+        shouldReplaceDefault: true,
+        dropAdaptedClassics: hasAdaptedClassics,
+        notice:
+          'Les créneaux classiques (sans inscrit) ont été remplacés proprement par vos créneaux sur mesure pour éviter tout chevauchement et préserver la fiabilité des statistiques.',
+      };
+    }
+
+    return {
+      error: null,
+      shouldReplaceDefault: replaceDefault,
+      dropAdaptedClassics: false,
+      notice: null,
+    };
+  };
+
   const handleSaveSlot = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setFormNotice(null);
     if (!startInput || !endInput) return;
-    if (toMinHHMM(endInput) <= toMinHHMM(startInput)) {
-      setFormError('L’heure de fin doit être postérieure à l’heure de début.');
+
+    const check = validateCandidateSlot(startInput, endInput, editingSlotId);
+    if (check.error) {
+      setFormError(check.error);
       return;
     }
+
+    const baseList = check.dropAdaptedClassics
+      ? customSlots.filter(cs => !isAdaptedClassicSlot(cs))
+      : customSlots;
 
     if (editingSlotId) {
       const targetSlot = customSlots.find(s => s.id === editingSlotId);
@@ -96,8 +254,7 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
         setEditingSlotId(null);
         return;
       }
-      // Mise à jour d'un créneau existant
-      const updated = customSlots.map(s => {
+      const updated = baseList.map(s => {
         if (s.id === editingSlotId) {
           return {
             ...s,
@@ -105,35 +262,39 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
             end: endInput,
             title: titleInput.trim() || 'Séance sur mesure',
             places: placesInput > 0 ? placesInput : 1,
+            isAdapted: false,
           };
         }
         return s;
       }).sort((a, b) => a.start.localeCompare(b.start));
 
-      onUpdateCustomSlots(dateStr, replaceDefault, updated);
+      onUpdateCustomSlots(dateStr, check.shouldReplaceDefault, updated);
       setEditingSlotId(null);
       setTitleInput('Séance sur mesure');
+      if (check.notice) setFormNotice(check.notice);
     } else {
-      // Ajout d'un nouveau créneau
       const newSlot: CustomSlot = {
         id: `cs_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         start: startInput,
         end: endInput,
         title: titleInput.trim() || 'Séance sur mesure',
         places: placesInput > 0 ? placesInput : 1,
+        isAdapted: false,
       };
 
-      const updated = [...customSlots, newSlot].sort((a, b) => a.start.localeCompare(b.start));
-      onUpdateCustomSlots(dateStr, replaceDefault, updated);
+      const updated = [...baseList, newSlot].sort((a, b) => a.start.localeCompare(b.start));
+      onUpdateCustomSlots(dateStr, check.shouldReplaceDefault, updated);
+      if (check.notice) setFormNotice(check.notice);
     }
   };
 
   const handleStartEdit = (cs: CustomSlot) => {
     if (getSlotLockReason(cs)) return;
     setFormError(null);
+    setFormNotice(null);
     setEditingSlotId(cs.id);
-    setStartInput(cs.start);
-    setEndInput(cs.end);
+    setStartInput(normHHMM(cs.start));
+    setEndInput(normHHMM(cs.end));
     setTitleInput(cs.title || 'Séance');
     setPlacesInput(cs.places || 1);
     if (!isOpen) toggleOpen();
@@ -154,21 +315,36 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
   };
 
   const handleToggleReplace = (checked: boolean) => {
+    setFormError(null);
+    setFormNotice(null);
+    if (checked && activeClassicConflicts.length > 0) {
+      setFormError(
+        `Impossible de supprimer les créneaux classiques : certains ont déjà des inscrits ou un REX (${activeClassicConflicts.map(formatConflictItem).join(' ; ')}). Traitez-les d’abord dans Cycle 2.`
+      );
+      return;
+    }
     if (effectiveDayResetLock) return;
     onUpdateCustomSlots(dateStr, checked, customSlots);
   };
 
   const handleImportCalculatedSlots = () => {
+    setFormError(null);
+    setFormNotice(null);
+    if (activeClassicConflicts.length > 0) {
+      setFormError(
+        `Action bloquée : des créneaux classiques ont déjà des inscrits ou un REX (${activeClassicConflicts.map(formatConflictItem).join(' ; ')}).`
+      );
+      return;
+    }
     if (effectiveDayResetLock) return;
     if (!defaultSlots || defaultSlots.length === 0) return;
     const imported: CustomSlot[] = defaultSlots.map((ds, idx) => ({
       id: `cs_imp_${Date.now()}_${idx}`,
-      start: ds.start,
-      end: ds.end,
+      start: normHHMM(ds.start),
+      end: normHHMM(ds.end),
       title: ds.title || `Séance ${idx + 1}`,
       places: settings.cap || 1,
     }));
-    // Remplacer automatiquement les créneaux par défaut pour permettre modification totale
     onUpdateCustomSlots(dateStr, true, imported);
     if (!isOpen) toggleOpen();
   };
@@ -261,6 +437,48 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
 
       {isOpen && (
         <div style={{ marginTop: '14px', borderTop: '1px solid #cbd5e1', paddingTop: '12px' }}>
+          {/* Garde-fou explicite : créneaux classiques déjà engagés (inscrits / REX) vs remplacement propre */}
+          {activeClassicConflicts.length > 0 ? (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #fca5a5',
+                borderRadius: '8px',
+                padding: '9px 12px',
+                marginBottom: '12px',
+                color: '#991b1b',
+                fontSize: '0.73rem',
+                lineHeight: 1.4,
+              }}
+            >
+              <strong>⚠️ Incohérence à traiter avant remplacement par du sur mesure :</strong>
+              <div style={{ marginTop: '3px' }}>
+                Créneau(x) classique(s) déjà engagé(s) :{' '}
+                <strong>{activeClassicConflicts.map(formatConflictItem).join(' · ')}</strong>.
+                <br />
+                Déplacez ou annulez d’abord ces inscriptions dans Cycle 2 afin d’éviter tout doublon et ne pas biaiser les statistiques.
+              </div>
+            </div>
+          ) : (
+            (!replaceDefault || customSlots.some(isAdaptedClassicSlot)) &&
+            defaultSlots.length > 0 && (
+              <div
+                style={{
+                  background: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  marginBottom: '12px',
+                  color: '#0369a1',
+                  fontSize: '0.72rem',
+                  lineHeight: 1.4,
+                }}
+              >
+                <strong>ℹ️ Règle anti-doublon :</strong> ajouter un créneau sur mesure supprime automatiquement les créneaux classiques (sans inscrit) pour éviter tout chevauchement et garder des statistiques exactes.
+              </div>
+            )
+          )}
+
           {/* Quick action: Importer les créneaux automatiques pour modification totale */}
           {defaultSlots.length > 0 && (!replaceDefault || customSlots.length === 0) && !effectiveDayResetLock && (
             <div
@@ -580,16 +798,34 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                 <div
                   style={{
                     width: '100%',
-                    padding: '5px 8px',
+                    padding: '6px 9px',
                     borderRadius: '6px',
                     background: '#fef2f2',
-                    border: '1px solid #fca5a5',
+                    border: '1.5px solid #fca5a5',
                     color: '#b91c1c',
                     fontSize: '0.72rem',
                     fontWeight: 800,
+                    lineHeight: 1.4,
                   }}
                 >
                   ⛔ {formError}
+                </div>
+              )}
+              {formNotice && (
+                <div
+                  style={{
+                    width: '100%',
+                    padding: '6px 9px',
+                    borderRadius: '6px',
+                    background: '#f0f9ff',
+                    border: '1px solid #7dd3fc',
+                    color: '#0369a1',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  ✅ {formNotice}
                 </div>
               )}
               {!editingSlotId && onCreateAndPublishSlot && (
@@ -597,9 +833,11 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                   type="button"
                   onClick={() => {
                     setFormError(null);
+                    setFormNotice(null);
                     if (!startInput || !endInput) return;
-                    if (toMinHHMM(endInput) <= toMinHHMM(startInput)) {
-                      setFormError('L’heure de fin doit être postérieure à l’heure de début.');
+                    const check = validateCandidateSlot(startInput, endInput, null);
+                    if (check.error) {
+                      setFormError(check.error);
                       return;
                     }
                     const newSlot: CustomSlot = {
@@ -608,9 +846,14 @@ export const CustomSlotsManager: React.FC<CustomSlotsManagerProps> = ({
                       end: endInput,
                       title: titleInput.trim() || 'Séance sur mesure',
                       places: placesInput > 0 ? placesInput : 1,
+                      isAdapted: false,
                     };
-                    onCreateAndPublishSlot(dateStr, newSlot);
+                    onCreateAndPublishSlot(dateStr, newSlot, {
+                      replaceDefault: check.shouldReplaceDefault,
+                      dropAdaptedClassics: check.dropAdaptedClassics,
+                    });
                     setTitleInput('Séance sur mesure');
+                    if (check.notice) setFormNotice(check.notice);
                   }}
                   style={{
                     background: '#16a34a',

@@ -235,6 +235,10 @@ export type Cycle2ActionPayload =
     }
   | {
       type: 'reset_to_cycle1';
+    }
+  | {
+      type: 'purge_orphan';
+      valItemKey?: string;
     };
 
 /**
@@ -494,13 +498,16 @@ export function findMatchingValidationItem(
   const items = valRecord?.items;
   if (!items || items.length === 0) return undefined;
 
+  const available = usedKeys ? items.filter(it => !usedKeys.has(it.k)) : items;
+  if (available.length === 0) return undefined;
+
   const norm = (v?: string) => (v || '').trim().replace('h', ':');
   const startNorm = norm(startTimeStr);
   const endNorm = norm(endTimeStr);
 
-  let found = items.find(it => it.k === slotKey);
+  let found = available.find(it => it.k === slotKey);
   if (!found) {
-    found = items.find(
+    found = available.find(
       it =>
         (norm(it.publishedStart || it.s) === startNorm && norm(it.publishedEnd || it.e) === endNorm) ||
         (Boolean(it.actualStart) &&
@@ -510,19 +517,20 @@ export function findMatchingValidationItem(
     );
   }
   if (!found) {
-    found = items.find(
+    found = available.find(
       it =>
         norm(it.publishedStart || it.s) === startNorm ||
         (Boolean(it.actualStart) && norm(it.actualStart) === startNorm)
     );
   }
   if (!found) {
+    // Tolérance stricte <= 20 min (glissement barométrique/marée léger uniquement) :
+    // interdit tout croisement accidentel avec une séance voisine (>= 45-60 min d'écart)
     const slotMin = parseTimeMinutes(startTimeStr);
     if (slotMin !== null) {
       let closest: ValidationItem | undefined;
-      let minDiff = 90;
-      for (const item of items) {
-        if (usedKeys?.has(item.k)) continue;
+      let minDiff = 20;
+      for (const item of available) {
         const candidates = [item.publishedStart || item.s, item.actualStart].filter(Boolean) as string[];
         for (const cand of candidates) {
           const candMin = parseTimeMinutes(cand);

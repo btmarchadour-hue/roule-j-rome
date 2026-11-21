@@ -688,7 +688,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   cap: 1,         // Chars par séance
   all: true,      // Tout le jour si petit coef
   cmax: 50,       // Seuil coef roulage continu
-  pcor: true,     // Correction pression
+  pcor: false,    // Conservé pour compatibilité ascendante (remplacé par le modèle empirique)
+  calculationMode: 'theorique', // Option B : SHOM brut par défaut, bascule optionnelle vers 'reel'
   L: 4.5,         // Seuil hauteur d'eau L (m)
   mg: 0,          // Marge marée (cm)
   lum: -1.1,      // Seuil luminosité lum (deg)

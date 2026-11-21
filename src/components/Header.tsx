@@ -42,6 +42,9 @@ export const Header: React.FC<HeaderProps> = ({
   const [isInstalled, setIsInstalled] = useState(false);
   const [isInIframe, setIsInIframe] = useState(false);
   const [platform, setPlatform] = useState<'ios' | 'android' | 'desktop'>('desktop');
+  const [selectedGuideTab, setSelectedGuideTab] = useState<'android' | 'ios' | 'desktop'>('android');
+  const [isIOSNonSafari, setIsIOSNonSafari] = useState(false);
+  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
@@ -57,12 +60,23 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     const ua = window.navigator.userAgent.toLowerCase();
-    if (/iphone|ipad|ipod/.test(ua) || (ua.includes('mac') && 'ontouchend' in document)) {
-      setPlatform('ios');
-    } else if (/android/.test(ua)) {
-      setPlatform('android');
-    } else {
-      setPlatform('desktop');
+    const detectedIOS =
+      /iphone|ipad|ipod/.test(ua) || (ua.includes('mac') && 'ontouchend' in document);
+    const detectedAndroid = /android/.test(ua);
+    const detectedPlatform: 'ios' | 'android' | 'desktop' = detectedIOS
+      ? 'ios'
+      : detectedAndroid
+      ? 'android'
+      : 'desktop';
+    setPlatform(detectedPlatform);
+    setSelectedGuideTab(detectedPlatform);
+
+    // Détection navigateur intégré (WhatsApp, Facebook, Instagram, Gmail/Google App...) ou Chrome/Firefox sur iOS
+    const inApp = /fban|fbav|instagram|whatsapp|line|wv\)|gsa\/|mail|snapchat|linkedin/.test(ua);
+    setIsInAppBrowser(inApp);
+    if (detectedIOS) {
+      const nonSafari = /crios|fxios|edgios|opios/.test(ua) || inApp || !/safari/.test(ua);
+      setIsIOSNonSafari(nonSafari);
     }
 
     const handleBeforeInstall = (e: Event) => {
@@ -94,6 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
     setLinkCopied(false);
+    setSelectedGuideTab(platform);
     setShowInstallGuide(true);
   };
 
@@ -121,6 +136,24 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
   };
+
+  const handleShareAppUrl = async () => {
+    const url = window.location.origin + '/';
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'Ça roule ? – Horaires de roulage',
+          text: 'Lien direct pour installer le raccourci Ça roule ? sur écran d’accueil :',
+          url,
+        });
+      } catch {
+        // Annulé par l'utilisateur
+      }
+    }
+  };
+
+  const canNativeShare =
+    typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
   return (
     <>
@@ -261,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
-            padding: '16px',
+            padding: '12px',
           }}
           onClick={() => setShowInstallGuide(false)}
         >
@@ -269,36 +302,61 @@ export const Header: React.FC<HeaderProps> = ({
             style={{
               background: '#ffffff',
               borderRadius: '14px',
-              maxWidth: '460px',
+              maxWidth: '480px',
               width: '100%',
-              padding: '24px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '20px',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
               border: '1px solid #e2e8f0',
               color: '#0f172a',
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
               <img
                 src="/apple-touch-icon.png"
                 alt="Icône Ça roule ?"
                 style={{
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '13px',
+                  width: '52px',
+                  height: '52px',
+                  borderRadius: '12px',
                   boxShadow: '0 4px 6px -1px rgba(0,0,0,0.15)',
                   border: '1px solid #cbd5e1',
+                  flexShrink: 0,
                 }}
               />
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: '#0f172a' }}>
-                  Installer « Ça roule ? »
+                <h3 style={{ margin: 0, fontSize: '1.04rem', fontWeight: 800, color: '#0f172a' }}>
+                  Installer « Ça roule ? » sur l&apos;écran d&apos;accueil
                 </h3>
-                <p style={{ margin: '3px 0 0 0', fontSize: '0.78rem', color: '#64748b' }}>
-                  Accès plein écran depuis l&apos;écran d&apos;accueil (smartphone ou ordinateur)
+                <p style={{ margin: '2px 0 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                  Accès direct plein écran depuis votre téléphone ou ordinateur
                 </p>
               </div>
             </div>
+
+            {deferredPrompt && (
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                style={{
+                  width: '100%',
+                  background: '#0f766e',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '11px 16px',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  marginBottom: '12px',
+                  boxShadow: '0 2px 6px rgba(15, 118, 110, 0.3)',
+                }}
+              >
+                📲 Installer l&apos;application directement (1 clic)
+              </button>
+            )}
 
             {isInIframe && (
               <div
@@ -308,12 +366,46 @@ export const Header: React.FC<HeaderProps> = ({
                   borderRadius: '10px',
                   padding: '10px 12px',
                   marginBottom: '12px',
-                  fontSize: '0.78rem',
+                  fontSize: '0.77rem',
                   color: '#92400e',
                   lineHeight: 1.45,
                 }}
               >
-                <strong>⚠️ Vous êtes actuellement dans un aperçu intégré :</strong> le bouton d&apos;installation du navigateur ne peut pas apparaître ici. Copiez le lien direct ci-dessous et ouvrez-le directement dans <strong>Safari</strong> (iPhone) ou <strong>Chrome / Edge</strong> (Android / PC).
+                <strong>⚠️ Vous êtes dans un aperçu intégré :</strong> l&apos;installation ne fonctionne pas ici. Copiez le lien direct ci-dessous puis ouvrez-le directement dans <strong>Chrome</strong> (Android) ou <strong>Safari</strong> (iPhone).
+              </div>
+            )}
+
+            {!isInIframe && isInAppBrowser && (
+              <div
+                style={{
+                  background: '#fffbeb',
+                  border: '1.5px solid #fcd34d',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  marginBottom: '12px',
+                  fontSize: '0.77rem',
+                  color: '#92400e',
+                  lineHeight: 1.45,
+                }}
+              >
+                <strong>⚠️ Navigateur intégré détecté (WhatsApp / Mail / appli) :</strong> l&apos;option d&apos;installation est bloquée ici. Copiez le lien ci-dessous et collez-le directement dans <strong>{platform === 'ios' ? 'Safari' : 'Google Chrome'}</strong>.
+              </div>
+            )}
+
+            {!isInIframe && !isInAppBrowser && isIOSNonSafari && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1.5px solid #fca5a5',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  marginBottom: '12px',
+                  fontSize: '0.77rem',
+                  color: '#991b1b',
+                  lineHeight: 1.45,
+                }}
+              >
+                <strong>⚠️ Vous n&apos;êtes pas dans Safari sur iPhone :</strong> copiez le lien ci-dessous et ouvrez-le dans <strong>Safari</strong> (icône boussole bleue) pour créer un vrai raccourci plein écran.
               </div>
             )}
 
@@ -321,18 +413,18 @@ export const Header: React.FC<HeaderProps> = ({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
+                gap: '6px',
                 background: '#f1f5f9',
                 border: '1px solid #cbd5e1',
                 borderRadius: '8px',
-                padding: '8px 10px',
-                marginBottom: '14px',
+                padding: '7px 9px',
+                marginBottom: '12px',
               }}
             >
               <span
                 style={{
                   flex: 1,
-                  fontSize: '0.73rem',
+                  fontSize: '0.71rem',
                   fontFamily: 'monospace',
                   color: '#334155',
                   overflow: 'hidden',
@@ -350,69 +442,175 @@ export const Header: React.FC<HeaderProps> = ({
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '6px',
-                  padding: '5px 10px',
-                  fontSize: '0.73rem',
+                  padding: '5px 9px',
+                  fontSize: '0.72rem',
                   fontWeight: 800,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {linkCopied ? '✓ Lien copié !' : '📋 Copier le lien'}
+                {linkCopied ? '✓ Copié !' : '📋 Copier'}
               </button>
+              {canNativeShare && (
+                <button
+                  type="button"
+                  onClick={handleShareAppUrl}
+                  style={{
+                    background: '#0284c7',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '5px 9px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  📤 Partager
+                </button>
+              )}
             </div>
 
-            <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '0.80rem', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ order: platform === 'ios' ? 0 : 1 }}>
-                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
-                  🍏 Sur iPhone / iPad (obligatoirement dans Safari) :
-                </strong>
-                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
-                  <li>Ouvrez le lien direct dans <strong>Safari</strong> (pas dans Chrome ni dans un aperçu mail/WhatsApp).</li>
-                  <li>Touchez le bouton <strong>Partager</strong> (carré avec une flèche vers le haut ⬆️, en bas de l&apos;écran).</li>
-                  <li>Descendez (ou touchez <em>Plus</em>) puis choisissez <strong>« Sur l&apos;écran d&apos;accueil »</strong> → <strong>Ajouter</strong>.</li>
-                </ol>
-              </div>
+            {/* Sélecteur d'appareil */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '6px',
+                marginBottom: '12px',
+              }}
+            >
+              {(
+                [
+                  { id: 'android', label: '🤖 Android' },
+                  { id: 'ios', label: '🍏 iPhone / iPad' },
+                  { id: 'desktop', label: '💻 PC / Mac' },
+                ] as const
+              ).map(tab => {
+                const active = selectedGuideTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSelectedGuideTab(tab.id)}
+                    style={{
+                      padding: '8px 6px',
+                      borderRadius: '8px',
+                      border: active ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                      background: active ? '#e0f2fe' : '#f8fafc',
+                      color: active ? '#0369a1' : '#475569',
+                      fontWeight: 800,
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
 
-              <div style={{ order: platform === 'android' ? 0 : 2 }}>
-                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
-                  🤖 Sur Android (Chrome) :
-                </strong>
-                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
-                  <li>Ouvrez le lien direct dans <strong>Google Chrome</strong>.</li>
-                  <li>Touchez les <strong>3 points ⋮</strong> en haut à droite → <strong>« Ajouter à l&apos;écran d&apos;accueil »</strong> → <strong>Installer</strong>.</li>
-                </ol>
-              </div>
+            <div
+              style={{
+                background: '#f8fafc',
+                borderRadius: '10px',
+                padding: '14px',
+                border: '1px solid #e2e8f0',
+                marginBottom: '14px',
+                fontSize: '0.80rem',
+                lineHeight: 1.55,
+              }}
+            >
+              {selectedGuideTab === 'android' && (
+                <div>
+                  <strong style={{ color: '#0284c7', display: 'block', marginBottom: '6px' }}>
+                    🤖 Sur Samsung / Android (Google Chrome) :
+                  </strong>
+                  <ol style={{ margin: '0 0 10px 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <li>
+                      Ouvrez le lien direct dans <strong>Google Chrome</strong>.
+                    </li>
+                    <li>
+                      Touchez les <strong>3 points ⋮</strong> tout en haut à droite.
+                    </li>
+                    <li>
+                      <strong>⬇️ Faites défiler ce menu vers le bas avec le doigt</strong> <em>(il est long : descendez sous « Traduire », « Écouter cette page » et « Mode Lecture »)</em>.
+                    </li>
+                    <li>
+                      Touchez <strong>« Ajouter à l&apos;écran d&apos;accueil »</strong> <em>(ou <strong>« Installer l&apos;application »</strong>)</em> → puis <strong>Installer</strong> <em>(ou <strong>Créer un raccourci</strong>)</em>.
+                    </li>
+                  </ol>
+                  <div
+                    style={{
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '8px',
+                      padding: '8px 10px',
+                      fontSize: '0.74rem',
+                      color: '#1e3a8a',
+                    }}
+                  >
+                    <strong>💡 Si vous utilisez Samsung Internet</strong> (icône planète violette) : touchez le menu <strong>≡</strong> en bas à droite → <strong>+ Ajouter la page à</strong> → <strong>Écran d&apos;accueil</strong>.
+                  </div>
+                </div>
+              )}
 
-              <div style={{ order: platform === 'desktop' ? 0 : 3 }}>
-                <strong style={{ color: '#0284c7', display: 'block', marginBottom: '4px' }}>
-                  💻 Sur ordinateur (Chrome ou Edge) :
-                </strong>
-                <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
-                  <li>Ouvrez le lien direct dans un onglet <strong>Chrome</strong> ou <strong>Edge</strong>.</li>
-                  <li>Cliquez sur l&apos;icône <strong>Installer</strong> (écran avec une flèche ⬇️) à droite de la barre d&apos;adresse, ou menu <strong>⋮ → Enregistrer et partager → Installer la page en tant qu&apos;application</strong>.</li>
-                </ol>
-              </div>
+              {selectedGuideTab === 'ios' && (
+                <div>
+                  <strong style={{ color: '#0284c7', display: 'block', marginBottom: '6px' }}>
+                    🍏 Sur iPhone / iPad (obligatoirement dans Safari) :
+                  </strong>
+                  <ol style={{ margin: '0 0 10px 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <li>
+                      Copiez le lien ci-dessus et ouvrez-le dans <strong>Safari</strong> <em>(boussole bleue — pas depuis l&apos;aperçu WhatsApp, SMS ou Mail)</em>.
+                    </li>
+                    <li>
+                      Touchez le bouton <strong>Partager</strong> (carré avec une flèche vers le haut <strong>⬆️</strong> en bas de l&apos;écran). <em>Sur iOS récent, s&apos;il n&apos;est pas visible directement, touchez d&apos;abord les <strong>3 points ⋯</strong> en bas à droite puis <strong>Partager</strong>.</em>
+                    </li>
+                    <li>
+                      <strong>⬇️ Faites défiler la liste vers le bas</strong> <em>(sous AirDrop et les contacts, puis touchez <strong>Plus</strong> si nécessaire)</em> et choisissez <strong>« Sur l&apos;écran d&apos;accueil »</strong> (icône <strong>+</strong>).
+                    </li>
+                    <li>
+                      Laissez <strong>« Ouvrir en tant qu&apos;app web »</strong> activé (si proposé), puis touchez <strong>Ajouter</strong> en haut à droite.
+                    </li>
+                  </ol>
+                  <div
+                    style={{
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '8px',
+                      padding: '8px 10px',
+                      fontSize: '0.74rem',
+                      color: '#1e3a8a',
+                    }}
+                  >
+                    <strong>💡 Astuce Chrome sur iPhone :</strong> si vous êtes dans Chrome iOS, l&apos;icône <strong>Partager ⬆️</strong> est <strong>en haut à droite dans la barre d&apos;adresse</strong> (puis descendre sur <strong>« Sur l&apos;écran d&apos;accueil »</strong>). Safari reste cependant recommandé pour l&apos;affichage plein écran.
+                  </div>
+                </div>
+              )}
+
+              {selectedGuideTab === 'desktop' && (
+                <div>
+                  <strong style={{ color: '#0284c7', display: 'block', marginBottom: '6px' }}>
+                    💻 Sur ordinateur (Chrome, Edge ou Safari Mac) :
+                  </strong>
+                  <ol style={{ margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <li>
+                      Ouvrez le lien direct dans un onglet <strong>Chrome</strong> ou <strong>Edge</strong>.
+                    </li>
+                    <li>
+                      Cliquez sur l&apos;icône <strong>Installer</strong> (écran avec flèche ⬇️) à droite de la barre d&apos;adresse, ou ouvrez le menu <strong>⋮ → Caster, enregistrer et partager → Installer la page en tant qu&apos;application</strong>.
+                    </li>
+                    <li>
+                      <em>Sur Mac (Safari) :</em> menu <strong>Fichier → Ajouter au Dock…</strong>.
+                    </li>
+                  </ol>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              {deferredPrompt && (
-                <button
-                  type="button"
-                  onClick={handleInstallClick}
-                  style={{
-                    background: '#0f766e',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '9px 16px',
-                    fontWeight: 800,
-                    fontSize: '0.84rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  📲 Installer maintenant
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => setShowInstallGuide(false)}

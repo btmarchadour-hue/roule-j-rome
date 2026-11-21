@@ -1,10 +1,24 @@
 import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
 import { evaluatePointAgainstCadre } from './beachCadreEngine';
-import { classifyBayZone, estimateLitto3dUsableWidthM } from './beachOrientation';
+import {
+  classifyBayZone,
+  estimateLitto3dUsableWidthM,
+  resolveTerrainDuneWidthM,
+} from './beachOrientation';
 import { build, comp, hAt, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
 const OFFLINE_QUEUE_KEY = 'cv_waterline_offline_queue_v1';
+
+/**
+ * Écart fixe de Zéro Hydrographique entre Brest (-4,02 m IGN69) et Douarnenez/Morgat (-3,39 m IGN69)
+ * Source : Références Altimétriques Maritimes (RAM) du SHOM.
+ */
+export const SHOM_BREST_TO_DOUARNENEZ_ZH_OFFSET_M = -0.63;
+
+export function convertBrestHeightToDouarnenezM(brestHeightM: number): number {
+  return Number((brestHeightM + SHOM_BREST_TO_DOUARNENEZ_ZH_OFFSET_M).toFixed(2));
+}
 
 export function getStoredWaterlineLogs(): GpsWaterlineLog[] {
   try {
@@ -758,16 +772,22 @@ export function buildWaterlineSnapshot(
   const rawSurcoteCm = Math.round((settings.L - theoreticalWaterHeightM) * 100);
   const correctedSurcoteCm = Math.round((settings.L - correctedWaterHeightM) * 100);
 
-  // 5. Mesures géométriques par rapport au Cadre Terrain (Largeur depuis la Dune + Position Gauche/Droite)
+  // 5. Mesures géométriques : Cadre Terrain personnalisé si défini, sinon pied de dune Lestrevet–Pentrez intégré (auto)
   const cadreEval = activeCadre
     ? evaluatePointAgainstCadre(gps.latitude, gps.longitude, activeCadre)
     : null;
   const softMarginM = activeCadre?.softSandMarginM ?? 50;
-  const usableWidthM =
-    cadreEval?.widthFromDuneM != null
-      ? Math.max(0, cadreEval.widthFromDuneM - softMarginM)
-      : estimateLitto3dUsableWidthM(correctedWaterHeightM, softMarginM);
+  const resolvedDune = resolveTerrainDuneWidthM(
+    gps.latitude,
+    gps.longitude,
+    cadreEval?.widthFromDuneM,
+    null
+  );
   const bayZone = classifyBayZone(gps.latitude, gps.longitude, cadreEval?.lateralPosPct);
+  const usableWidthM =
+    resolvedDune.widthFromDuneM != null
+      ? Math.max(0, resolvedDune.widthFromDuneM - softMarginM)
+      : estimateLitto3dUsableWidthM(correctedWaterHeightM, softMarginM, bayZone.zoneId);
 
   return {
     timestamp: gps.timestamp,
@@ -785,7 +805,7 @@ export function buildWaterlineSnapshot(
     schoolThresholdM: settings.L,
     rawSurcoteCm,
     correctedSurcoteCm,
-    measuredWidthFromDuneM: cadreEval?.widthFromDuneM ?? undefined,
+    measuredWidthFromDuneM: resolvedDune.widthFromDuneM ?? undefined,
     usableWidthM,
     beachZone: bayZone.zoneId,
     lateralPosFromLeftM: cadreEval?.lateralPosFromLeftM ?? undefined,
@@ -816,8 +836,12 @@ export function exportWaterlineLogsAsCsv(
     'Precision_GPS_m',
     'Qualite_GPS',
     'Zone_Plage',
-    'Largeur_Dune_Mer_m',
-    'Largeur_Utile_Exploitable_m',
+    'Largeur_Dune_Mer_Terrain_m',
+    'Bande_Sable_Theorique_Utile_m',
+    'Bande_Sable_Modele_Corrige_Utile_m',
+    'Bande_Sable_Terrain_Utile_m',
+    'Bande_Mangee_vs_Theo_m',
+    'Bande_Mangee_vs_Corrige_m',
     'Position_Depuis_Gauche_m',
     'Position_Couloir_pct',
     'Dans_Cadre_Roulage',
@@ -836,6 +860,7 @@ export function exportWaterlineLogsAsCsv(
     'Pression_Reelle_hPa',
     'Station_Pression',
     'Maregraphe_SHOM_Brest_m',
+    'Maregraphe_Brest_eq_Douarnenez_m',
     'Houle_Reelle_m',
     'Periode_Houle_Reelle_s',
     'Statut_Consolidation',
@@ -851,13 +876,20 @@ export function exportWaterlineLogsAsCsv(
   const softMarginM = activeCadre?.softSandMarginM ?? 50;
   const rows = logs.map(l => {
     const dynEval = activeCadre ? evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadre) : null;
-    const widthNum = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM ?? null;
+    const resolvedDune = resolveTerrainDuneWidthM(
+      l.latitude,
+      l.longitude,
+      dynEval?.widthFromDuneM,
+      l.measuredWidthFromDuneM
+    );
+    const widthNum = resolvedDune.widthFromDuneM;
     const widthM = widthNum ?? '';
-    const usableW =
-      widthNum != null
-        ? Math.max(0, widthNum - softMarginM)
-        : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
     const bayZone = classifyBayZone(l.latitude, l.longitude, dynEval?.lateralPosPct ?? l.lateralPosPct);
+    const theoUsableM = estimateLitto3dUsableWidthM(l.theoreticalWaterHeightM, softMarginM, bayZone.zoneId);
+    const corrUsableM = estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM, bayZone.zoneId);
+    const terrainUsableM = widthNum != null ? Math.max(0, widthNum - softMarginM) : '';
+    const eatenVsTheoM = typeof terrainUsableM === 'number' ? terrainUsableM - theoUsableM : '';
+    const eatenVsCorrM = typeof terrainUsableM === 'number' ? terrainUsableM - corrUsableM : '';
     const latPosM = dynEval?.lateralPosFromLeftM ?? l.lateralPosFromLeftM ?? '';
     const latPct = dynEval?.lateralPosPct ?? l.lateralPosPct ?? '';
     const inZone =
@@ -866,7 +898,12 @@ export function exportWaterlineLogsAsCsv(
         : l.isInsideZone != null
         ? (l.isInsideZone ? 'Oui' : 'Hors cadre')
         : '';
-    const cadreRef = dynEval?.widthFromDuneM != null ? dynEval.profileKey : (l.cadreProfileUsed || '');
+    const cadreRef =
+      resolvedDune.source === 'cadre'
+        ? dynEval?.profileKey || ''
+        : resolvedDune.source === 'builtin_dune'
+        ? 'dune_auto_lestrevet_pentrez'
+        : l.cadreProfileUsed || '';
     const rw = l.realWeatherSnapshot;
 
     return [
@@ -881,7 +918,11 @@ export function exportWaterlineLogsAsCsv(
       l.accuracyQuality,
       bayZone.shortLabel,
       widthM,
-      usableW,
+      theoUsableM,
+      corrUsableM,
+      terrainUsableM,
+      eatenVsTheoM,
+      eatenVsCorrM,
       latPosM,
       latPct,
       inZone,
@@ -900,6 +941,7 @@ export function exportWaterlineLogsAsCsv(
       rw?.pressureHpa != null ? rw.pressureHpa : '',
       rw?.pressureStation || '',
       rw?.shomBrestHeightM != null ? rw.shomBrestHeightM : '',
+      rw?.shomBrestHeightM != null ? convertBrestHeightToDouarnenezM(rw.shomBrestHeightM) : '',
       rw?.waveHeightM != null ? rw.waveHeightM : '',
       rw?.wavePeriodS != null ? rw.wavePeriodS : '',
       l.consolidationStatus || '',
@@ -965,7 +1007,13 @@ export interface GpsZoneDiagnostic {
   label: string;
   count: number;
   avgUsableWidthM: number | null;
+  avgDeltaVsCorrM: number | null;
   avgCorrDeltaCm: number | null;
+}
+
+export interface GpsSwellBucketDiagnostic {
+  count: number;
+  avgDeltaVsCorrM: number | null;
 }
 
 export interface GpsDiagnosticSummary {
@@ -978,8 +1026,24 @@ export interface GpsDiagnosticSummary {
   avgTheoreticalWaterM: number | null;
   avgCorrectedWaterM: number | null;
   avgShomBrestWaterM: number | null;
+  avgShomBrestEqDouarnenezM: number | null;
+  /** Surcote réelle moyenne au marégraphe de Brest (eq. DZ) vs modèle corrigé pression (cm) */
+  avgBrestSurgeVsCorrCm: number | null;
   avgRawSurcoteCm: number | null;
   avgCorrSurcoteCm: number | null;
+  /** Nombre de relevés avec bande terrain calculée (baie Lestrevet–Pentrez) */
+  terrainMeasuredCount: number;
+  /** Écart moyen (Terrain − SHOM brut) en mètres (négatif = plage mangée) */
+  avgDeltaBeachVsTheoM: number | null;
+  /** Écart moyen (Terrain − Modèle corrigé) en mètres (négatif = plage mangée au-delà de la pression) */
+  avgDeltaBeachVsCorrM: number | null;
+  /** Coefficient empirique : mètres de plage mangés/gagnés par mètre de houle (sur relevés houle >= 0,8 m) */
+  swellImpactMPerM: number | null;
+  swellImpactSampleCount: number;
+  swellCalm: GpsSwellBucketDiagnostic;
+  swellModerate: GpsSwellBucketDiagnostic;
+  swellStrong: GpsSwellBucketDiagnostic;
+  coveredZonesCount: number;
   suggestedThresholdM: number | null;
   deltaFromCurrentCm: number | null;
   verdictLevel: 'empty' | 'preliminary' | 'aligned' | 'higher' | 'lower';
@@ -1002,9 +1066,11 @@ export interface GpsDiagnosticSummary {
 export function computeGpsDiagnosticSummary(
   logs: GpsWaterlineLog[],
   currentThresholdM: number,
-  activeCadre?: BeachCadreProfile | null
+  activeCadre?: BeachCadreProfile | null,
+  startDate: string = '2026-11-20'
 ): GpsDiagnosticSummary {
-  const totalCount = logs.length;
+  const cleanLogs = logs.filter(l => l && l.dateStr && l.dateStr >= startDate);
+  const totalCount = cleanLogs.length;
   const threshold = GPS_DIAGNOSTIC_THRESHOLD;
   const isReady = totalCount >= threshold;
   const progressPct = Math.min(100, Math.round((totalCount / threshold) * 100));
@@ -1027,13 +1093,24 @@ export function computeGpsDiagnosticSummary(
       avgTheoreticalWaterM: null,
       avgCorrectedWaterM: null,
       avgShomBrestWaterM: null,
+      avgShomBrestEqDouarnenezM: null,
+      avgBrestSurgeVsCorrCm: null,
       avgRawSurcoteCm: null,
       avgCorrSurcoteCm: null,
+      terrainMeasuredCount: 0,
+      avgDeltaBeachVsTheoM: null,
+      avgDeltaBeachVsCorrM: null,
+      swellImpactMPerM: null,
+      swellImpactSampleCount: 0,
+      swellCalm: { count: 0, avgDeltaVsCorrM: null },
+      swellModerate: { count: 0, avgDeltaVsCorrM: null },
+      swellStrong: { count: 0, avgDeltaVsCorrM: null },
+      coveredZonesCount: 0,
       suggestedThresholdM: null,
       deltaFromCurrentCm: null,
       verdictLevel: 'empty',
       verdictText:
-        'Enregistrez vos 20 premiers relevés bord de l’eau (sur plusieurs coefficients et météos) pour obtenir un premier diagnostic chiffré du seuil réel de Lestrevet.',
+        'Enregistrez vos 20 premiers relevés bord de l’eau (mer calme, houle moyenne et forte houle) pour calibrer automatiquement l’effet houle et la largeur roulable réelle.',
       lowPressureCount: 0,
       lowPressureAvgRawCm: null,
       normalHighPressureCount: 0,
@@ -1047,6 +1124,7 @@ export function computeGpsDiagnosticSummary(
         label: z.label,
         count: 0,
         avgUsableWidthM: null,
+        avgDeltaVsCorrM: null,
         avgCorrDeltaCm: null,
       })),
     };
@@ -1059,8 +1137,21 @@ export function computeGpsDiagnosticSummary(
   let sumCorrCm = 0;
 
   let sumShomBrest = 0;
+  let sumBrestSurgeVsCorrCm = 0;
   let shomBrestCount = 0;
   let consolidatedCount = 0;
+
+  let terrainMeasuredCount = 0;
+  let sumDeltaBeachVsTheoM = 0;
+  let sumDeltaBeachVsCorrM = 0;
+
+  let swellImpactCount = 0;
+  let sumSwellWaveH = 0;
+  let sumSwellDeltaCorrM = 0;
+
+  const swellCalm = { count: 0, sumDeltaM: 0 };
+  const swellMod = { count: 0, sumDeltaM: 0 };
+  const swellStrong = { count: 0, sumDeltaM: 0 };
 
   let lowPCount = 0;
   let lowPSumRaw = 0;
@@ -1074,24 +1165,27 @@ export function computeGpsDiagnosticSummary(
 
   const zoneBuckets: Record<
     'lestrevet' | 'lieue_de_greve' | 'pentrez',
-    { count: number; sumW: number; wCount: number; sumCorrCm: number }
+    { count: number; sumW: number; wCount: number; sumDeltaCorrM: number; deltaCount: number; sumCorrCm: number }
   > = {
-    lestrevet: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
-    lieue_de_greve: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
-    pentrez: { count: 0, sumW: 0, wCount: 0, sumCorrCm: 0 },
+    lestrevet: { count: 0, sumW: 0, wCount: 0, sumDeltaCorrM: 0, deltaCount: 0, sumCorrCm: 0 },
+    lieue_de_greve: { count: 0, sumW: 0, wCount: 0, sumDeltaCorrM: 0, deltaCount: 0, sumCorrCm: 0 },
+    pentrez: { count: 0, sumW: 0, wCount: 0, sumDeltaCorrM: 0, deltaCount: 0, sumCorrCm: 0 },
   };
 
-  for (const l of logs) {
+  for (const l of cleanLogs) {
     sumTheo += l.theoreticalWaterHeightM;
-    sumCorr += l.correctedWaterHeightM;
+    sumCorr += l.theoreticalWaterHeightM;
     sumRawCm += l.rawSurcoteCm;
-    sumCorrCm += l.correctedSurcoteCm;
+    sumCorrCm += l.rawSurcoteCm;
 
     if (l.consolidationStatus === 'consolidated') {
       consolidatedCount += 1;
     }
     if (l.realWeatherSnapshot?.shomBrestHeightM != null) {
       sumShomBrest += l.realWeatherSnapshot.shomBrestHeightM;
+      const brestEqDz = convertBrestHeightToDouarnenezM(l.realWeatherSnapshot.shomBrestHeightM);
+      // Surcote marégraphe Brest (eq. DZ) comparée directement au SHOM brut
+      sumBrestSurgeVsCorrCm += (brestEqDz - l.theoreticalWaterHeightM) * 100;
       shomBrestCount += 1;
     }
 
@@ -1121,15 +1215,54 @@ export function computeGpsDiagnosticSummary(
     const bayZone = classifyBayZone(l.latitude, l.longitude, dynEval?.lateralPosPct ?? l.lateralPosPct);
     const bucket = zoneBuckets[bayZone.zoneId];
     bucket.count += 1;
-    bucket.sumCorrCm += l.correctedSurcoteCm;
-    const widthFromDune = dynEval?.widthFromDuneM ?? l.measuredWidthFromDuneM;
-    const usableW =
-      widthFromDune != null
-        ? Math.max(0, widthFromDune - softMarginM)
-        : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
-    if (usableW != null) {
-      bucket.sumW += usableW;
+    bucket.sumCorrCm += l.rawSurcoteCm;
+    const resolvedDune = resolveTerrainDuneWidthM(
+      l.latitude,
+      l.longitude,
+      dynEval?.widthFromDuneM,
+      l.measuredWidthFromDuneM
+    );
+
+    const theoUsableM = estimateLitto3dUsableWidthM(l.theoreticalWaterHeightM, softMarginM, bayZone.zoneId);
+
+    if (resolvedDune.widthFromDuneM != null) {
+      const terrainUsableM = Math.max(0, resolvedDune.widthFromDuneM - softMarginM);
+      const deltaTheoM = terrainUsableM - theoUsableM;
+
+      terrainMeasuredCount += 1;
+      sumDeltaBeachVsTheoM += deltaTheoM;
+      sumDeltaBeachVsCorrM += deltaTheoM;
+
+      bucket.sumW += terrainUsableM;
       bucket.wCount += 1;
+      bucket.sumDeltaCorrM += deltaTheoM;
+      bucket.deltaCount += 1;
+
+      const waveH = l.realWeatherSnapshot?.waveHeightM ?? l.weatherSnapshot.waveHeightM;
+      if (waveH != null && Number.isFinite(waveH)) {
+        if (waveH < 1.0) {
+          swellCalm.count += 1;
+          swellCalm.sumDeltaM += deltaTheoM;
+        } else if (waveH < 1.8) {
+          swellMod.count += 1;
+          swellMod.sumDeltaM += deltaTheoM;
+        } else {
+          swellStrong.count += 1;
+          swellStrong.sumDeltaM += deltaTheoM;
+        }
+
+        if (waveH >= 0.8) {
+          swellImpactCount += 1;
+          sumSwellWaveH += waveH;
+          sumSwellDeltaCorrM += deltaTheoM;
+        }
+      }
+    } else {
+      const fallbackUsable = l.usableWidthM ?? theoUsableM;
+      if (fallbackUsable != null) {
+        bucket.sumW += fallbackUsable;
+        bucket.wCount += 1;
+      }
     }
   }
 
@@ -1137,37 +1270,56 @@ export function computeGpsDiagnosticSummary(
   const avgCorrectedWaterM = Number((sumCorr / totalCount).toFixed(2));
   const avgShomBrestWaterM =
     shomBrestCount > 0 ? Number((sumShomBrest / shomBrestCount).toFixed(2)) : null;
+  const avgShomBrestEqDouarnenezM =
+    avgShomBrestWaterM != null ? convertBrestHeightToDouarnenezM(avgShomBrestWaterM) : null;
+  const avgBrestSurgeVsCorrCm =
+    shomBrestCount > 0 ? Math.round(sumBrestSurgeVsCorrCm / shomBrestCount) : null;
   const avgRawSurcoteCm = Math.round(sumRawCm / totalCount);
   const avgCorrSurcoteCm = Math.round(sumCorrCm / totalCount);
 
-  // Hauteur corrigée moyenne constatée quand le moniteur se tient à la limite basse de roulage
-  const suggestedThresholdM = avgCorrectedWaterM;
+  const avgDeltaBeachVsTheoM =
+    terrainMeasuredCount > 0 ? Math.round(sumDeltaBeachVsTheoM / terrainMeasuredCount) : null;
+  const avgDeltaBeachVsCorrM =
+    terrainMeasuredCount > 0 ? Math.round(sumDeltaBeachVsCorrM / terrainMeasuredCount) : null;
+  const swellImpactMPerM =
+    swellImpactCount > 0 && sumSwellWaveH > 0
+      ? Math.round(sumSwellDeltaCorrM / sumSwellWaveH)
+      : null;
+
+  const coveredZonesCount = zoneMeta.filter(z => zoneBuckets[z.id].count > 0).length;
+
+  // Hauteur SHOM moyenne constatée quand le moniteur se tient à la limite basse de roulage
+  const suggestedThresholdM = avgTheoreticalWaterM;
   const deltaFromCurrentCm = Math.round((suggestedThresholdM - currentThresholdM) * 100);
 
   let verdictLevel: GpsDiagnosticSummary['verdictLevel'] = 'preliminary';
   let verdictText = '';
   if (!isReady) {
     verdictLevel = 'preliminary';
-    verdictText = `Tendance préliminaire (${totalCount}/${threshold} mesures) : hauteur corrigée moyenne constatée à la limite basse = ${avgCorrectedWaterM.toFixed(
-      2
-    )} m (vs seuil actuel ${currentThresholdM.toFixed(2)} m, soit ${
-      deltaFromCurrentCm > 0 ? `+${deltaFromCurrentCm}` : deltaFromCurrentCm
-    } cm). Encore ${remaining} relevé${remaining > 1 ? 's' : ''} pour fiabiliser le diagnostic.`;
+    const swellSnippet =
+      swellImpactMPerM != null
+        ? ` · Effet houle observé : ${swellImpactMPerM > 0 ? `+${swellImpactMPerM}` : swellImpactMPerM} m de plage / m de houle`
+        : '';
+    verdictText = `Tendance préliminaire dès le 20/11 (${totalCount}/${threshold} mesures) : bande terrain ${
+      avgDeltaBeachVsTheoM != null
+        ? `${avgDeltaBeachVsTheoM > 0 ? `+${avgDeltaBeachVsTheoM}` : avgDeltaBeachVsTheoM} m vs SHOM brut`
+        : `hauteur SHOM ${avgTheoreticalWaterM.toFixed(2)} m`
+    }${swellSnippet}. Encore ${remaining} relevé${remaining > 1 ? 's' : ''} pour consolider le diagnostic.`;
   } else if (Math.abs(deltaFromCurrentCm) <= 10) {
     verdictLevel = 'aligned';
     verdictText = `Seuil actuel (${currentThresholdM.toFixed(
       2
-    )} m) confirmé par le terrain : hauteur corrigée moyenne mesurée = ${avgCorrectedWaterM.toFixed(
+    )} m) confirmé par le terrain (dès le 20/11) : hauteur SHOM moyenne mesurée = ${avgTheoreticalWaterM.toFixed(
       2
     )} m (écart de ${deltaFromCurrentCm > 0 ? `+${deltaFromCurrentCm}` : deltaFromCurrentCm} cm, dans la marge normale ±10 cm).`;
   } else if (deltaFromCurrentCm > 10) {
     verdictLevel = 'higher';
-    verdictText = `La plage reste roulable plus haut que prévu (+${deltaFromCurrentCm} cm en moyenne) : seuil mesuré autour de ${suggestedThresholdM.toFixed(
+    verdictText = `La plage reste roulable plus haut que prévu (+${deltaFromCurrentCm} cm vs SHOM en moyenne) : seuil constaté autour de ${suggestedThresholdM.toFixed(
       2
     )} m contre ${currentThresholdM.toFixed(2)} m actuellement. À valider avec Jérôme avant d’ajuster le curseur.`;
   } else {
     verdictLevel = 'lower';
-    verdictText = `La mer limite le roulage plus tôt que prévu (${deltaFromCurrentCm} cm en moyenne) : seuil mesuré autour de ${suggestedThresholdM.toFixed(
+    verdictText = `La mer limite le roulage plus tôt que prévu (${deltaFromCurrentCm} cm vs SHOM en moyenne) : seuil constaté autour de ${suggestedThresholdM.toFixed(
       2
     )} m contre ${currentThresholdM.toFixed(2)} m actuellement. Envisager un réglage plus prudent avec Jérôme.`;
   }
@@ -1182,8 +1334,28 @@ export function computeGpsDiagnosticSummary(
     avgTheoreticalWaterM,
     avgCorrectedWaterM,
     avgShomBrestWaterM,
+    avgShomBrestEqDouarnenezM,
+    avgBrestSurgeVsCorrCm,
     avgRawSurcoteCm,
     avgCorrSurcoteCm,
+    terrainMeasuredCount,
+    avgDeltaBeachVsTheoM,
+    avgDeltaBeachVsCorrM,
+    swellImpactMPerM,
+    swellImpactSampleCount: swellImpactCount,
+    swellCalm: {
+      count: swellCalm.count,
+      avgDeltaVsCorrM: swellCalm.count > 0 ? Math.round(swellCalm.sumDeltaM / swellCalm.count) : null,
+    },
+    swellModerate: {
+      count: swellMod.count,
+      avgDeltaVsCorrM: swellMod.count > 0 ? Math.round(swellMod.sumDeltaM / swellMod.count) : null,
+    },
+    swellStrong: {
+      count: swellStrong.count,
+      avgDeltaVsCorrM: swellStrong.count > 0 ? Math.round(swellStrong.sumDeltaM / swellStrong.count) : null,
+    },
+    coveredZonesCount,
     suggestedThresholdM,
     deltaFromCurrentCm,
     verdictLevel,
@@ -1203,6 +1375,7 @@ export function computeGpsDiagnosticSummary(
         label: z.label,
         count: b.count,
         avgUsableWidthM: b.wCount > 0 ? Math.round(b.sumW / b.wCount) : null,
+        avgDeltaVsCorrM: b.deltaCount > 0 ? Math.round(b.sumDeltaCorrM / b.deltaCount) : null,
         avgCorrDeltaCm: b.count > 0 ? Math.round(b.sumCorrCm / b.count) : null,
       };
     }),

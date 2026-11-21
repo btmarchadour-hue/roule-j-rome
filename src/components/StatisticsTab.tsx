@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AppSettings, CustomSlotsMap, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
+import { AppSettings, BeachCadreConfig, CustomSlotsMap, GpsWaterlineLog, SlotObservation, TidePoint, ValidationsMap, WindPoint } from '../types';
 import {
   AbsentSlotRef,
   CANCELLATION_REASONS_INFO,
   computePeriodStats,
-  computeCalibrationStats,
   getStoredObservations,
   getFiscalYearStart,
   getFiscalYearBounds,
@@ -12,11 +11,20 @@ import {
 } from '../utils/statisticsEngine';
 import { SlotObservationModal } from './SlotObservationModal';
 import { StatisticsComparator } from './StatisticsComparator';
+import { PhysicalCorrelationObservatory } from './PhysicalCorrelationObservatory';
 import {
   AgendaBookingItem,
   subscribeToObservations,
+  subscribeToWaterlineGpsLogs,
+  subscribeToBeachCadreConfig,
   saveObservationToFirestore,
 } from '../utils/firebaseSync';
+import { getStoredBeachCadreConfig } from '../utils/beachCadreEngine';
+import {
+  getOfflineGpsQueue,
+  getStoredWaterlineLogs,
+  mergeOfflineQueueWithLogs,
+} from '../utils/waterlineGpsEngine';
 import {
   buildReservationKey,
   DEFAULT_NON_PUBLISH_REASONS,
@@ -65,8 +73,13 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
   const [observations, setObservations] = useState<SlotObservation[]>(() =>
     getStoredObservations().filter(o => o && o.id && !o.id.startsWith('sample-obs-'))
   );
+  // Relevés GPS bord d'eau + cadre terrain actif pour l'Observatoire Physique (dès 20/11/2026)
+  const [gpsLogs, setGpsLogs] = useState<GpsWaterlineLog[]>(() =>
+    mergeOfflineQueueWithLogs(getStoredWaterlineLogs(), getOfflineGpsQueue())
+  );
+  const [cadreConfig, setCadreConfig] = useState<BeachCadreConfig>(() => getStoredBeachCadreConfig());
 
-  // Abonnement temps réel Firestore pour recevoir les relevés notés par Jérôme ou Benoît
+  // Abonnement temps réel Firestore pour recevoir les relevés REX + GPS bord d'eau
   useEffect(() => {
     // Purger définitivement tout ancien échantillon fictif du stockage local
     try {
@@ -93,7 +106,30 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
         // ignore
       }
     });
-    return () => unsubscribe();
+
+    const unsubGps = subscribeToWaterlineGpsLogs(
+      remoteLogs => {
+        setGpsLogs(mergeOfflineQueueWithLogs(remoteLogs, getOfflineGpsQueue()));
+      },
+      () => {
+        // Fallback silencieux sur le cache local si hors-ligne
+      }
+    );
+
+    const unsubCadre = subscribeToBeachCadreConfig(
+      remoteCadre => {
+        setCadreConfig(remoteCadre);
+      },
+      () => {
+        // Fallback silencieux sur le cadre local
+      }
+    );
+
+    return () => {
+      unsubscribe();
+      unsubGps();
+      unsubCadre();
+    };
   }, []);
 
   // Modal de saisie / édition d'un relevé + sélecteur de date et vrai créneau (Option B)
@@ -332,10 +368,8 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
     );
   }, [startDateStr, endDateStr, settings, EX, windList, validations, customSlotsMap, observations, filterScope]);
 
-  // Calcul des statistiques de calibration & surcote (Point 2)
-  const calibrationStats = useMemo(() => {
-    return computeCalibrationStats(observations, settings.L);
-  }, [observations, settings.L]);
+  // Cadre terrain actif pour le calcul de largeur plage réelle
+  const activeCadreProfile = cadreConfig.profiles[cadreConfig.activeProfile];
 
   // Carnet de bord trié du plus récent au plus ancien (date puis horaire de début décroissants)
   const sortedObservations = useMemo(() => {
@@ -351,9 +385,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
 
   const pickerDaySlots = useMemo(() => {
     if (!slotPickerOpen || !pickerDate) return [];
-    const isRealMode = settings.calculationMode === 'reel';
-    const empiricalOffsetM = isRealMode ? (settings.empiricalOffsetCm ?? 15) / 100 : 0;
-    const effThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
+    const effThreshold = settings.L - (settings.mg || 0) / 100;
     const tideW = win(EX, effThreshold);
     const first = EX[0]?.t ?? 0;
     const last = EX[EX.length - 1]?.t ?? 0;
@@ -1700,215 +1732,16 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
           border: '1px solid var(--bd, #e2e8f0)',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
-          <div>
-            <div style={{ textTransform: 'uppercase', fontSize: '0.68rem', fontWeight: 800, color: '#0284c7', letterSpacing: '0.04em' }}>
-              Point 2 · Observatoire Physique & Calibration
-            </div>
-            <h3 style={{ margin: '2px 0 0', fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
-              🌊 Écarts Théorie vs Réel sur les Hauteurs d'Eau & Surcotes
-            </h3>
-            <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px' }}>
-              Croisement des relevés terrain avec la pression atmosphérique (règle barométrique), le vent de mer et la houle.
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="fbtn"
-            onClick={handleOpenNewObservation}
-            style={{
-              margin: 0,
-              padding: '6px 12px',
-              fontSize: '0.76rem',
-              fontWeight: 800,
-              background: '#0284c7',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
-          >
-            + Noter un relevé
-          </button>
-        </div>
-
-        {/* Synthèse de calibration automatique */}
-        <div
-          style={{
-            background: '#f0fdf4',
-            border: '1.5px solid #86efac',
-            borderRadius: '10px',
-            padding: '12px 16px',
-            marginBottom: '16px',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '12px',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#166534' }}>
-              💡 Calibration estimée du spot (Lestrevet)
-            </div>
-            <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>
-              Seuil effectif moyen : <strong>{calibrationStats.suggestedThresholdM.toFixed(2)} m</strong> (nominal {settings.L.toFixed(2)} m)
-            </div>
-            <div style={{ fontSize: '0.72rem', color: '#334155', marginTop: '2px' }}>
-              Surcote moyenne constatée :{' '}
-              {calibrationStats.waterDeltaCount > 0 ? (
-                <>
-                  <strong>
-                    {calibrationStats.avgWaterDeltaCm > 0
-                      ? `+${calibrationStats.avgWaterDeltaCm}`
-                      : calibrationStats.avgWaterDeltaCm}{' '}
-                    cm
-                  </strong>{' '}
-                  ({calibrationStats.waterDeltaCount} mesure{calibrationStats.waterDeltaCount > 1 ? 's' : ''})
-                </>
-              ) : (
-                <strong>— (aucune mesure de surcote)</strong>
-              )}
-            </div>
-            <div style={{ fontSize: '0.68rem', color: '#166534', marginTop: '4px', fontStyle: 'italic' }}>
-              ℹ️ Seuil théorique ({settings.L.toFixed(2)} m) diminué de la surcote pour maintenir la même largeur de roulage.
-            </div>
-          </div>
-
-          <div style={{ fontSize: '0.72rem', color: '#166534', borderLeft: '2px solid #86efac', paddingLeft: '12px' }}>
-            <div>
-              • <strong>Basse pression (&lt; 1005 hPa)</strong> : surcote moy.{' '}
-              {calibrationStats.pressureCorrelation.lowPressureCount > 0 ? (
-                <strong>
-                  {calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm > 0
-                    ? `+${calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm}`
-                    : calibrationStats.pressureCorrelation.lowPressureAvgDeltaCm}{' '}
-                  cm ({calibrationStats.pressureCorrelation.lowPressureCount})
-                </strong>
-              ) : (
-                <strong>—</strong>
-              )}
-            </div>
-            <div style={{ marginTop: '2px' }}>
-              • <strong>Vents d&apos;Ouest (portant mer)</strong> : surcote moy.{' '}
-              {calibrationStats.windDirCorrelation.westSectorCount > 0 ? (
-                <strong>
-                  {calibrationStats.windDirCorrelation.westSectorAvgDeltaCm > 0
-                    ? `+${calibrationStats.windDirCorrelation.westSectorAvgDeltaCm}`
-                    : calibrationStats.windDirCorrelation.westSectorAvgDeltaCm}{' '}
-                  cm ({calibrationStats.windDirCorrelation.westSectorCount})
-                </strong>
-              ) : (
-                <strong>—</strong>
-              )}
-            </div>
-            <div style={{ marginTop: '2px' }}>
-              • <strong>Décalage moyen au roulage</strong> :{' '}
-              {calibrationStats.timeDeltaCount > 0 ? (
-                <>
-                  <strong>
-                    {calibrationStats.avgTimeDeltaMin > 0
-                      ? `+${calibrationStats.avgTimeDeltaMin} min`
-                      : `${calibrationStats.avgTimeDeltaMin} min`}
-                  </strong>{' '}
-                  ({calibrationStats.timeDeltaCount} mesure{calibrationStats.timeDeltaCount > 1 ? 's' : ''})
-                </>
-              ) : (
-                <strong>— (aucune mesure)</strong>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Graphique de Corrélation SVG (Scatter plot Surcote vs Pression) */}
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', marginBottom: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase' }}>
-              📈 Corrélation : Surcote constatée (cm) vs Pression Atmosphérique (hPa)
-            </span>
-            <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
-              Ligne rouge = règle théorique (+1 cm / hPa sous 1013)
-            </span>
-          </div>
-
-          <div style={{ width: '100%', height: '180px', position: 'relative', overflow: 'hidden' }}>
-            <svg width="100%" height="180" viewBox="0 0 500 180" preserveAspectRatio="none">
-              {/* Grille de fond */}
-              <line x1="50" y1="20" x2="480" y2="20" stroke="#e2e8f0" strokeDasharray="3 3" />
-              <line x1="50" y1="65" x2="480" y2="65" stroke="#e2e8f0" strokeDasharray="3 3" />
-              <line x1="50" y1="110" x2="480" y2="110" stroke="#94a3b8" strokeWidth="1.5" /> {/* Ligne zéro */}
-              <line x1="50" y1="155" x2="480" y2="155" stroke="#e2e8f0" strokeDasharray="3 3" />
-
-              {/* Axes Labels */}
-              <text x="45" y="24" textAnchor="end" style={{ fontSize: '9px', fill: '#64748b' }}>+30cm</text>
-              <text x="45" y="69" textAnchor="end" style={{ fontSize: '9px', fill: '#64748b' }}>+15cm</text>
-              <text x="45" y="114" textAnchor="end" style={{ fontSize: '9px', fill: '#0f172a', fontWeight: 800 }}>0 cm</text>
-              <text x="45" y="159" textAnchor="end" style={{ fontSize: '9px', fill: '#64748b' }}>-15cm</text>
-
-              {/* Axe Pression (X de 980 hPa à 1030 hPa) */}
-              <text x="50" y="175" textAnchor="start" style={{ fontSize: '9px', fill: '#64748b' }}>980 hPa</text>
-              <text x="265" y="175" textAnchor="middle" style={{ fontSize: '9px', fill: '#64748b' }}>1005 hPa</text>
-              <text x="350" y="175" textAnchor="middle" style={{ fontSize: '9px', fill: '#0f172a', fontWeight: 800 }}>1013 hPa</text>
-              <text x="480" y="175" textAnchor="end" style={{ fontSize: '9px', fill: '#64748b' }}>1030 hPa</text>
-
-              {/* Ligne théorique barométrique (1013 hPa -> 0 cm, 993 hPa -> +20 cm, 1023 hPa -> -10 cm) */}
-              {/* X: 980 -> 50, 1030 -> 480. Delta X = 430 pour 50 hPa, soit 8.6 px/hPa */}
-              {/* Y: 0cm -> 110. Delta Y = 3 px/cm */}
-              <line
-                x1={50 + (990 - 980) * 8.6}
-                y1={110 - (1013 - 990) * 3}
-                x2={50 + (1025 - 980) * 8.6}
-                y2={110 - (1013 - 1025) * 3}
-                stroke="#dc2626"
-                strokeWidth="1.5"
-                strokeDasharray="4 2"
-              />
-
-              {/* Points réels observés */}
-              {observations
-                .filter(o => o.waterDeltaCm != null && o.observedPressure != null)
-                .map((o, idx) => {
-                  const p = Math.max(980, Math.min(1030, o.observedPressure!));
-                  const delta = Math.max(-20, Math.min(40, o.waterDeltaCm!));
-
-                  const px = 50 + (p - 980) * 8.6;
-                  const py = 110 - delta * 3;
-
-                  const isWest = o.observedWindDir?.toUpperCase().includes('O') || o.observedWindDir?.toUpperCase().includes('W');
-
-                  return (
-                    <g key={o.id || idx}>
-                      <circle
-                        cx={px}
-                        cy={py}
-                        r="5.5"
-                        fill={isWest ? '#0284c7' : '#f97316'}
-                        stroke="#fff"
-                        strokeWidth="1.5"
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <title>{`${o.ds} (${o.slotStart}) : Pression ${p} hPa, Surcote ${delta > 0 ? '+' : ''}${delta} cm, Vent ${o.observedWindKts || 0} nds ${o.observedWindDir || ''}`}</title>
-                      </circle>
-                    </g>
-                  );
-                })}
-            </svg>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '6px', fontSize: '0.68rem', color: '#64748b' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', display: 'inline-block' }} />
-              Vent portant de mer (Ouest / SO / NO)
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f97316', display: 'inline-block' }} />
-              Vent de terre (Est / NE / SE)
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '14px', height: '2px', background: '#dc2626', display: 'inline-block' }} />
-              Règle théorique (+1 cm / hPa)
-            </span>
-          </div>
-        </div>
+        <PhysicalCorrelationObservatory
+          gpsLogs={gpsLogs}
+          observations={observations}
+          activeCadre={activeCadreProfile}
+          settings={settings}
+          windList={windList}
+          selectedDate={selectedDate}
+          onNewObservation={handleOpenNewObservation}
+          onEditObservation={handleEditObservation}
+        />
 
         {/* Tableau des relevés réels enregistrés */}
         <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>

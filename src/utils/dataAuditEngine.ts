@@ -133,9 +133,7 @@ export const buildDataAuditReport = ({
   windList: WindPoint[];
 }): DataAuditReport => {
   const todayStr = tdy();
-  const isRealMode = settings.calculationMode === 'reel';
-  const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
-  const effectiveThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
+  const effectiveThreshold = settings.L - (settings.mg || 0) / 100;
   const tideW = EX.length > 0 ? win(EX, effectiveThreshold) : [];
   const first = EX[0]?.t ?? 0;
   const last = EX[EX.length - 1]?.t ?? 0;
@@ -378,7 +376,7 @@ export const buildDataAuditReport = ({
           }
         }
 
-        // 5. Réservations actives sur un créneau fermé en Cycle 1 ou annulé Pas d'inscrits (Vie 2)
+        // 5. Réservations actives sur un créneau fermé en Cycle 1, regroupé ou annulé Pas d'inscrits (Vie 2)
         if (
           bookingSummary.totalChars > 0 &&
           (c1 === 'not_published' || c1 === 'excluded' || c1 === 'closed_no_bookings')
@@ -394,6 +392,15 @@ export const buildDataAuditReport = ({
                 ? 'À ne pas publier (C1)'
                 : "Pas d'inscrits (Vie 2)"
             } ». Vérifie s’il a bien roulé ou s’il faut corriger ce statut.`,
+          });
+        } else if (bookingSummary.totalChars > 0 && c2 === 'merged') {
+          issues.push({
+            code: 'bookings_on_merged_slot',
+            level: 'conflict',
+            label: `Fiches clients encore rattachées à un créneau regroupé (${bookingSummary.totalChars} char(s))`,
+            detail: `Ce créneau est marqué regroupé${
+              valItem.mergedLabel ? ` vers ${valItem.mergedLabel}` : ''
+            }, mais ${bookingSummary.totalChars} char(s) sont restés dans les réservations de l’ancien créneau. Vérifie la séance cible puis nettoie ce reliquat.`,
           });
         }
 

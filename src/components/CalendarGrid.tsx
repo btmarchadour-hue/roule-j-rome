@@ -148,7 +148,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
       }
 
       if (valStatus === 'ok') {
-        dayTooltip += ` · ${cycle2Count > 0 ? '✓' : '📅'} ${valCount} ouvert${valCount > 1 ? 's' : ''}${
+        dayTooltip += ` · ${cycle2Count > 0 ? '✓' : '⏳'} ${valCount} ouvert${valCount > 1 ? 's' : ''}${
           rejCount ? `, ${rejCount} fermé${rejCount > 1 ? 's' : ''}` : ''
         }${isPast ? ' (passé)' : ''}`;
       }
@@ -190,7 +190,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
                 : 'Cycle 1 : journée publiée à la vente'
             }
           >
-            {hasCycle2 ? (isPartial ? `${valCount}/${totalCount}` : '⚡') : isPartial ? `${valCount}/${totalCount}` : 'C1'}
+            {hasCycle2 ? (isPartial ? `${valCount}/${totalCount}` : '⚡') : isPartial ? `${valCount}/${totalCount}` : '⏳'}
           </span>
         )}
         {valStatus === 'none' && dayBookedChars > 0 && (
@@ -417,8 +417,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             <div className="cal-holiday-legend" style={{ marginTop: 0, paddingTop: '4px', borderTop: 'none', marginBottom: '4px' }}>
               <span style={{ fontWeight: 700 }}>Statuts (haut gauche) :</span>
               <span className="cal-holiday-legend-item">
-                <span className="cal-holiday-swatch" style={{ backgroundColor: '#0284c7', color: '#fff', width: 'auto', padding: '0 4px' }}>
-                  C1
+                <span className="cal-holiday-swatch" style={{ backgroundColor: '#0284c7', color: '#fff' }}>
+                  ⏳
                 </span>
                 <span>Publié (sans inscrit)</span>
               </span>
@@ -656,7 +656,7 @@ const BatchCycle1Bar: React.FC<BatchCycle1BarProps> = ({
         }}
       >
         <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#334155' }}>
-          📅 Publication rapide Cycle 1 :
+          ⏳ Publication rapide Cycle 1 :
           <span style={{ fontWeight: 600, color: '#64748b', marginLeft: '6px' }}>
             (en complément du jour par jour)
           </span>

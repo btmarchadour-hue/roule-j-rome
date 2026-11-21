@@ -1,18 +1,81 @@
 import React from 'react';
-import { TidePoint } from '../types';
-import { getNextTideInfo, lc, tdy } from '../utils/tides';
+import { TidePoint, WindPoint } from '../types';
+import { getNextTideInfo, lc, tdy, toU, wstat, wtxt } from '../utils/tides';
 
 interface TideHeaderCardProps {
   selectedDate: string;
   EX: TidePoint[];
+  windList?: WindPoint[];
 }
 
-export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX }) => {
+export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX, windList = [] }) => {
   const [y, m0, d] = selectedDate.split('-').map(Number);
   const m = m0 - 1;
   const isToday = selectedDate === tdy();
 
   const { pmList, bmList, nextTide, coef, pmCoefs } = getNextTideInfo(EX, selectedDate);
+
+  // Vent prévu sur la plage horaire de roulage (09h00 – 18h00 heure locale)
+  const dayWindStat = windList.length > 0
+    ? wstat(toU(y, m, d, 9 * 60), toU(y, m, d, 18 * 60), windList)
+    : null;
+  const dayWindMean = dayWindStat ? (dayWindStat.lo + dayWindStat.hi) / 2 : null;
+
+  type WindVisual = {
+    tier: 'none' | 'light' | 'ideal' | 'strong';
+    sailColor: string;
+    hullColor: string;
+    bgColor: string;
+    borderColor: string;
+    streaks: number;
+    tooltip: string;
+  };
+
+  const windVisual: WindVisual = (() => {
+    if (dayWindStat == null || dayWindMean == null) {
+      return {
+        tier: 'none',
+        sailColor: '#0284c7',
+        hullColor: '#0f172a',
+        bgColor: '#f0f9ff',
+        borderColor: '#bae6fd',
+        streaks: 0,
+        tooltip: 'Char à voile · Prévision vent non disponible pour cette date',
+      };
+    }
+    const detail = wtxt(dayWindStat);
+    if (dayWindMean < 8) {
+      return {
+        tier: 'light',
+        sailColor: '#64748b',
+        hullColor: '#334155',
+        bgColor: '#f1f5f9',
+        borderColor: '#cbd5e1',
+        streaks: 0,
+        tooltip: `Vent faible (0–8 nds) · ${detail}`,
+      };
+    }
+    if (dayWindMean <= 20) {
+      return {
+        tier: 'ideal',
+        sailColor: '#16a34a',
+        hullColor: '#14532d',
+        bgColor: '#dcfce7',
+        borderColor: '#86efac',
+        streaks: 1,
+        tooltip: `Vent idéal (8–20 nds) · ${detail}`,
+      };
+    }
+    return {
+      tier: 'strong',
+      sailColor: '#ea580c',
+      hullColor: '#7c2d12',
+      bgColor: '#ffedd5',
+      borderColor: '#fdba74',
+      streaks: 2,
+      tooltip: `Vent soutenu (> 20 nds) · ${detail}`,
+    };
+  })();
 
   const fr2 = (v: number) => v.toFixed(2).replace('.', ',');
 
@@ -52,8 +115,83 @@ export const TideHeaderCard: React.FC<TideHeaderCardProps> = ({ selectedDate, EX
           marginBottom: '10px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '1.35rem', lineHeight: 1 }}>🌊</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap' }}>
+          <span
+            title={windVisual.tooltip}
+            aria-label={windVisual.tooltip}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '9px',
+              background: windVisual.bgColor,
+              border: `1.5px solid ${windVisual.borderColor}`,
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 28 28"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              {/* Filets de vent selon la force */}
+              {windVisual.streaks >= 1 && (
+                <path
+                  d="M2.5 9.5H7.5"
+                  stroke={windVisual.sailColor}
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  opacity="0.75"
+                />
+              )}
+              {windVisual.streaks >= 2 && (
+                <path
+                  d="M1.5 13.5H6.5"
+                  stroke={windVisual.sailColor}
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  opacity="0.9"
+                />
+              )}
+              {/* Voile de char à voile */}
+              <path
+                d="M12.5 3.2C17.8 6.8 20.6 12.6 20.8 18.6L10.8 18.6C11.4 13.5 11.9 8.2 12.5 3.2Z"
+                fill={windVisual.sailColor}
+              />
+              {/* Lattes de voile */}
+              <path
+                d="M12 10.5L17.4 10.2M11.5 14.5L19.4 14.2"
+                stroke="#ffffff"
+                strokeWidth="1"
+                strokeLinecap="round"
+                opacity="0.65"
+              />
+              {/* Mât */}
+              <path
+                d="M12.5 3L10.6 20.5"
+                stroke={windVisual.hullColor}
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+              {/* Châssis du char à voile */}
+              <path
+                d="M6.5 21H22.2"
+                stroke={windVisual.hullColor}
+                strokeWidth="2.1"
+                strokeLinecap="round"
+              />
+              {/* Roue arrière + roue avant */}
+              <circle cx="9.2" cy="22.4" r="2.7" fill={windVisual.hullColor} />
+              <circle cx="9.2" cy="22.4" r="1.1" fill="#ffffff" />
+              <circle cx="20.6" cy="23.1" r="2" fill={windVisual.hullColor} />
+              <circle cx="20.6" cy="23.1" r="0.8" fill="#ffffff" />
+            </svg>
+          </span>
           <span
             style={{
               fontSize: '1.18rem',

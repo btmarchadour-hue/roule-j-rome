@@ -1,11 +1,29 @@
-import React, { useEffect, useId, useMemo, useState } from 'react';
-import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint } from '../types';
-import { computeCadreGeometry, evaluatePointAgainstCadre } from '../utils/beachCadreEngine';
-import { build, hAt } from '../utils/tides';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
+import { computeCadreGeometry } from '../utils/beachCadreEngine';
+import {
+  BAY_ZONES_META,
+  BayZoneId,
+  estimateLitto3dWaterlineXExactM,
+  LITTO3D_PROFILES_BY_ZONE,
+} from '../utils/beachOrientation';
+import { build, hAt, windAt } from '../utils/tides';
+import {
+  BeachPisteDiagram,
+  estimateSvgPillWidth,
+} from './BeachPisteDiagram';
+import {
+  buildPhysicalObservationPoints,
+  fitEmpiricalTerrainModel,
+  OBSERVATORY_START_DATE,
+  predictEmpiricalAt,
+} from '../utils/physicalCorrelationEngine';
+import { getStoredObservations } from '../utils/statisticsEngine';
 
 interface Litto3DBeachSectionProps {
   settings: AppSettings;
   EX: TidePoint[];
+  windList?: WindPoint[];
   logs?: GpsWaterlineLog[];
   activeCadre?: BeachCadreProfile | null;
 }
@@ -13,24 +31,17 @@ interface Litto3DBeachSectionProps {
 export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   settings,
   EX,
+  windList = [],
   logs = [],
   activeCadre = null,
 }) => {
-  const rawUid = useId();
-  const uid = rawUid.replace(/[^a-zA-Z0-9_-]/g, '');
 
   // Heure actuelle en minute UTC
   const nowUtcMinute = Math.floor(Date.now() / 60000);
 
-  // 1. Hauteur théorique SHOM pure (sans correction pression ni offset empirique)
+  // 1. Hauteur théorique SHOM pure (sans correction météo)
   const rawEX = useMemo(() => build(settings.les, false, []), [settings.les]);
   const theoTideHeight = hAt(nowUtcMinute, rawEX) ?? hAt(nowUtcMinute, EX) ?? settings.L;
-
-  // 2. Correction active du modèle (pression atm + décalage empirique Mode Réel)
-  const correctedTideHeight = hAt(nowUtcMinute, EX) ?? theoTideHeight;
-  const isRealMode = settings.calculationMode === 'reel';
-  const empiricalOffsetM = isRealMode ? (settings.empiricalOffsetCm ?? 15) / 100 : 0;
-  const modelDeltaCm = Math.round((correctedTideHeight + empiricalOffsetM - theoTideHeight) * 100);
 
   // Curseur libre de surcote (+) / sous-cote (−) simulée (-40 cm à +50 cm)
   const [simulatedSurcoteCm, setSimulatedSurcoteCm] = useState<number>(0);
@@ -46,45 +57,53 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
 
   // Mode d'affichage visuel : 'aerial' (Vue du dessus / Piste de char) ou 'profile' (Coupe transversale)
   const [viewMode, setViewMode] = useState<'aerial' | 'profile'>('aerial');
+  // Secteur de baie sélectionné pour le profil altimétrique IGN RGE ALTI 1 m (Lestrevet par défaut)
+  const [selectedZone, setSelectedZone] = useState<BayZoneId>('lestrevet');
 
-  // Hauteurs d'eau : Théorique SHOM vs Réelle avec surcote/sous-cote appliquée
+  // Données issues du Cadre Terrain étalonné (Dune + Gauche/Droite)
+  const cadreGeom = useMemo(() => computeCadreGeometry(activeCadre), [activeCadre]);
+
+  // Météo en direct & Modèle Réel Empirique unifié (Pression + Houle + Vent dès le 20/11/2026)
+  const liveWind = useMemo(() => windAt(nowUtcMinute, windList), [nowUtcMinute, windList]);
+  const empiricalTerrainModel = useMemo(() => {
+    const rexObs = getStoredObservations().filter(
+      o => o && o.id && !o.id.startsWith('sample-obs-')
+    );
+    const { points } = buildPhysicalObservationPoints(
+      logs,
+      rexObs,
+      activeCadre,
+      OBSERVATORY_START_DATE
+    );
+    return fitEmpiricalTerrainModel(points);
+  }, [logs, activeCadre]);
+
+  const empiricalPred = useMemo(
+    () => predictEmpiricalAt(empiricalTerrainModel, liveWind),
+    [empiricalTerrainModel, liveWind]
+  );
+  const modelDeltaCm = empiricalPred.surcoteCm;
+  const empiricalBasisLabel =
+    empiricalTerrainModel.sampleCountSurcote > 0
+      ? `${empiricalTerrainModel.terrainConfidencePct}% terrain · ${empiricalTerrainModel.sampleCountSurcote} rel. dès 20/11`
+      : 'Pression + Houle + Vent';
+
+  // Hauteurs d'eau : SHOM brut vs Modèle Réel Empirique (+ curseur simulation)
   const theoWaterHeightM = Number(theoTideHeight.toFixed(2));
   const appliedDeltaCm = modelDeltaCm + simulatedSurcoteCm;
   const realWaterHeightM = Number((theoWaterHeightM + appliedDeltaCm / 100).toFixed(2));
 
   /**
-   * Modèle Altimétrique Litto3D Finistère (IGN / SHOM) pour Lestrevet / Pentrez
+   * Profil Altimétrique réel IGN RGE ALTI 1 m / Litto3D du secteur sélectionné (Lestrevet / Lieue de Grève / Pentrez)
    */
-  const beachProfile = useMemo(() => {
-    return [
-      { x: 0, z: 7.2, desc: 'Pied de dune' },
-      { x: 40, z: 6.2, desc: 'Cordon galets / sable sec' },
-      { x: 75, z: 5.3, desc: 'Laisse de haute mer (Pleine mer)' },
-      { x: 120, z: 4.85, desc: 'Zone haute praticable' },
-      { x: 160, z: 4.5, desc: 'Seuil École 4,50 m' },
-      { x: 220, z: 3.9, desc: 'Plateau sable dur' },
-      { x: 280, z: 3.25, desc: 'Cœur zone de roulage' },
-      { x: 340, z: 2.65, desc: 'Bas estran' },
-      { x: 400, z: 1.95, desc: 'Basse mer de vive-eau' },
-      { x: 460, z: 1.25, desc: 'Zéro de basse mer exceptionnelle' },
-    ];
-  }, []);
+  const beachProfile = useMemo(
+    () => LITTO3D_PROFILES_BY_ZONE[selectedZone],
+    [selectedZone]
+  );
 
-  // Calcul exact (flottant) de la distance X depuis la dune selon la hauteur d'eau Z
-  const calculateWaterLineXExact = (zWater: number): number => {
-    if (zWater >= 7.2) return 0;
-    if (zWater <= 1.25) return 460;
-
-    for (let i = 0; i < beachProfile.length - 1; i++) {
-      const p1 = beachProfile[i];
-      const p2 = beachProfile[i + 1];
-      if (zWater <= p1.z && zWater >= p2.z) {
-        const ratio = (p1.z - zWater) / (p1.z - p2.z);
-        return p1.x + ratio * (p2.x - p1.x);
-      }
-    }
-    return 200;
-  };
+  // Calcul exact (flottant) de la distance X depuis la dune selon la hauteur d'eau Z et la zone
+  const calculateWaterLineXExact = (zWater: number): number =>
+    estimateLitto3dWaterlineXExactM(zWater, selectedZone);
 
   const theoExactX = calculateWaterLineXExact(theoWaterHeightM);
   const realExactX = calculateWaterLineXExact(realWaterHeightM);
@@ -93,33 +112,26 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   const realDiscoveredX = Math.round(realExactX);
   const theoRollableWidthM = Math.max(0, theoDiscoveredX - softSandMarginM);
   const realRollableWidthM = Math.max(0, realDiscoveredX - softSandMarginM);
-  const deltaBeachM = realDiscoveredX - theoDiscoveredX; // négatif = perte (surcote), positif = gain (sous-cote)
+  const deltaBeachM = realDiscoveredX - theoDiscoveredX; // négatif = perte (surcote), positif = gain (décote)
 
   // Position et largeur utile au seuil école nominal (ex: 4,50 m)
   const nominalThresholdX = Math.round(calculateWaterLineXExact(settings.L));
   const nominalWidthM = Math.max(0, nominalThresholdX - softSandMarginM);
 
-  // Données issues du Cadre Terrain étalonné (Dune + Gauche/Droite)
-  const cadreGeom = useMemo(() => computeCadreGeometry(activeCadre), [activeCadre]);
-  const latestGpsDuneEval = useMemo(() => {
-    if (!activeCadre || logs.length === 0) return null;
-    return evaluatePointAgainstCadre(logs[0].latitude, logs[0].longitude, activeCadre);
-  }, [activeCadre, logs]);
-
-  // Dimensions SVG
+  // Dimensions SVG (Coupe Altimétrique)
   const svgW = 700;
-  const svgH = 265;
+  const svgH = 318;
   const padL = 54;
   const padR = 25;
-  const padT = 25;
-  const padB = 45;
+  const padT = 28;
+  const padB = 94;
   const plotW = svgW - padL - padR;
   const plotH = svgH - padT - padB;
 
   const mapX = (x: number) => padL + (x / 460) * plotW;
-  const mapY = (z: number) => padT + plotH - ((z - 0.5) / 7.5) * plotH;
+  const mapY = (z: number) => padT + plotH - ((z - 1.0) / 8.2) * plotH;
 
-  // Positions X/Y en coupe & en vue aérienne
+  // Positions X/Y en coupe
   const theoXPos = mapX(theoExactX);
   const theoYPos = mapY(theoWaterHeightM);
   const realXPos = mapX(realExactX);
@@ -127,28 +139,32 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
 
   // Polygone du sol en coupe
   const sandPolygon = [
-    `${mapX(0)},${mapY(0.5)}`,
+    `${mapX(0)},${mapY(1.0)}`,
     ...beachProfile.map(p => `${mapX(p.x)},${mapY(p.z)}`),
-    `${mapX(460)},${mapY(0.5)}`,
+    `${mapX(460)},${mapY(1.0)}`,
   ].join(' ');
 
   // Polygone d'eau réelle en coupe
   const waterPolygon = [
     `${realXPos},${realYPos}`,
     `${mapX(460)},${realYPos}`,
-    `${mapX(460)},${mapY(0.5)}`,
-    `${realXPos},${mapY(0.5)}`,
+    `${mapX(460)},${mapY(1.0)}`,
+    `${realXPos},${mapY(1.0)}`,
   ].join(' ');
 
-  const isSurcote = appliedDeltaCm > 0; // eau plus haute -> realXPos < theoXPos -> moins de plage
-  const isSouscote = appliedDeltaCm < 0; // eau plus basse -> realXPos > theoXPos -> plus de plage
+  const isSurcote = appliedDeltaCm > 0;
+  const isSouscote = appliedDeltaCm < 0;
   const hasWaterDiff = Math.abs(realXPos - theoXPos) >= 0.8;
 
-  const drySandPatternId = `drySandPattern-${uid}`;
-  const tracksPatternId = `tracksPattern-${uid}`;
-  const oceanGradId = `oceanGrad-${uid}`;
-  const surcoteZonePatternId = `surcoteZone-${uid}`;
-  const souscoteZonePatternId = `souscoteZone-${uid}`;
+  const realHeightLabel = realWaterHeightM.toFixed(2).replace('.', ',');
+  const theoHeightLabel = theoWaterHeightM.toFixed(2).replace('.', ',');
+
+  const shomBarText = `SHOM brut : ${theoRollableWidthM} m utiles`;
+  const shomPillW = estimateSvgPillWidth(shomBarText, 5.4, 22);
+  const diffRollM = realRollableWidthM - theoRollableWidthM;
+  const diffRollStr = diffRollM > 0 ? `+${diffRollM} m` : diffRollM < 0 ? `${diffRollM} m` : 'identique';
+  const empBarText = `Modèle réel empirique : ${realRollableWidthM} m (${diffRollStr} · ${empiricalBasisLabel})`;
+  const empPillW = Math.min(395, estimateSvgPillWidth(empBarText, 5.25, 22));
 
   return (
     <div
@@ -178,50 +194,78 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           </h3>
         </div>
 
-        {/* Sélecteur de représentation : Vue Aérienne (Piste) vs Coupe Altimétrique */}
-        <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-          <button
-            type="button"
-            onClick={() => setViewMode('aerial')}
-            style={{
-              border: 'none',
-              background: viewMode === 'aerial' ? '#0284c7' : 'transparent',
-              color: viewMode === 'aerial' ? '#ffffff' : '#475569',
-              fontWeight: 800,
-              fontSize: '0.74rem',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <span>🛰️</span>
-            <span>Vue Piste (Du dessus)</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('profile')}
-            style={{
-              border: 'none',
-              background: viewMode === 'profile' ? '#0284c7' : 'transparent',
-              color: viewMode === 'profile' ? '#ffffff' : '#475569',
-              fontWeight: 800,
-              fontSize: '0.74rem',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '5px',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <span>📐</span>
-            <span>Coupe Altimétrique</span>
-          </button>
+        {/* Sélecteur secteur IGN + bascule Vue Piste / Coupe Altimétrique */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'inline-flex', background: '#f8fafc', padding: '3px', borderRadius: '8px', border: '1px solid #cbd5e1', gap: '2px' }}>
+            {(['lestrevet', 'lieue_de_greve', 'pentrez'] as const).map(zId => {
+              const meta = BAY_ZONES_META[zId];
+              const active = selectedZone === zId;
+              return (
+                <button
+                  key={zId}
+                  type="button"
+                  onClick={() => setSelectedZone(zId)}
+                  style={{
+                    border: active ? `1px solid ${meta.bd}` : '1px solid transparent',
+                    background: active ? meta.bg : 'transparent',
+                    color: active ? meta.fg : '#64748b',
+                    fontWeight: active ? 800 : 700,
+                    fontSize: '0.70rem',
+                    padding: '5px 8px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {meta.shortLabel}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+            <button
+              type="button"
+              onClick={() => setViewMode('aerial')}
+              style={{
+                border: 'none',
+                background: viewMode === 'aerial' ? '#0284c7' : 'transparent',
+                color: viewMode === 'aerial' ? '#ffffff' : '#475569',
+                fontWeight: 800,
+                fontSize: '0.74rem',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>🛰️</span>
+              <span>Vue Piste (Du dessus)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('profile')}
+              style={{
+                border: 'none',
+                background: viewMode === 'profile' ? '#0284c7' : 'transparent',
+                color: viewMode === 'profile' ? '#ffffff' : '#475569',
+                fontWeight: 800,
+                fontSize: '0.74rem',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>📐</span>
+              <span>Coupe Altimétrique</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -256,7 +300,7 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               }}
             />
             <span style={{ color: '#475569' }}>
-              Théorique SHOM : <strong style={{ color: '#0f172a' }}>{theoWaterHeightM.toFixed(2).replace('.', ',')} m</strong> (X = {theoDiscoveredX} m)
+              SHOM brut : <strong style={{ color: '#0f172a' }}>{theoHeightLabel} m</strong> (bord d&apos;eau {theoDiscoveredX} m)
             </span>
           </span>
 
@@ -271,8 +315,8 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               }}
             />
             <span style={{ color: '#0f172a' }}>
-              Réel ({appliedDeltaCm >= 0 ? `+${appliedDeltaCm}` : appliedDeltaCm} cm) :{' '}
-              <strong>{realWaterHeightM.toFixed(2).replace('.', ',')} m</strong> (X = {realDiscoveredX} m)
+              Modèle empirique ({appliedDeltaCm >= 0 ? `+${appliedDeltaCm}` : appliedDeltaCm} cm) :{' '}
+              <strong>{realHeightLabel} m</strong> (bord d&apos;eau {realDiscoveredX} m)
             </span>
           </span>
         </div>
@@ -286,350 +330,42 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           {appliedDeltaCm > 0
             ? `Surcote +${appliedDeltaCm} cm ➔ ${deltaBeachM} m de plage (${realRollableWidthM} m utiles vs ${theoRollableWidthM} m SHOM)`
             : appliedDeltaCm < 0
-            ? `Sous-cote ${appliedDeltaCm} cm ➔ +${deltaBeachM} m de plage (${realRollableWidthM} m utiles vs ${theoRollableWidthM} m SHOM)`
-            : 'Écart 0 cm : ligne réelle superposée au SHOM (utilisez le curseur Surcote / Sous-cote ci-dessous pour simuler)'}
+            ? `Décote ${appliedDeltaCm} cm ➔ +${deltaBeachM} m de plage (${realRollableWidthM} m utiles vs ${theoRollableWidthM} m SHOM)`
+            : 'Écart 0 cm : modèle empirique aligné sur le SHOM (utilisez le curseur ci-dessous pour simuler)'}
         </span>
       </div>
 
-      {/* REPRÉSENTATION 1 : VUE AÉRIENNE DE LA PISTE (VUE DU DESSUS) */}
+      {/* REPRÉSENTATION 1 : VUE AÉRIENNE DE LA PISTE (SHOM vs MODÈLE RÉEL EMPIRIQUE) */}
       {viewMode === 'aerial' ? (
-        <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '14px', overflowX: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '0.72rem', color: '#64748b' }}>
+        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '12px 14px', overflowX: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', fontSize: '0.72rem', color: '#64748b' }}>
             <span>Vue plongeante orientée vers le large (Dune à gauche ➔ Mer à droite)</span>
-            <span style={{ fontWeight: 700, color: '#0369a1' }}>Échelle réelle 1:1 en largeur</span>
+            <span style={{ fontWeight: 700, color: '#0369a1' }}>Échelle réelle 1:1 en largeur (0 – 460 m)</span>
           </div>
 
-          <svg
-            viewBox="0 0 700 245"
-            style={{ width: '100%', minWidth: '560px', height: 'auto', display: 'block', borderRadius: '8px', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.06)' }}
-          >
-            <defs>
-              {/* Motif sable sec */}
-              <pattern id={drySandPatternId} width="20" height="20" patternUnits="userSpaceOnUse">
-                <rect width="20" height="20" fill="#fef08a" />
-                <circle cx="5" cy="5" r="1" fill="#facc15" />
-                <circle cx="15" cy="15" r="1.2" fill="#eab308" />
-              </pattern>
-              {/* Motif traces de roues char à voile */}
-              <pattern id={tracksPatternId} width="40" height="30" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="8" x2="40" y2="8" stroke="#ca8a04" strokeWidth="1" strokeDasharray="6 4" opacity="0.45" />
-                <line x1="0" y1="22" x2="40" y2="22" stroke="#ca8a04" strokeWidth="1" strokeDasharray="6 4" opacity="0.45" />
-              </pattern>
-              {/* Dégradé vagues */}
-              <linearGradient id={oceanGradId} x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#38bdf8" />
-                <stop offset="30%" stopColor="#0284c7" />
-                <stop offset="100%" stopColor="#0369a1" />
-              </linearGradient>
-              {/* Hachures Surcote (plage submergée par rapport au SHOM) */}
-              <pattern id={surcoteZonePatternId} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <rect width="8" height="8" fill="rgba(249, 115, 22, 0.42)" />
-                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255, 237, 213, 0.85)" strokeWidth="2.2" />
-              </pattern>
-              {/* Hachures Sous-cote (plage gagnée par rapport au SHOM) */}
-              <pattern id={souscoteZonePatternId} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-                <rect width="8" height="8" fill="rgba(16, 185, 129, 0.32)" />
-                <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(209, 250, 229, 0.9)" strokeWidth="2.2" />
-              </pattern>
-            </defs>
-
-            {/* 1. Zone Dune & Oyats */}
-            <rect x="0" y="0" width="30" height="245" fill="#a3e635" />
-            <line x1="30" y1="0" x2="30" y2="245" stroke="#4d7c0f" strokeWidth="2" strokeDasharray="3 3" />
-            <text x="15" y="125" fill="#365314" fontSize="10" fontWeight="900" transform="rotate(-90 15,125)" textAnchor="middle">
-              DUNE / HERBE
-            </text>
-
-            {/* 2. Zone de sable sec / haut de plage */}
-            {softSandMarginM > 0 && (
-              <g>
-                <rect
-                  x="30"
-                  y="0"
-                  width={Math.max(0, mapX(softSandMarginM) - 30)}
-                  height="245"
-                  fill="#fef9c3"
-                />
-                <rect
-                  x="30"
-                  y="0"
-                  width={Math.max(0, mapX(softSandMarginM) - 30)}
-                  height="245"
-                  fill={`url(#${drySandPatternId})`}
-                  opacity="0.35"
-                />
-                <line
-                  x1={mapX(softSandMarginM)}
-                  y1="0"
-                  x2={mapX(softSandMarginM)}
-                  y2="245"
-                  stroke="#d97706"
-                  strokeWidth="2"
-                  strokeDasharray="4 2"
-                />
-                {mapX(softSandMarginM) > 80 && (
-                  <text
-                    x={(30 + mapX(softSandMarginM)) / 2}
-                    y="125"
-                    fill="#b45309"
-                    fontSize="9.5"
-                    fontWeight="800"
-                    transform={`rotate(-90 ${(30 + mapX(softSandMarginM)) / 2},125)`}
-                    textAnchor="middle"
-                  >
-                    SABLE SEC / MOU ({softSandMarginM} m)
-                  </text>
-                )}
-              </g>
-            )}
-
-            {/* 3. Piste de roulage en sable dur (De softSandMarginM à realXPos) */}
-            {realXPos > mapX(softSandMarginM) && (
-              <g>
-                <rect
-                  x={mapX(softSandMarginM)}
-                  y="0"
-                  width={Math.max(0, realXPos - mapX(softSandMarginM))}
-                  height="245"
-                  fill="#fde68a"
-                />
-                <rect
-                  x={mapX(softSandMarginM)}
-                  y="0"
-                  width={Math.max(0, realXPos - mapX(softSandMarginM))}
-                  height="245"
-                  fill={`url(#${tracksPatternId})`}
-                />
-
-                {realRollableWidthM >= 80 && (
-                  <g opacity="0.88">
-                    <rect
-                      x={mapX(softSandMarginM) + 15}
-                      y="38"
-                      width={Math.max(20, realXPos - mapX(softSandMarginM) - 30)}
-                      height="165"
-                      rx="30"
-                      fill="none"
-                      stroke="#ea580c"
-                      strokeWidth="2"
-                      strokeDasharray="8 6"
-                    />
-                    <circle cx={mapX(softSandMarginM) + 25} cy="72" r="5" fill="#dc2626" stroke="#fff" strokeWidth="1.5" />
-                    <circle cx={mapX(softSandMarginM) + 25} cy="168" r="5" fill="#dc2626" stroke="#fff" strokeWidth="1.5" />
-                    <circle cx={realXPos - 25} cy="72" r="5" fill="#eab308" stroke="#000" strokeWidth="1.5" />
-                    <circle cx={realXPos - 25} cy="168" r="5" fill="#eab308" stroke="#000" strokeWidth="1.5" />
-
-                    <g transform={`translate(${((mapX(softSandMarginM) + realXPos) / 2)}, 110)`}>
-                      <line x1="0" y1="-12" x2="0" y2="12" stroke="#1e293b" strokeWidth="2.5" />
-                      <line x1="-10" y1="10" x2="10" y2="10" stroke="#1e293b" strokeWidth="2.5" />
-                      <rect x="-2" y="-15" width="4" height="6" rx="1" fill="#0f172a" />
-                      <rect x="-12" y="7" width="4" height="6" rx="1" fill="#0f172a" />
-                      <rect x="8" y="7" width="4" height="6" rx="1" fill="#0f172a" />
-                      <path d="M 0,0 Q 8,-4 14,-2" fill="none" stroke="#2563eb" strokeWidth="3" />
-                      <circle cx="0" cy="0" r="3" fill="#ef4444" />
-                    </g>
-
-                    <text
-                      x={(mapX(softSandMarginM) + realXPos) / 2}
-                      y="140"
-                      fill="#9a3412"
-                      fontSize="9"
-                      fontWeight="900"
-                      textAnchor="middle"
-                    >
-                      Piste de cours {realRollableWidthM} m
-                    </text>
-                  </g>
-                )}
-              </g>
-            )}
-
-            {/* 4. Océan & Ligne d'eau RÉELLE (avec surcote / sous-cote) */}
-            <rect
-              x={realXPos}
-              y="0"
-              width={Math.max(0, 700 - realXPos)}
-              height="245"
-              fill={`url(#${oceanGradId})`}
-            />
-
-            {/* 4b. ZONE D'ÉCART ENTRE THÉORIQUE SHOM ET RÉEL (SURCOTE / SOUS-COTE) */}
-            {hasWaterDiff && (
-              <g>
-                <rect
-                  x={Math.min(realXPos, theoXPos)}
-                  y="0"
-                  width={Math.abs(theoXPos - realXPos)}
-                  height="245"
-                  fill={`url(#${isSurcote ? surcoteZonePatternId : souscoteZonePatternId})`}
-                />
-                {Math.abs(theoXPos - realXPos) >= 14 && (
-                  <text
-                    x={(realXPos + theoXPos) / 2}
-                    y="125"
-                    fill={isSurcote ? '#fff7ed' : '#065f46'}
-                    fontSize="8.5"
-                    fontWeight="900"
-                    transform={`rotate(-90 ${(realXPos + theoXPos) / 2},125)`}
-                    textAnchor="middle"
-                    style={{
-                      paintOrder: 'stroke',
-                      stroke: isSurcote ? '#9a3412' : '#ecfdf5',
-                      strokeWidth: '2px',
-                    }}
-                  >
-                    {isSurcote ? `SURCOTE ${deltaBeachM} m` : `SOUS-COTE +${deltaBeachM} m`}
-                  </text>
-                )}
-              </g>
-            )}
-
-            {/* Vaguelettes et trait d'eau RÉEL */}
-            <path
-              d={`M ${realXPos},0 Q ${realXPos + 4},30 ${realXPos},60 T ${realXPos},120 T ${realXPos},180 T ${realXPos},245`}
-              fill="none"
-              stroke={isSurcote ? '#ffedd5' : isSouscote ? '#d1fae5' : '#ffffff'}
-              strokeWidth="3.5"
-              opacity="0.95"
-            />
-            <text
-              x={Math.min(682, Math.max(realXPos, theoXPos) + 26)}
-              y="125"
-              fill="#ffffff"
-              fontSize="10.5"
-              fontWeight="900"
-              transform={`rotate(90 ${Math.min(682, Math.max(realXPos, theoXPos) + 26)},125)`}
-              textAnchor="middle"
-            >
-              MER RÉELLE ({realWaterHeightM.toFixed(2).replace('.', ',')} m)
-            </text>
-
-            {/* 4c. LIGNE D'EAU THÉORIQUE SHOM (pointillés jaune/ambre très visibles) */}
-            <line
-              x1={theoXPos}
-              y1="0"
-              x2={theoXPos}
-              y2="245"
-              stroke="#0f172a"
-              strokeWidth="3.2"
-              strokeDasharray="6 4"
-              opacity="0.45"
-            />
-            <line
-              x1={theoXPos}
-              y1="0"
-              x2={theoXPos}
-              y2="245"
-              stroke="#fde047"
-              strokeWidth="2.2"
-              strokeDasharray="6 4"
-            />
-            <rect
-              x={Math.min(605, Math.max(40, theoXPos - 54))}
-              y="6"
-              width="108"
-              height="16"
-              rx="4"
-              fill="rgba(15, 23, 42, 0.85)"
-              stroke="#fde047"
-              strokeWidth="1"
-            />
-            <text
-              x={Math.min(659, Math.max(94, theoXPos))}
-              y="17"
-              fill="#fef08a"
-              fontSize="7.8"
-              fontWeight="900"
-              textAnchor="middle"
-            >
-              Théo SHOM {theoWaterHeightM.toFixed(2).replace('.', ',')} m
-            </text>
-
-            {/* Étiquette Ligne d'eau Réelle si distincte du SHOM */}
-            {hasWaterDiff && (
-              <g>
-                <rect
-                  x={Math.min(600, Math.max(36, realXPos - 58))}
-                  y="25"
-                  width="116"
-                  height="16"
-                  rx="4"
-                  fill={isSurcote ? '#9a3412' : '#065f46'}
-                  stroke="#ffffff"
-                  strokeWidth="1"
-                />
-                <text
-                  x={Math.min(658, Math.max(94, realXPos))}
-                  y="36"
-                  fill="#ffffff"
-                  fontSize="7.8"
-                  fontWeight="900"
-                  textAnchor="middle"
-                >
-                  Réel {realWaterHeightM.toFixed(2).replace('.', ',')} m ({appliedDeltaCm > 0 ? `+${appliedDeltaCm}` : appliedDeltaCm} cm)
-                </text>
-              </g>
-            )}
-
-            {/* 5. Seuil nominal école (Ligne repère à 4,50 m) */}
-            <line
-              x1={mapX(nominalThresholdX)}
-              y1="0"
-              x2={mapX(nominalThresholdX)}
-              y2="245"
-              stroke="#b45309"
-              strokeWidth="1.6"
-              strokeDasharray="6 3"
-            />
-            <text
-              x={mapX(nominalThresholdX) - 4}
-              y="198"
-              fill="#78350f"
-              fontSize="8"
-              fontWeight="900"
-              textAnchor="end"
-            >
-              Seuil école {settings.L} m (X = {nominalThresholdX} m)
-            </text>
-
-            {/* 6. Points GPS réels de Jérôme projetés */}
-            {logs.slice(0, 5).map((l, idx) => {
-              const gpsX = calculateWaterLineXExact(l.theoreticalWaterHeightM);
-              return (
-                <g key={`log-aerial-${idx}`}>
-                  <circle cx={mapX(gpsX)} cy={52 + idx * 32} r="4.5" fill="#f59e0b" stroke="#000" strokeWidth="1.5" />
-                  <text x={mapX(gpsX) + 7} y={55 + idx * 32} fill="#0f172a" fontSize="7.5" fontWeight="800">
-                    GPS {l.author} ({l.theoreticalWaterHeightM}m)
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* 7. Grandes cotations en bas */}
-            <line x1="30" y1="216" x2={realXPos} y2="216" stroke="#475569" strokeWidth="1.2" />
-            <circle cx="30" cy="216" r="2.5" fill="#475569" />
-            <circle cx={realXPos} cy="216" r="2.5" fill="#475569" />
-            <text x={(30 + realXPos) / 2} y="211" fill="#475569" fontSize="8.5" fontWeight="800" textAnchor="middle">
-              Plage réelle découverte : {realDiscoveredX} m (Théo SHOM : {theoDiscoveredX} m)
-            </text>
-
-            {realRollableWidthM > 20 && (
-              <g>
-                <line x1={mapX(softSandMarginM)} y1="232" x2={realXPos} y2="232" stroke="#16a34a" strokeWidth="2.5" />
-                <circle cx={mapX(softSandMarginM)} cy="232" r="3.5" fill="#16a34a" />
-                <circle cx={realXPos} cy="232" r="3.5" fill="#16a34a" />
-                <text x={(mapX(softSandMarginM) + realXPos) / 2} y="236" fill="#15803d" fontSize="10" fontWeight="900" textAnchor="middle">
-                  🏁 LARGEUR ROULABLE RÉELLE : {realRollableWidthM} MÈTRES
-                  {deltaBeachM !== 0 ? ` (${deltaBeachM > 0 ? `+${deltaBeachM}` : deltaBeachM} m vs SHOM)` : ''}
-                </text>
-              </g>
-            )}
-          </svg>
+          <BeachPisteDiagram
+            softSandMarginM={softSandMarginM}
+            theoWaterHeightM={theoWaterHeightM}
+            realWaterHeightM={realWaterHeightM}
+            appliedDeltaCm={appliedDeltaCm}
+            theoExactX={theoExactX}
+            realExactX={realExactX}
+            theoRollableWidthM={theoRollableWidthM}
+            realRollableWidthM={realRollableWidthM}
+            deltaBeachM={deltaBeachM}
+            thresholdHeightM={settings.L}
+            thresholdExactX={nominalThresholdX}
+            thresholdLabelPrefix="Seuil"
+            thresholdTone="amber"
+            isWithinThreshold={realWaterHeightM <= settings.L}
+            empiricalBasisLabel={empiricalBasisLabel}
+            minWidth="560px"
+          />
         </div>
       ) : (
         /* REPRÉSENTATION 2 : COUPE ALTIMÉTRIQUE EN SECTION */
-        <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '14px', overflowX: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '0.72rem', color: '#64748b' }}>
+        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '12px 14px', overflowX: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', fontSize: '0.72rem', color: '#64748b' }}>
             <span>Coupe transversale (Remarque : hauteur verticalement rehaussée pour distinguer les cotes)</span>
             <span style={{ fontWeight: 700, color: '#0369a1' }}>Pente réelle : 1,15 % (0,66° seulement)</span>
           </div>
@@ -640,7 +376,7 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           >
             <rect x={padL} y={padT} width={plotW} height={plotH} fill="#f0f9ff" />
 
-            {[1, 2, 3, 4, 5, 6, 7].map(alt => {
+            {[2, 3, 4, 5, 6, 7, 8].map(alt => {
               const yPos = mapY(alt);
               return (
                 <g key={`y-grid-${alt}`}>
@@ -684,9 +420,9 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
             />
             <text
               x={padL - 10}
-              y={padT - 8}
+              y={padT - 10}
               fill="#0369a1"
-              fontSize="8"
+              fontSize="8.5"
               fontWeight="900"
               textAnchor="start"
             >
@@ -704,10 +440,10 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               />
             )}
 
-            <polygon points={waterPolygon} fill="rgba(14, 165, 233, 0.45)" />
+            <polygon points={waterPolygon} fill="rgba(14, 165, 233, 0.42)" />
             <polygon points={sandPolygon} fill="#fef3c7" stroke="#d97706" strokeWidth="2" />
 
-            {/* Seuil 4,50 m */}
+            {/* Seuil nominal école */}
             <line
               x1={padL}
               x2={padL + plotW}
@@ -717,8 +453,25 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               strokeWidth="1.5"
               strokeDasharray="5 3"
             />
-            <text x={padL + 5} y={mapY(settings.L) - 4} fill="#b45309" fontSize="8.5" fontWeight="800">
-              Seuil nominal école {settings.L} m (X = {nominalThresholdX} m · Utile : {nominalWidthM} m)
+            <rect
+              x={padL + 6}
+              y={Math.abs(mapY(settings.L) - realYPos) < 18 ? mapY(settings.L) + 4 : mapY(settings.L) - 18}
+              width="216"
+              height="15"
+              rx="4"
+              fill="rgba(254, 243, 199, 0.94)"
+              stroke="#f59e0b"
+              strokeWidth="0.9"
+            />
+            <text
+              x={padL + 114}
+              y={Math.abs(mapY(settings.L) - realYPos) < 18 ? mapY(settings.L) + 14.5 : mapY(settings.L) - 7.5}
+              fill="#92400e"
+              fontSize="8.2"
+              fontWeight="800"
+              textAnchor="middle"
+            >
+              Seuil école {settings.L} m (X = {nominalThresholdX} m · Utile {nominalWidthM} m)
             </text>
 
             {/* LIGNE D'EAU THÉORIQUE SHOM */}
@@ -740,17 +493,31 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               strokeWidth="1.2"
               strokeDasharray="3 3"
             />
-            <circle cx={theoXPos} cy={theoYPos} r="4.2" fill="#fde047" stroke="#0f172a" strokeWidth="1.4" />
-            <text
-              x={mapX(460) - 4}
-              y={isSurcote ? theoYPos + 11 : theoYPos - 5}
-              fill="#854d0e"
-              fontSize="8.5"
-              fontWeight="800"
-              textAnchor="end"
-            >
-              Théo SHOM : {theoWaterHeightM.toFixed(2).replace('.', ',')} m (X = {theoDiscoveredX} m)
-            </text>
+            <circle cx={theoXPos} cy={theoYPos} r="4" fill="#fde047" stroke="#0f172a" strokeWidth="1.3" />
+            {Math.abs(realYPos - theoYPos) >= 18 && (
+              <g>
+                <rect
+                  x={mapX(460) - 178}
+                  y={isSurcote ? theoYPos + 4 : theoYPos - 19}
+                  width="174"
+                  height="15"
+                  rx="4"
+                  fill="rgba(255, 255, 255, 0.92)"
+                  stroke="#eab308"
+                  strokeWidth="0.9"
+                />
+                <text
+                  x={mapX(460) - 91}
+                  y={isSurcote ? theoYPos + 14.5 : theoYPos - 8.5}
+                  fill="#854d0e"
+                  fontSize="8.2"
+                  fontWeight="800"
+                  textAnchor="middle"
+                >
+                  Théo SHOM : {theoHeightLabel} m (X = {theoDiscoveredX} m)
+                </text>
+              </g>
+            )}
 
             {/* LIGNE D'EAU RÉELLE (avec surcote / sous-cote) */}
             <line
@@ -769,75 +536,196 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
               stroke="#fff"
               strokeWidth="1.5"
             />
-            <text
-              x={Math.min(mapX(460) - 20, Math.max(realXPos, mapX(95)))}
-              y={Math.max(padT + 12, isSurcote ? realYPos - 7 : realYPos + 12)}
-              fill={isSurcote ? '#c2410c' : isSouscote ? '#047857' : '#0369a1'}
-              fontSize="9"
-              fontWeight="900"
-              textAnchor="middle"
-            >
-              Ligne réelle : {realWaterHeightM.toFixed(2).replace('.', ',')} m (X = {realDiscoveredX} m
-              {appliedDeltaCm !== 0 ? ` · ${appliedDeltaCm > 0 ? `+${appliedDeltaCm}` : appliedDeltaCm} cm` : ''})
-            </text>
+            {(() => {
+              const pillW = appliedDeltaCm !== 0 ? 228 : 168;
+              const pillX = Math.max(padL + 8, Math.min(mapX(460) - pillW - 4, realXPos + 10));
+              const pillY = Math.max(padT + 4, realYPos - 21);
+              return (
+                <g>
+                  <rect
+                    x={pillX}
+                    y={pillY}
+                    width={pillW}
+                    height="16"
+                    rx="4"
+                    fill="rgba(255, 255, 255, 0.95)"
+                    stroke={isSurcote ? '#ea580c' : isSouscote ? '#059669' : '#0284c7'}
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={pillX + pillW / 2}
+                    y={pillY + 11}
+                    fill={isSurcote ? '#c2410c' : isSouscote ? '#047857' : '#0369a1'}
+                    fontSize="8.5"
+                    fontWeight="900"
+                    textAnchor="middle"
+                  >
+                    Empirique : {realHeightLabel} m ({realDiscoveredX} m
+                    {appliedDeltaCm !== 0 ? ` · ${appliedDeltaCm > 0 ? `+${appliedDeltaCm}` : appliedDeltaCm} cm` : ''})
+                  </text>
+                </g>
+              );
+            })()}
 
-            {/* Cote utile */}
-            {realRollableWidthM > 20 && (
+            {/* Repères d'axe X */}
+            <text x={mapX(0)} y={padT + plotH + 13} fill="#64748b" fontSize="8" textAnchor="middle">Dune (0 m)</text>
+            {softSandMarginM >= 45 ? (
+              <text x={mapX(softSandMarginM)} y={padT + plotH + 13} fill="#b45309" fontSize="8" fontWeight="700" textAnchor="middle">
+                Sable mou ({softSandMarginM} m)
+              </text>
+            ) : softSandMarginM >= 25 ? (
+              <text x={mapX(softSandMarginM)} y={padT + plotH + 13} fill="#b45309" fontSize="8" fontWeight="700" textAnchor="middle">
+                {softSandMarginM} m
+              </text>
+            ) : null}
+            <text x={mapX(200)} y={padT + plotH + 13} fill="#64748b" fontSize="8" textAnchor="middle">200 m</text>
+            <text x={mapX(350)} y={padT + plotH + 13} fill="#64748b" fontSize="8" textAnchor="middle">350 m</text>
+            <text x={mapX(460)} y={padT + plotH + 13} fill="#64748b" fontSize="8" textAnchor="middle">460 m</text>
+
+            {/* Cote 1 : Bande roulable SHOM brut */}
+            {theoRollableWidthM > 0 ? (
               <g>
-                <line x1={mapX(softSandMarginM)} x2={realXPos} y1={padT + plotH + 20} y2={padT + plotH + 20} stroke="#15803d" strokeWidth="2" />
-                <circle cx={mapX(softSandMarginM)} cy={padT + plotH + 20} r="3" fill="#15803d" />
-                <circle cx={realXPos} cy={padT + plotH + 20} r="3" fill="#15803d" />
-                <text x={(mapX(softSandMarginM) + realXPos) / 2} y={padT + plotH + 33} fill="#15803d" fontSize="9.5" fontWeight="900" textAnchor="middle">
-                  BANDE ROULABLE RÉELLE : {realRollableWidthM} MÈTRES (Théo SHOM : {theoRollableWidthM} m)
+                <line x1={mapX(softSandMarginM)} x2={theoXPos} y1={padT + plotH + 34} y2={padT + plotH + 34} stroke="#ca8a04" strokeWidth="2.4" strokeDasharray="5 3" />
+                <line x1={mapX(softSandMarginM)} x2={mapX(softSandMarginM)} y1={padT + plotH + 28} y2={padT + plotH + 40} stroke="#a16207" strokeWidth="2" />
+                <line x1={theoXPos} x2={theoXPos} y1={padT + plotH + 28} y2={padT + plotH + 40} stroke="#a16207" strokeWidth="2" />
+                {(() => {
+                  const pW = shomPillW;
+                  const putRight = mapX(460) - theoXPos >= pW + 12;
+                  const boxX = putRight
+                    ? theoXPos + 10
+                    : Math.max(padL, Math.min(mapX(460) - pW, (mapX(softSandMarginM) + theoXPos) / 2 - pW / 2));
+                  return (
+                    <g>
+                      <rect
+                        x={boxX}
+                        y={padT + plotH + 23}
+                        width={pW}
+                        height="22"
+                        rx="6"
+                        fill="#fefce8"
+                        stroke="#eab308"
+                        strokeWidth="1.2"
+                      />
+                      <text
+                        x={boxX + pW / 2}
+                        y={padT + plotH + 37.5}
+                        fill="#854d0e"
+                        fontSize="9"
+                        fontWeight="900"
+                        textAnchor="middle"
+                      >
+                        {shomBarText}
+                      </text>
+                    </g>
+                  );
+                })()}
+              </g>
+            ) : (
+              <g>
+                <rect x={padL} y={padT + plotH + 23} width="228" height="22" rx="6" fill="#fefce8" stroke="#eab308" strokeWidth="1.2" />
+                <text x={padL + 114} y={padT + plotH + 37.5} fill="#854d0e" fontSize="9" fontWeight="900" textAnchor="middle">
+                  SHOM brut : 0 m roulable
                 </text>
               </g>
             )}
 
-            {/* Repères d'axe X */}
-            <text x={mapX(0)} y={padT + plotH + 10} fill="#64748b" fontSize="8" textAnchor="middle">Dune (0m)</text>
-            <text x={mapX(softSandMarginM)} y={padT + plotH + 10} fill="#b45309" fontSize="8" textAnchor="middle">Sable mou ({softSandMarginM}m)</text>
-            <text x={mapX(200)} y={padT + plotH + 10} fill="#64748b" fontSize="8" textAnchor="middle">200m</text>
-            <text x={mapX(350)} y={padT + plotH + 10} fill="#64748b" fontSize="8" textAnchor="middle">350m</text>
-            <text x={mapX(460)} y={padT + plotH + 10} fill="#64748b" fontSize="8" textAnchor="middle">Bas estran (460m)</text>
+            {/* Cote 2 : Bande roulable Modèle Réel Empirique */}
+            {realRollableWidthM > 0 ? (
+              <g>
+                <line x1={mapX(softSandMarginM)} x2={realXPos} y1={padT + plotH + 68} y2={padT + plotH + 68} stroke={isSurcote ? '#ea580c' : isSouscote ? '#059669' : '#0284c7'} strokeWidth="2.6" />
+                <line x1={mapX(softSandMarginM)} x2={mapX(softSandMarginM)} y1={padT + plotH + 62} y2={padT + plotH + 74} stroke={isSurcote ? '#c2410c' : isSouscote ? '#047857' : '#0369a1'} strokeWidth="2" />
+                <line x1={realXPos} x2={realXPos} y1={padT + plotH + 62} y2={padT + plotH + 74} stroke={isSurcote ? '#c2410c' : isSouscote ? '#047857' : '#0369a1'} strokeWidth="2" />
+                {(() => {
+                  const pW = empPillW;
+                  const putRight = mapX(460) - realXPos >= pW + 12;
+                  const boxX = putRight
+                    ? realXPos + 10
+                    : Math.max(padL, Math.min(mapX(460) - pW, (mapX(softSandMarginM) + realXPos) / 2 - pW / 2));
+                  return (
+                    <g>
+                      <rect
+                        x={boxX}
+                        y={padT + plotH + 57}
+                        width={pW}
+                        height="22"
+                        rx="6"
+                        fill={isSurcote ? '#fff7ed' : isSouscote ? '#ecfdf5' : '#e0f2fe'}
+                        stroke={isSurcote ? '#ea580c' : isSouscote ? '#059669' : '#0284c7'}
+                        strokeWidth="1.2"
+                      />
+                      <text
+                        x={boxX + pW / 2}
+                        y={padT + plotH + 71.5}
+                        fill={isSurcote ? '#9a3412' : isSouscote ? '#065f46' : '#0c4a6e'}
+                        fontSize="9"
+                        fontWeight="900"
+                        textAnchor="middle"
+                      >
+                        {empBarText}
+                      </text>
+                    </g>
+                  );
+                })()}
+              </g>
+            ) : (
+              <g>
+                <rect x={padL} y={padT + plotH + 57} width="268" height="22" rx="6" fill="#fef2f2" stroke="#f87171" strokeWidth="1.2" />
+                <text x={padL + 134} y={padT + plotH + 71.5} fill="#991b1b" fontSize="9" fontWeight="900" textAnchor="middle">
+                  Modèle réel empirique : 0 m roulable
+                </text>
+              </g>
+            )}
           </svg>
         </div>
       )}
 
       {/* PANNEAU DE CONTRÔLE INTERACTIF & RÉGLAGES */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '14px' }}>
-        {/* KPI 1 : Largeur de roulage nette */}
-        <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '12px 14px' }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#166534' }}>
-            🏎️ Largeur utile de roulage (Réel)
+        {/* KPI 1 : Comparatif Bande Roulable — Modèle Réel Empirique vs SHOM brut */}
+        <div style={{ background: '#f0f9ff', border: '1.5px solid #7dd3fc', borderRadius: '10px', padding: '12px 14px' }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1' }}>
+            🏎️ Bande roulable · Modèle empirique
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '4px' }}>
-            <span style={{ fontSize: '1.9rem', fontWeight: 900, color: '#15803d', fontFamily: 'monospace' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', marginTop: '3px' }}>
+            <span style={{ fontSize: '1.75rem', fontWeight: 900, color: '#0c4a6e', fontFamily: 'monospace' }}>
               {realRollableWidthM}
             </span>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#166534' }}>mètres</span>
-            {deltaBeachM !== 0 && (
+            <span style={{ fontSize: '0.80rem', fontWeight: 800, color: '#0369a1' }}>m</span>
+            {theoRollableWidthM !== realRollableWidthM && (
               <span
                 style={{
-                  fontSize: '0.74rem',
-                  fontWeight: 900,
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
                   color: deltaBeachM < 0 ? '#c2410c' : '#047857',
                 }}
               >
-                ({deltaBeachM > 0 ? `+${deltaBeachM}` : deltaBeachM} m vs SHOM)
+                ({deltaBeachM > 0 ? `+${deltaBeachM}` : deltaBeachM} m vs SHOM {theoRollableWidthM} m)
               </span>
             )}
           </div>
-          <div style={{ fontSize: '0.70rem', color: '#166534', marginTop: '2px' }}>
-            Réel : <strong>{realDiscoveredX} m</strong> (SHOM : <strong>{theoDiscoveredX} m</strong>) · Marge haute : <strong>{softSandMarginM} m</strong>
+
+          <div
+            style={{
+              marginTop: '6px',
+              padding: '5px 8px',
+              borderRadius: '7px',
+              background: '#f3e8ff',
+              border: '1px solid #c4b5fd',
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              color: '#5b21b6',
+            }}
+          >
+            🎯 SHOM brut : {theoRollableWidthM} m · Empirique : {empiricalBasisLabel}
           </div>
-          {latestGpsDuneEval?.widthFromDuneM != null && (
-            <div style={{ fontSize: '0.70rem', color: '#0369a1', fontWeight: 700, marginTop: '4px' }}>
-              GPS Dune → Mer ({logs[0]?.timeStr}) : <strong>{latestGpsDuneEval.widthFromDuneM} m</strong>
-              {cadreGeom.corridorLengthM != null && ` · Longueur zone : ${cadreGeom.corridorLengthM} m`}
-            </div>
-          )}
-          <div style={{ fontSize: '0.70rem', color: '#15803d', fontWeight: 700, marginTop: '4px' }}>
-            {realRollableWidthM >= 180 ? '✓ Idéal grand circuit (12 chars)' : realRollableWidthM >= 100 ? '⚡ Circuit compact' : '⛔ Trop étroit (< 100 m)'}
+
+          <div style={{ fontSize: '0.69rem', color: '#0369a1', fontWeight: 700, marginTop: '6px' }}>
+            {realRollableWidthM >= 180
+              ? '✓ Idéal grand circuit (12 chars)'
+              : realRollableWidthM >= 100
+              ? '⚡ Circuit compact'
+              : '⛔ Trop étroit (< 100 m)'}
+            {cadreGeom.corridorLengthM != null && ` · Longueur : ${cadreGeom.corridorLengthM} m`}
           </div>
         </div>
 
@@ -908,7 +796,7 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           <div style={{ fontSize: '0.67rem', color: '#64748b', lineHeight: 1.35 }}>
             {modelDeltaCm !== 0 && (
               <div>
-                Modèle actif (pression / REX) : <strong>{modelDeltaCm > 0 ? `+${modelDeltaCm}` : modelDeltaCm} cm</strong>
+                Modèle réel empirique : <strong>{modelDeltaCm > 0 ? `+${modelDeltaCm}` : modelDeltaCm} cm</strong>
                 {simulatedSurcoteCm !== 0 ? ` + simulation ${simulatedSurcoteCm > 0 ? `+${simulatedSurcoteCm}` : simulatedSurcoteCm} cm` : ''}.
               </div>
             )}

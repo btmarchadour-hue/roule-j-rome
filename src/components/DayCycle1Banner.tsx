@@ -6,7 +6,7 @@ import {
   ValidationsMap,
   WindPoint,
 } from '../types';
-import { dayFocus, isCycle1PastLocked, lc, tdy, VC, vstat } from '../utils/tides';
+import { dayFocus, isCycle1PastLocked, tdy, vstat } from '../utils/tides';
 import { DEFAULT_NON_PUBLISH_REASONS, stripReasonAccents } from '../utils/cycleHelpers';
 
 interface DayCycle1BannerProps {
@@ -97,21 +97,18 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
     timeZone: 'UTC',
   });
 
+  const effectiveSt = valInfo.st === 'chg' ? 'ok' : valInfo.st;
   const isZeroPublishedOk =
-    valInfo.st === 'ok' && valInfo.valCount === 0 && valInfo.cycle2Count === 0;
+    effectiveSt === 'ok' && valInfo.valCount === 0 && valInfo.cycle2Count === 0;
   const boxBg = isZeroPublishedOk
     ? '#f1f5f9'
-    : valInfo.st === 'ok'
+    : effectiveSt === 'ok'
     ? 'var(--okbg, #f0fdf4)'
-    : !isPast && valInfo.st === 'chg'
-    ? '#fffbeb'
     : 'var(--card, #fff)';
   const boxBorder = isZeroPublishedOk
     ? '1.5px solid #94a3b8'
-    : valInfo.st === 'ok'
+    : effectiveSt === 'ok'
     ? '2px solid var(--ok, #16a34a)'
-    : !isPast && valInfo.st === 'chg'
-    ? '2px solid #f59e0b'
     : '1px solid var(--bd, #e5e7eb)';
 
   return (
@@ -138,7 +135,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '1.25rem' }}>
             {isPast
-              ? valInfo.st === 'ok'
+              ? effectiveSt === 'ok'
                 ? '📜'
                 : '⏳'
               : valInfo.cycle2Count > 0
@@ -149,10 +146,8 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                 : valInfo.excludedCount > 0 && valInfo.closedNoBookingsCount === 0
                 ? '➖'
                 : '⛔'
-              : valInfo.st === 'ok'
-              ? '📅'
-              : valInfo.st === 'chg'
-              ? '⚠️'
+              : effectiveSt === 'ok'
+              ? '⏳'
               : '📋'}
           </span>
           <div>
@@ -229,7 +224,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               }}
             >
               {isPast
-                ? valInfo.st === 'ok'
+                ? effectiveSt === 'ok'
                   ? `Archive · ${valInfo.valCount} publié${valInfo.valCount > 1 ? 's' : ''}${
                       valInfo.excludedCount
                         ? ` · ➖ ${valInfo.excludedCount} hors offre`
@@ -242,15 +237,13 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                       valInfo.closedNoBookingsCount ? ` · ⛔ ${valInfo.closedNoBookingsCount} annulé Vie 2` : ''
                     } (sur ${valInfo.totalCount})`
                   : 'Journée passée'
-                : valInfo.st === 'chg'
-                ? `Cycle 2 impacté : Prévisions / marées modifiées (${valInfo.cycle2Count} créneau${valInfo.cycle2Count > 1 ? 'x' : ''} inscrit${valInfo.cycle2Count > 1 ? 's' : ''})`
                 : isZeroPublishedOk
                 ? valInfo.notPublishedCount > 0
                   ? `Cycle 1 · Journée non publiée (${valInfo.notPublishedCount} créneau${valInfo.notPublishedCount > 1 ? 'x' : ''})`
                   : valInfo.excludedCount > 0 && valInfo.closedNoBookingsCount === 0
                   ? `Cycle 1 · Hors offre (${valInfo.excludedCount} créneau${valInfo.excludedCount > 1 ? 'x' : ''} exclu${valInfo.excludedCount > 1 ? 's' : ''} des stats)`
                   : `Cycle 1 · Annulé Vie 2 (${valInfo.closedNoBookingsCount} sans inscrit)`
-                : valInfo.st === 'ok'
+                : effectiveSt === 'ok'
                 ? `Cycle 1 · ${valInfo.valCount} à publier${
                     valInfo.excludedCount
                       ? ` · ➖ ${valInfo.excludedCount} hors offre`
@@ -310,26 +303,24 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
 
             <div style={{ fontSize: '0.74rem', color: 'var(--mu, #666)', marginTop: '2px' }}>
               {isPastLocked
-                ? valInfo.st === 'ok'
+                ? valInfo.st !== 'none'
                   ? `Archive verrouillée (> 7 j) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}`
                   : 'Archive verrouillée (> 7 j) · Non modifiable en Cycle 1'
                 : isPast
-                ? valInfo.st === 'ok'
+                ? valInfo.st !== 'none'
                   ? `Journée passée (rattrapage autorisé sous 7 j) · Enregistré le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}`
                   : 'Journée passée · Vous pouvez publier ou fermer toute la journée (ex. Paris, absence) sous 7 j'
-                : valInfo.st === 'ok'
+                : valInfo.st !== 'none'
                 ? `Publié le ${new Date(valInfo.V.ts).toLocaleString('fr-FR', {
                     dateStyle: 'short',
                     timeStyle: 'short',
                   })} · Repositionnable tant qu'il y a 0 inscrit · Bascule Cycle 2 dès 1 char`
-                : valInfo.st === 'chg'
-                ? `Créneaux engagés (Cycle 2) modifiés · Basculez vers Adaptation météo & décisions pour ajuster`
                 : `${focusData.list.length} créneau${focusData.list.length > 1 ? 'x' : ''} calculé${
                     focusData.list.length > 1 ? 's' : ''
                   } selon la marée · Ajustable pendant toute la vie du Cycle 1 (0 inscrit)`}
@@ -386,14 +377,11 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
                 style={{
                   margin: 0,
                   background:
-                    valInfo.st === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0
+                    effectiveSt === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0
                       ? '#16a34a'
-                      : valInfo.st === 'chg'
-                      ? '#f59e0b'
                       : 'var(--ac, #ffc40d)',
                   color:
-                    (valInfo.st === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0) ||
-                    valInfo.st === 'chg'
+                    effectiveSt === 'ok' && valInfo.valCount > 0 && valInfo.notPublishedCount === 0
                       ? '#fff'
                       : '#111',
                   fontWeight: 800,
@@ -474,7 +462,7 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               onClick={() => onOpenCycle1Detail(selectedDate)}
               title="Ouvrir cette journée dans Validation des créneaux de roulage (Cycle 1)"
             >
-              📅 Créneaux (C1)
+              ⏳ Créneaux (C1)
             </button>
           )}
 
@@ -627,38 +615,6 @@ export const DayCycle1Banner: React.FC<DayCycle1BannerProps> = ({
               Annuler
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Alerte uniquement si Cycle 2 actif ou dérive horaire de marée */}
-      {!isPast && valInfo.st === 'chg' && (valInfo.cycle2Count > 0 || valInfo.rem.length > 0) && (
-        <div
-          style={{
-            marginTop: '10px',
-            padding: '8px 10px',
-            background: '#fef3c7',
-            borderRadius: '6px',
-            fontSize: '0.76rem',
-            color: '#92400e',
-            lineHeight: 1.4,
-          }}
-        >
-          <b>Alerte Cycle 2 (créneaux avec inscrits ou horaires modifiés) :</b>
-          {valInfo.add.length > 0 && (
-            <div>
-              ➕ Ajout : {valInfo.add.map(x => `${lc(x.a, y, m, d)} - ${lc(x.b, y, m, d)}`).join(' ; ')}
-            </div>
-          )}
-          {valInfo.rem.length > 0 && (
-            <div>
-              ➖ Retiré : {valInfo.rem.map(x => `${x.s} - ${x.e}`).join(' ; ')}
-            </div>
-          )}
-          {valInfo.kchg && (
-            <div>
-              Verdict météo : {VC[valInfo.V.k][1]} → {VC[focusData.k][1]}
-            </div>
-          )}
         </div>
       )}
     </div>

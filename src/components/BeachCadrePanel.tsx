@@ -74,7 +74,7 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
   const [editingProfileKey, setEditingProfileKey] = useState<BeachCadreProfileKey>(
     config.activeProfile || 'jerome'
   );
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(true);
 
   // GPS static calibration state
   const [calibratingSlot, setCalibratingSlot] = useState<SlotKey | null>(null);
@@ -401,16 +401,15 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.72rem', color: '#475569', fontWeight: 700 }}>
-            <span style={{ color: '#0369a1', fontWeight: 800 }}>Référentiel Terrain Fixe</span>
+            <span style={{ color: '#0369a1', fontWeight: 800 }}>Cadre Terrain Optionnel</span>
             <span aria-hidden="true">·</span>
-            <span>{calibratedPointsCount}/4 repères enregistrés</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Référence active :{' '}
-              <strong style={{ color: '#0f172a' }}>
-                {config.activeProfile === 'jerome' ? 'Zone Jérôme (École)' : 'Zone Mairie (AOT)'}
-              </strong>
-            </span>
+            <span style={{ color: '#166534' }}>✓ Pied de dune Lestrevet–Pentrez intégré (auto)</span>
+            {calibratedPointsCount > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{calibratedPointsCount}/4 repères persos</span>
+              </>
+            )}
           </div>
           <h2 style={{ margin: '4px 0 0', fontSize: '1.12rem', fontWeight: 900, color: '#0f172a' }}>
             Cadre de Roulage : Ligne de Dune & Limites Gauche / Droite

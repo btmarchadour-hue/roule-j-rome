@@ -644,11 +644,21 @@ async function fetchShomBrestNearest(ts: number): Promise<RealShomResult | null>
       const obj = entry as Record<string, unknown>;
       const tRaw = obj.timestamp ?? obj.date ?? obj.t;
       const vRaw = obj.value ?? obj.height ?? obj.h;
-      const ms = typeof tRaw === 'number'
-        ? (tRaw < 1e12 ? tRaw * 1000 : tRaw)
-        : typeof tRaw === 'string'
-        ? Date.parse(tRaw)
-        : NaN;
+      const ms =
+        typeof tRaw === 'number'
+          ? tRaw < 1e12
+            ? tRaw * 1000
+            : tRaw
+          : typeof tRaw === 'string'
+          ? (() => {
+              const trimmed = tRaw.trim();
+              // SHOM REFMAR renvoie des horodatages UTC sans suffixe ('YYYY/MM/DD HH:mm:ss')
+              const normalized = /^\d{4}[/-]\d{2}[/-]\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(trimmed)
+                ? trimmed.replace(/\//g, '-').replace(' ', 'T') + 'Z'
+                : trimmed;
+              return Date.parse(normalized);
+            })()
+          : NaN;
       const h = typeof vRaw === 'number' ? vRaw : typeof vRaw === 'string' ? Number(vRaw) : NaN;
       if (Number.isFinite(ms) && Number.isFinite(h)) {
         parsedPoints.push({ ms, h });

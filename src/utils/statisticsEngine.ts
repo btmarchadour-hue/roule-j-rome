@@ -374,9 +374,7 @@ export function computePeriodStats(
     other: 0,
   };
 
-  const isRealMode = settings.calculationMode === 'reel';
-  const empiricalOffsetM = isRealMode ? (settings.empiricalOffsetCm ?? 15) / 100 : 0;
-  const effThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
+  const effThreshold = settings.L - (settings.mg || 0) / 100;
   const tideW = win(EX, effThreshold);
   const first = EX[0]?.t ?? 0;
   const last = EX[EX.length - 1]?.t ?? 0;

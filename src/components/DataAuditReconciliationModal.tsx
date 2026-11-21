@@ -293,6 +293,8 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showPedagogyGuide, setShowPedagogyGuide] = useState<boolean>(false);
+  const [showChecklistPanel, setShowChecklistPanel] = useState<boolean>(false);
+  const [checklistCopied, setChecklistCopied] = useState<boolean>(false);
 
   const allNonPublishChoices = useMemo(() => {
     const merged = [...DEFAULT_NON_PUBLISH_REASONS, ...customNonPublishReasons];
@@ -391,6 +393,55 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     const d = String(dt.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }, []);
+
+  const checklistEntries = useMemo(
+    () =>
+      report.entries.filter(
+        e => e.severity === 'conflict' || (e.severity === 'warning' && !e.isVerified)
+      ),
+    [report.entries]
+  );
+
+  const checklistText = useMemo(() => {
+    if (checklistEntries.length === 0) {
+      return `✅ Aucune anomalie à corriger sur les ${report.daysAnalyzed} journées (${report.totalCount} créneaux) analysées !`;
+    }
+    const conflicts = checklistEntries.filter(e => e.severity === 'conflict');
+    const warnings = checklistEntries.filter(e => e.severity === 'warning');
+    const byDate = new Map<string, AuditSlotEntry[]>();
+    checklistEntries.forEach(e => {
+      const list = byDate.get(e.ds) || [];
+      list.push(e);
+      byDate.set(e.ds, list);
+    });
+    const datesSorted = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
+    const lines: string[] = [
+      `LISTE DES CORRECTIONS À FAIRE (${checklistEntries.length} créneau${checklistEntries.length > 1 ? 'x' : ''} sur ${datesSorted.length} journée${datesSorted.length > 1 ? 's' : ''})`,
+      `• 🔴 Contradictions prioritaires : ${conflicts.length}`,
+      `• 🟠 Points à préciser / vérifier : ${warnings.length}`,
+      '',
+    ];
+    for (const ds of datesSorted) {
+      const dayList = (byDate.get(ds) || []).sort((a, b) => a.startTime.localeCompare(b.startTime));
+      lines.push(`📅 ${formatDateFr(ds)} (${ds})`);
+      for (const e of dayList) {
+        const icon = e.severity === 'conflict' ? '🔴' : '🟠';
+        const valChars = getValidationItemChars(e.valItem).totalChars;
+        const obsChars = e.obs ? getObservationChars(e.obs) : null;
+        const issueLabels = e.issues.map(i => i.label).join(' | ');
+        lines.push(
+          `  ${icon} ${e.displayTime} · ${e.summaryStatusLabel} · Planning=${valChars} ch. / Inscrits=${e.bookingSummary.totalChars} ch.${
+            obsChars !== null ? ` / REX=${obsChars} ch.` : ''
+          }`
+        );
+        if (issueLabels) {
+          lines.push(`     → ${issueLabels}`);
+        }
+      }
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }, [checklistEntries, report.daysAnalyzed, report.totalCount]);
 
   if (!isOpen) return null;
 
@@ -1004,7 +1055,14 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
           nextItemsMap.delete(entry.slotKey);
           auditBatchMap[entry.entryKey] = null;
           if (entry.bookings.length > 0) {
-            await saveBookingToFirestore(`${ds}_${targetSlotKey}`, entry.bookings);
+            const existingTargetBookings =
+              report.entries.find(e => e.ds === ds && e.slotKey === targetSlotKey)?.bookings || [];
+            const seenIds = new Set(existingTargetBookings.map(b => b.id));
+            const mergedTargetBookings = [
+              ...existingTargetBookings,
+              ...entry.bookings.filter(b => !seenIds.has(b.id)),
+            ];
+            await saveBookingToFirestore(`${ds}_${targetSlotKey}`, mergedTargetBookings);
             await saveBookingToFirestore(`${ds}_${entry.slotKey}`, []);
           }
         }
@@ -1118,9 +1176,7 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     setIsBatchSaving(true);
     setActionError(null);
     try {
-      const isRealMode = settings.calculationMode === 'reel';
-      const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
-      const effectiveThreshold = settings.L + empiricalOffsetM - (settings.mg || 0) / 100;
+      const effectiveThreshold = settings.L - (settings.mg || 0) / 100;
       const tideW = win(EX, effectiveThreshold);
       const first = EX[0]?.t ?? 0;
       const last = EX[EX.length - 1]?.t ?? 0;
@@ -1342,9 +1398,16 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
         items: nextItems,
       });
 
-      // 2. Si clé réalignée et réservations attachées à l'ancienne clé -> migrer vers la nouvelle clé
+      // 2. Si clé réalignée et réservations attachées à l'ancienne clé -> migrer vers la nouvelle clé sans écraser d'éventuelles fiches déjà présentes
       if (targetSlotKey !== entry.slotKey && entry.bookings.length > 0) {
-        await saveBookingToFirestore(`${entry.ds}_${targetSlotKey}`, entry.bookings);
+        const existingTargetBookings =
+          report.entries.find(e => e.ds === entry.ds && e.slotKey === targetSlotKey)?.bookings || [];
+        const seenIds = new Set(existingTargetBookings.map(b => b.id));
+        const mergedTargetBookings = [
+          ...existingTargetBookings,
+          ...entry.bookings.filter(b => !seenIds.has(b.id)),
+        ];
+        await saveBookingToFirestore(`${entry.ds}_${targetSlotKey}`, mergedTargetBookings);
         await saveBookingToFirestore(`${entry.ds}_${entry.slotKey}`, []);
       }
 
@@ -1543,6 +1606,17 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
     }
   };
 
+  const handleCopyChecklist = async () => {
+    setShowChecklistPanel(true);
+    try {
+      await navigator.clipboard.writeText(checklistText);
+      setChecklistCopied(true);
+      window.setTimeout(() => setChecklistCopied(false), 2400);
+    } catch {
+      setChecklistCopied(false);
+    }
+  };
+
   const severityBadge = (severity: AuditSeverity) => {
     if (severity === 'conflict') {
       return { label: '🔴 Contradiction à trancher', bg: '#fee2e2', fg: '#991b1b', bd: '#fca5a5' };
@@ -1625,7 +1699,26 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             </h3>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleCopyChecklist}
+              style={{
+                background: showChecklistPanel ? '#d97706' : '#0284c7',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '6px 10px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+              title="Générer et copier la liste exacte des anomalies à corriger"
+            >
+              {checklistCopied
+                ? '✓ Liste copiée !'
+                : `📋 Liste à corriger (${checklistEntries.length})`}
+            </button>
             <button
               type="button"
               onClick={handleExportAuditCsv}
@@ -1663,6 +1756,79 @@ export const DataAuditReconciliationModal: React.FC<DataAuditReconciliationModal
             </button>
           </div>
         </div>
+
+        {showChecklistPanel && (
+          <div
+            style={{
+              flexShrink: 0,
+              background: '#fffbeb',
+              borderBottom: '2px solid #f59e0b',
+              padding: '10px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 900, color: '#92400e' }}>
+                📋 Liste complète des points à corriger ({checklistEntries.length}) — sélectionne ou copie ce texte pour le suivre ou le partager :
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={handleCopyChecklist}
+                  style={{
+                    background: '#0284c7',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {checklistCopied ? '✓ Copié !' : '📋 Copier tout'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowChecklistPanel(false)}
+                  style={{
+                    background: '#fff',
+                    color: '#475569',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+            <textarea
+              readOnly
+              value={checklistText}
+              onFocus={e => e.currentTarget.select()}
+              style={{
+                width: '100%',
+                minHeight: '130px',
+                maxHeight: '220px',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: '0.72rem',
+                lineHeight: 1.45,
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1px solid #fcd34d',
+                background: '#ffffff',
+                color: '#0f172a',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+        )}
 
         {/* BARRE DE FILTRES COMPACTE FIXE */}
         <div

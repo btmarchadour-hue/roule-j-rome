@@ -24,10 +24,12 @@ import {
   minDs,
   plan,
   summarizeSlotsWind,
+  sw,
   tdy,
   toU,
   VC,
-  vstat,
+  wstat,
+  wtxt,
 } from '../utils/tides';
 import { AgendaBookingItem } from '../utils/firebaseSync';
 import {
@@ -44,6 +46,7 @@ import {
   hasCycle2Trigger,
   hasRecordedShift,
   normalizeSlotTimeHHhMM,
+  parseTimeMinutes,
   SECONDARY_INSTRUCTOR_PRESETS,
 } from '../utils/cycleHelpers';
 import { CalendarGrid } from './CalendarGrid';
@@ -52,8 +55,11 @@ import { MarnageChart } from './MarnageChart';
 import { WindguruTable } from './WindguruTable';
 import { WindsUpBaliseCard } from './WindsUpBaliseCard';
 import { SlotBookingsModal } from './SlotBookingsModal';
-import { CustomSlotsManager } from './CustomSlotsManager';
-import { getStoredWaterlineLogs } from '../utils/waterlineGpsEngine';
+import {
+  CreateCustomSlotOptions,
+  CustomSlotsManager,
+  SlotActivityConflict,
+} from './CustomSlotsManager';
 import {
   classifyWindSector,
   WindSectorInfo,
@@ -86,7 +92,11 @@ interface FocusTabProps {
   onSelectDayInCalendar: (ds: string) => void;
   customSlotsMap?: CustomSlotsMap;
   onUpdateCustomSlots?: (dateStr: string, replaceDefault: boolean, slots: CustomSlot[]) => void;
-  onCreateAndPublishCustomSlot?: (dateStr: string, slot: CustomSlot) => void;
+  onCreateAndPublishCustomSlot?: (
+    dateStr: string,
+    slot: CustomSlot,
+    options?: CreateCustomSlotOptions
+  ) => void;
   onValidateDay?: (
     dateStr: string,
     focusData: DayFocusData,
@@ -183,12 +193,14 @@ export const FocusTab: React.FC<FocusTabProps> = ({
   const [doubleFormula, setDoubleFormula] = useState<string>('');
   const [isCustomSlotsOpen, setIsCustomSlotsOpen] = useState<boolean>(false);
   const [confirmResetC2SlotKey, setConfirmResetC2SlotKey] = useState<string | null>(null);
+  const [confirmPurgeOrphanKey, setConfirmPurgeOrphanKey] = useState<string | null>(null);
 
   const handleSelectCustomDate = (ds: string) => {
     setInternalFocusDate(ds);
     onFocusDateChange?.(ds);
     setOpenTool(null);
     setConfirmResetC2SlotKey(null);
+    setConfirmPurgeOrphanKey(null);
   };
 
   const targetDs = propFocusDate || internalFocusDate;
@@ -212,6 +224,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       x: SessionItem;
       slotKey: string;
       valItem: ReturnType<typeof findMatchingValidationItem>;
+      isFromCurrentList: boolean;
     }> = [];
     for (const x of currentFocus.list) {
       const startTimeStr = lc(x.a, currentFocus.y, currentFocus.m, currentFocus.d);
@@ -238,9 +251,48 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
 
       if (c1Status === 'published' || inCycle2) {
-        out.push({ x, slotKey, valItem });
+        out.push({ x, slotKey, valItem, isFromCurrentList: true });
       }
     }
+
+    // Conserver aussi les séances déjà validées en Cycle 1 / engagées en Cycle 2
+    // même si un recalcul barométrique/marée ultérieur les a sorties de la liste auto du jour
+    const nowMin = Date.now() / 6e4;
+    for (const valItem of valRecordForDay?.items || []) {
+      if (matchedValKeys.has(valItem.k)) continue;
+      const bookingSummary = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)] || []
+      );
+      const c1Status = getEffectiveCycle1Status(valItem);
+      const inCycle2 = hasCycle2Trigger(valItem, bookingSummary.totalChars);
+      if (c1Status !== 'published' && !inCycle2) continue;
+
+      const startMin = parseTimeMinutes(valItem.actualStart || valItem.publishedStart || valItem.s);
+      const endMin = parseTimeMinutes(valItem.actualEnd || valItem.publishedEnd || valItem.e);
+      if (startMin === null || endMin === null) continue;
+
+      const a = toU(cy, cm, cd, startMin);
+      const b = toU(cy, cm, cd, endMin);
+      const ok = sw(a, b, settings, windList);
+      const st = wstat(a, b, windList);
+      const synthItem: SessionItem = {
+        a,
+        b,
+        opt: valItem.k.endsWith('o') || valItem.k.endsWith('oc'),
+        isCustom: valItem.k.endsWith('c'),
+        customTitle: valItem.customTitle || 'Validé C1 · hors recalcul auto (marée/pression)',
+        ok,
+        st,
+        txt: st ? wtxt(st) : '',
+        over: 0,
+        lim: '',
+        side: '',
+        past: currentFocus.ds === tdRaw && b < nowMin,
+      };
+      out.push({ x: synthItem, slotKey: valItem.k, valItem, isFromCurrentList: false });
+    }
+
+    out.sort((p, q) => p.x.a - q.x.a);
     return out;
   })();
 
@@ -357,7 +409,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     x: SessionItem,
     key: string,
     preMatchedValItem?: ReturnType<typeof findMatchingValidationItem>,
-    validatedMergeKeys?: Set<string>
+    validatedMergeKeys?: Set<string>,
+    isOrphan = false,
+    overlapsActiveSlot = false
   ) => {
     const startTimeStr = lc(x.a, f.y, f.m, f.d);
     const endTimeStr = lc(x.b, f.y, f.m, f.d);
@@ -536,6 +590,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
       : x.txt || '';
     const slotWindSector = !isPastDay && x.st ? classifyWindSector(x.st.dir) : null;
 
+    const orphanTargetKey = valItem?.k || slotKey;
+
     return (
       <div
         key={key}
@@ -546,14 +602,102 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           padding: '12px 16px',
           borderRadius: '10px',
           marginBottom: '10px',
-          backgroundColor: cardBg,
-          border: cardBorder,
-          borderLeft: `6px solid ${cardBarColor}`,
+          backgroundColor: isOrphan ? '#fffbeb' : cardBg,
+          border: isOrphan ? '2px dashed #f59e0b' : cardBorder,
+          borderLeft: `6px solid ${isOrphan ? '#d97706' : cardBarColor}`,
           boxShadow: inCycle2
             ? '0 2px 8px rgba(22, 163, 74, 0.10)'
             : '0 1px 3px rgba(0,0,0,0.04)',
         }}
       >
+        {isOrphan && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              padding: '7px 10px',
+              borderRadius: '8px',
+              background: '#fef3c7',
+              border: '1px solid #f59e0b',
+              color: '#92400e',
+              fontSize: '0.73rem',
+              fontWeight: 700,
+              lineHeight: 1.35,
+            }}
+          >
+            <div>
+              ⚠️ <strong>Ancien créneau orphelin (hors planning adapté actuel)</strong>
+              {overlapsActiveSlot ? ' · chevauche un créneau adapté du jour' : ''} — conservé en base car il contenait encore des inscriptions.
+            </div>
+            {!isReadOnly && onCycle2Action && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {confirmPurgeOrphanKey === orphanTargetKey ? (
+                  <>
+                    <span style={{ color: '#991b1b', fontWeight: 800 }}>
+                      Supprimer ce doublon{effectiveChars > 0 ? ` (${effectiveChars} ch.)` : ''} ?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCycle2Action(f, x, { type: 'purge_orphan', valItemKey: orphanTargetKey });
+                        setConfirmPurgeOrphanKey(null);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: '#dc2626',
+                        color: '#fff',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Oui, supprimer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmPurgeOrphanKey(null)}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        color: '#334155',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Annuler
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmPurgeOrphanKey(orphanTargetKey)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1.5px solid #dc2626',
+                      background: '#fff',
+                      color: '#dc2626',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                    title="Retirer cet ancien créneau orphelin du planning et nettoyer ses inscriptions associées"
+                  >
+                    🗑️ Supprimer ce reliquat
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: 'flex',
@@ -714,7 +858,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   fontSize: '0.74rem',
                 }}
               >
-                <span>📅</span>
+                <span>⏳</span>
                 <span>CYCLE 1 PUBLIÉ · Prêt pour Cycle 2</span>
               </span>
             ) : c1Status === 'excluded' ? (
@@ -1648,64 +1792,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
     );
   };
 
-  const renderVBox = (f: DayFocusData) => {
-    const v = vstat(f, validations);
-    let msg: React.ReactNode = null;
-
-    if (v.st === 'none') {
-      msg = (
-        <>
-          ⏳ En attente de validation Cycle 1 pour cette journée ({f.list.length} créneau
-          {f.list.length > 1 ? 'x' : ''} proposé{f.list.length > 1 ? 's' : ''}). La validation s&apos;effectue dans l&apos;onglet <b>Validation des créneaux de roulage</b>.
-        </>
-      );
-    } else if (v.st === 'ok') {
-      msg = (
-        <>
-          ✅ <b>{v.valCount} à publier (C1)</b>
-          {v.notPublishedCount ? ` · 🚫 ${v.notPublishedCount} non publié${v.notPublishedCount > 1 ? 's' : ''}` : ''}
-          {v.cycle2Count > 0 ? ` · ⚡ ${v.cycle2Count} en Cycle 2` : ''}
-          {v.closedNoBookingsCount > 0 ? ` · 🌑 ${v.closedNoBookingsCount} Vie 1` : ''} (sur {v.totalCount}) le{' '}
-          {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
-        </>
-      );
-    } else {
-      msg = (
-        <>
-          ⚠️ <b>Cycle 2 impacté : prévisions / marées modifiées</b> depuis l&apos;enregistrement du{' '}
-          {new Date(v.V.ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}.
-          {v.add.length > 0 && (
-            <>
-              <br />
-              Ajouté :{' '}
-              {v.add
-                .map(x => `${lc(x.a, f.y, f.m, f.d)} - ${lc(x.b, f.y, f.m, f.d)}`)
-                .join(' ; ')}
-            </>
-          )}
-          {v.rem.length > 0 && (
-            <>
-              <br />
-              Retiré : {v.rem.map(x => `${x.s} - ${x.e}`).join(' ; ')}
-            </>
-          )}
-          {v.kchg && (
-            <>
-              <br />
-              Verdict : {VC[v.V.k][1].toLowerCase()} → {VC[f.k][1].toLowerCase()}
-            </>
-          )}
-        </>
-      );
-    }
-
-    return (
-      <div className="note" style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-        <div>{msg}</div>
-      </div>
-    );
-  };
-
   return (
     <div id="tab2">
       {/* Calendrier en haut du Cycle 2 (exigence Jérôme) */}
@@ -1763,12 +1849,6 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             {(() => {
-              const logsCount = getStoredWaterlineLogs().length;
-              const isDemo =
-                typeof window !== 'undefined' &&
-                localStorage.getItem('cv_demo_mode_reel_unlocked') === 'true';
-              const isUnlocked = logsCount >= 300 || isDemo;
-              if (!isUnlocked) return null;
               const currentMode = settings.calculationMode || 'theorique';
               return (
                 <div
@@ -1779,6 +1859,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                     borderRadius: '8px',
                     border: '1px solid var(--bd)',
                   }}
+                  title="Choisir la base de calcul des créneaux : marée SHOM brute (défaut) ou Modèle réel empirique (Pression + Houle + Vent, dès le 20/11/2026)"
                 >
                   <button
                     type="button"
@@ -1794,7 +1875,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       cursor: 'pointer',
                     }}
                   >
-                    📐 Théorique
+                    📐 SHOM brut
                   </button>
                   <button
                     type="button"
@@ -1810,7 +1891,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       cursor: 'pointer',
                     }}
                   >
-                    ✨ Mode Réel
+                    ✨ Modèle empirique
                   </button>
                 </div>
               );
@@ -2070,7 +2151,57 @@ export const FocusTab: React.FC<FocusTabProps> = ({
           W={tideW}
           first={first}
           last={last}
+          windList={windList}
         />
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            margin: '12px 0 8px 0',
+            padding: '7px 12px',
+            borderRadius: '8px',
+            background: 'var(--cell)',
+            border: '1px solid var(--bd)',
+            borderLeft: '4px solid var(--ac)',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.95rem',
+              fontWeight: 900,
+              textTransform: 'capitalize',
+              color: 'var(--tx)',
+            }}
+          >
+            {new Date(Date.UTC(cy, cm, cd)).toLocaleDateString('fr-FR', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+              timeZone: 'UTC',
+            })}
+          </span>
+          {currentDs === tdy() && (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 900,
+                background: 'var(--ac)',
+                color: '#111',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.02em',
+              }}
+            >
+              Aujourd&apos;hui
+            </span>
+          )}
+        </div>
 
         {/* Plages praticables & coefficient */}
         {!P.length && (
@@ -2098,7 +2229,9 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
         {(() => {
           const validatedKeySet = new Set(cycle1ValidatedSlots.map(item => item.slotKey));
-          const hiddenSlotsCount = currentFocus.list.length - cycle1ValidatedSlots.length;
+          const matchedCurrentCount = cycle1ValidatedSlots.filter(item => item.isFromCurrentList).length;
+          const hiddenSlotsCount = Math.max(0, currentFocus.list.length - matchedCurrentCount);
+          const displayTotalCount = Math.max(currentFocus.list.length, cycle1ValidatedSlots.length);
           const anySlotNeedsSmsNotice = cycle1ValidatedSlots.some(({ valItem, slotKey }) => {
             const effectiveBKey =
               valItem && (bookingsMap[buildReservationKey(currentFocus.ds, valItem.k)]?.length ?? 0) > 0
@@ -2115,7 +2248,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             <>
               <div className="fh" style={{ marginTop: '14px', marginBottom: '6px' }}>
                 Créneaux validés Cycle 1 ({cycle1ValidatedSlots.length}
-                {hiddenSlotsCount > 0 ? ` / ${currentFocus.list.length}` : ''}) · Jauge max{' '}
+                {hiddenSlotsCount > 0 ? ` / ${displayTotalCount}` : ''}) · Jauge max{' '}
                 {MAX_CHARS_PER_INSTRUCTOR} chars / moniteur
               </div>
 
@@ -2144,9 +2277,26 @@ export const FocusTab: React.FC<FocusTabProps> = ({
 
               {cycle1ValidatedSlots.length > 0 ? (
                 <>
-                  {cycle1ValidatedSlots.map((item, idx) =>
-                    renderSessRow(currentFocus, item.x, `f-${idx}`, item.valItem, validatedKeySet)
-                  )}
+                  {cycle1ValidatedSlots.map((item, idx) => {
+                    const isOrphan = !item.isFromCurrentList;
+                    const overlapsActive =
+                      isOrphan &&
+                      cycle1ValidatedSlots.some(
+                        other =>
+                          other.isFromCurrentList &&
+                          item.x.a < other.x.b &&
+                          item.x.b > other.x.a
+                      );
+                    return renderSessRow(
+                      currentFocus,
+                      item.x,
+                      `f-${idx}`,
+                      item.valItem,
+                      validatedKeySet,
+                      isOrphan,
+                      overlapsActive
+                    );
+                  })}
                   {hiddenSlotsCount > 0 && (
                     <div
                       style={{
@@ -2231,7 +2381,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                       }}
                       onClick={() => onSelectDayInCalendar(currentDs)}
                     >
-                      📅 Valider les créneaux en Cycle 1
+                      ⏳ Valider les créneaux en Cycle 1
                     </button>
                   )}
                 </div>
@@ -2243,13 +2393,13 @@ export const FocusTab: React.FC<FocusTabProps> = ({
                   </div>
                 </div>
               )}
-              {(cycle1ValidatedSlots.length > 0 || Boolean(validations[currentFocus.ds])) && renderVBox(currentFocus)}
             </>
           );
         })()}
 
         {onUpdateCustomSlots && (() => {
           const protectedSlotReasons: Array<{ start: string; end: string; reason: string }> = [];
+          const slotActivityList: SlotActivityConflict[] = [];
           let hasAnyLockedSlot = false;
           const valRec = validations[currentDs];
           const dayObs = observations.filter(o => o.ds === currentDs);
@@ -2279,6 +2429,16 @@ export const FocusTab: React.FC<FocusTabProps> = ({
             const sHHMM = sStart.replace('h', ':');
             const eHHMM = sEnd.replace('h', ':');
             const c1 = getEffectiveCycle1Status(sVal);
+            const isClassic = !s.isCustom || Boolean(s.isAdapted) || Boolean(s.isUnchangedTide);
+            slotActivityList.push({
+              start: sHHMM,
+              end: eHHMM,
+              chars: eChars,
+              hasRex: Boolean(sObs),
+              hasC2Decision: hasCycle2Activity(sVal, eChars, sObs),
+              isClassic,
+              label: s.customTitle,
+            });
             if (eChars > 0) {
               protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: `≥ 1 inscrit (${eChars})` });
               hasAnyLockedSlot = true;
@@ -2307,8 +2467,8 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               onUpdateCustomSlots={onUpdateCustomSlots}
               onCreateAndPublishSlot={
                 onCreateAndPublishCustomSlot
-                  ? (ds, slot) => {
-                      onCreateAndPublishCustomSlot(ds, slot);
+                  ? (ds, slot, options) => {
+                      onCreateAndPublishCustomSlot(ds, slot, options);
                       setIsCustomSlotsOpen(false);
                     }
                   : undefined
@@ -2333,6 +2493,7 @@ export const FocusTab: React.FC<FocusTabProps> = ({
               onToggleOpen={() => setIsCustomSlotsOpen(prev => !prev)}
               isReadOnly={isReadOnly || currentDs < tdRaw}
               protectedSlotReasons={protectedSlotReasons}
+              slotActivityList={slotActivityList}
               dayResetLockReason={hasAnyLockedSlot ? 'créneaux < 48h ou avec activité/décision' : null}
             />
           );

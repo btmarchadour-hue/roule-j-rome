@@ -19,6 +19,7 @@ import {
   calculateGpsDistanceM,
   computeGpsDiagnosticSummary,
   consolidateGpsLogWithRealData,
+  convertBrestHeightToDouarnenezM,
   enqueueOfflineGpsLog,
   exportWaterlineLogsAsCsv,
   fetchRealConditionsAt,
@@ -39,6 +40,8 @@ import {
   BayZoneId,
   classifyBayZone,
   estimateLitto3dUsableWidthM,
+  estimateLitto3dWaterlineXExactM,
+  resolveTerrainDuneWidthM,
 } from '../utils/beachOrientation';
 import { BeachCadrePanel } from './BeachCadrePanel';
 import { Litto3DBeachSection } from './Litto3DBeachSection';
@@ -513,21 +516,31 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
     return displayedLogs.map(l => {
       const dyn = evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadreProfile);
       const zone = classifyBayZone(l.latitude, l.longitude, dyn.lateralPosPct ?? l.lateralPosPct);
-      const rawWidth = dyn.widthFromDuneM ?? l.measuredWidthFromDuneM ?? null;
-      const usableWidthM =
-        rawWidth != null
-          ? Math.max(0, rawWidth - softMarginM)
-          : l.usableWidthM ?? estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM);
+      const resolvedDune = resolveTerrainDuneWidthM(
+        l.latitude,
+        l.longitude,
+        dyn.widthFromDuneM,
+        l.measuredWidthFromDuneM
+      );
+      const rawWidth = resolvedDune.widthFromDuneM;
+      const theoTotalX = Math.round(estimateLitto3dWaterlineXExactM(l.theoreticalWaterHeightM, zone.zoneId));
+      const theoUsableM = Math.max(0, theoTotalX - softMarginM);
+      const terrainUsableM = rawWidth != null ? Math.max(0, rawWidth - softMarginM) : null;
+      const usableWidthM = terrainUsableM ?? theoUsableM;
       return {
         log: l,
         dyn,
         zone,
         rawWidth,
+        widthSource: resolvedDune.source,
+        theoTotalX,
+        theoUsableM,
+        terrainUsableM,
         usableWidthM,
         isEstimatedWidth: rawWidth == null,
       };
     });
-  }, [logs, activeCadreProfile, softMarginM]);
+  }, [displayedLogs, activeCadreProfile, softMarginM]);
 
   const zoneSummaries = useMemo(() => {
     const order: BayZoneId[] = ['lestrevet', 'lieue_de_greve', 'pentrez'];
@@ -558,21 +571,40 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
   // Statistiques synthétiques
   const stats = useMemo(() => {
-    if (filteredLogs.length === 0) {
-      return { count: 0, avgAccuracy: 0, avgRawSurcote: 0, avgCorrSurcote: 0 };
+    if (filteredEntries.length === 0) {
+      return {
+        count: 0,
+        avgAccuracy: 0,
+        measuredCount: 0,
+        avgDeltaVsTheoM: null as number | null,
+        avgTerrainUsableM: null as number | null,
+      };
     }
-    const total = filteredLogs.length;
-    const sumAcc = filteredLogs.reduce((acc, l) => acc + l.accuracyM, 0);
-    const sumRaw = filteredLogs.reduce((acc, l) => acc + l.rawSurcoteCm, 0);
-    const sumCorr = filteredLogs.reduce((acc, l) => acc + l.correctedSurcoteCm, 0);
+    const total = filteredEntries.length;
+    const sumAcc = filteredEntries.reduce((acc, e) => acc + e.log.accuracyM, 0);
+    const measured = filteredEntries.filter(e => e.terrainUsableM != null);
+    const avgDeltaVsTheoM =
+      measured.length > 0
+        ? Math.round(
+            measured.reduce((acc, e) => acc + ((e.terrainUsableM as number) - e.theoUsableM), 0) /
+              measured.length
+          )
+        : null;
+    const avgTerrainUsableM =
+      measured.length > 0
+        ? Math.round(
+            measured.reduce((acc, e) => acc + (e.terrainUsableM as number), 0) / measured.length
+          )
+        : null;
 
     return {
       count: total,
       avgAccuracy: Math.round((sumAcc / total) * 10) / 10,
-      avgRawSurcote: Math.round(sumRaw / total),
-      avgCorrSurcote: Math.round(sumCorr / total),
+      measuredCount: measured.length,
+      avgDeltaVsTheoM,
+      avgTerrainUsableM,
     };
-  }, [filteredLogs]);
+  }, [filteredEntries]);
 
   return (
     <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '8px 12px 60px' }}>
@@ -721,15 +753,15 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '6px', fontSize: '0.70rem' }}>
               {isRealModeUnlocked ? (
                 <span style={{ color: '#166534', fontWeight: 800 }}>
-                  ✨ <strong>Cap des 300 mesures franchi !</strong> Jeu complet disponible pour le calibrage fin.
+                  ✨ <strong>Cap des 300 mesures franchi !</strong> Calibrage fin maximal du modèle empirique.
                 </span>
               ) : isDiagnosticReady ? (
                 <span style={{ color: '#0369a1', fontWeight: 700 }}>
-                  🔬 <strong>Diagnostic 20 mesures actif ci-dessous</strong> · Encore <strong>{remainingCount}</strong> relevés pour le jeu complet (300).
+                  🔬 <strong>Diagnostic 20 mesures actif</strong> · Modèle réel empirique calibré progressivement dès le 20/11/2026 ({remainingCount} relevés avant maturité complète 300).
                 </span>
               ) : (
                 <span style={{ color: '#64748b' }}>
-                  🔒 <strong>Mode Théorique actif</strong> (seuil {settings.L.toFixed(2)} m) · Encore{' '}
+                  ✨ <strong>Modèle réel empirique actif progressivement dès le 20/11/2026</strong> · Encore{' '}
                   <strong>{Math.max(0, GPS_DIAGNOSTIC_THRESHOLD - totalCount)}</strong> relevé{GPS_DIAGNOSTIC_THRESHOLD - totalCount > 1 ? 's' : ''} pour le <strong>Diagnostic seuil réel (20)</strong>.
                 </span>
               )}
@@ -1200,7 +1232,9 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   {lastLoggedItem.realWeatherSnapshot.pressureHpa != null &&
                     ` · ${lastLoggedItem.realWeatherSnapshot.pressureHpa} hPa (${lastLoggedItem.realWeatherSnapshot.pressureStation || 'METAR'})`}
                   {lastLoggedItem.realWeatherSnapshot.shomBrestHeightM != null &&
-                    ` · SHOM Brest ${lastLoggedItem.realWeatherSnapshot.shomBrestHeightM} m`}
+                    ` · SHOM Brest ${lastLoggedItem.realWeatherSnapshot.shomBrestHeightM} m (≈ ${convertBrestHeightToDouarnenezM(
+                      lastLoggedItem.realWeatherSnapshot.shomBrestHeightM
+                    )} m eq. DZ)`}
                   {lastLoggedItem.realWeatherSnapshot.waveHeightM != null &&
                     ` · Houle ${lastLoggedItem.realWeatherSnapshot.waveHeightM} m`}
                 </div>
@@ -1216,29 +1250,33 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             {/* Comparaison Hydrodynamique */}
             <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '0.66rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }}>
-                🌊 Modèle vs Réalité (Limite Basse)
+                🌊 SHOM brut vs Réalité (Limite Basse)
               </div>
               <div style={{ fontSize: '0.74rem', color: '#334155', marginTop: '4px' }}>
-                Théorique brut : <strong>{lastLoggedItem.theoreticalWaterHeightM} m</strong>
-                <br />
-                Modèle corrigé : <strong>{lastLoggedItem.correctedWaterHeightM} m</strong>
+                Marée SHOM brute : <strong>{lastLoggedItem.theoreticalWaterHeightM} m</strong>
               </div>
               <div style={{ fontSize: '0.80rem', fontWeight: 900, color: lastLoggedItem.rawSurcoteCm > 0 ? '#0369a1' : '#166534', marginTop: '4px' }}>
                 Surcote observée : {lastLoggedItem.rawSurcoteCm > 0 ? `+${lastLoggedItem.rawSurcoteCm}` : lastLoggedItem.rawSurcoteCm} cm
                 <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#64748b', marginLeft: '6px' }}>
-                  (Écart résiduel : {lastLoggedItem.correctedSurcoteCm > 0 ? `+${lastLoggedItem.correctedSurcoteCm}` : lastLoggedItem.correctedSurcoteCm} cm)
+                  (vs SHOM brut)
                 </span>
               </div>
               {(() => {
                 const dyn = evaluatePointAgainstCadre(lastLoggedItem.latitude, lastLoggedItem.longitude, activeCadreProfile);
-                const wDune = dyn.widthFromDuneM ?? lastLoggedItem.measuredWidthFromDuneM;
+                const resolvedDune = resolveTerrainDuneWidthM(
+                  lastLoggedItem.latitude,
+                  lastLoggedItem.longitude,
+                  dyn.widthFromDuneM,
+                  lastLoggedItem.measuredWidthFromDuneM
+                );
+                const wDune = resolvedDune.widthFromDuneM;
                 const latPct = dyn.lateralPosPct ?? lastLoggedItem.lateralPosPct;
                 const zone = classifyBayZone(lastLoggedItem.latitude, lastLoggedItem.longitude, latPct);
                 const usableW =
                   wDune != null
                     ? Math.max(0, wDune - softMarginM)
                     : lastLoggedItem.usableWidthM ??
-                      estimateLitto3dUsableWidthM(lastLoggedItem.correctedWaterHeightM, softMarginM);
+                      estimateLitto3dUsableWidthM(lastLoggedItem.theoreticalWaterHeightM, softMarginM, zone.zoneId);
                 return (
                   <div style={{ fontSize: '0.74rem', color: '#0f172a', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div>
@@ -1261,7 +1299,9 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       Bande exploitable utile : <strong>{usableW} m</strong>
                       {wDune != null ? (
                         <span style={{ color: '#64748b' }}>
-                          {' '}(Dune → Mer {wDune} m − {softMarginM} m sable mou{latPct != null ? ` · ${latPct}%` : ''})
+                          {' '}(Dune → Mer {wDune} m − {softMarginM} m sable mou
+                          {resolvedDune.source === 'builtin_dune' ? ' · dune auto' : ''}
+                          {latPct != null ? ` · ${latPct}%` : ''})
                         </span>
                       ) : (
                         <span style={{ color: '#64748b' }}> (est. Litto3D)</span>
@@ -1303,25 +1343,50 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
         <div className="card" style={{ padding: '14px 16px', background: '#ffffff', border: '1.5px solid #eab308', borderRadius: '10px' }}>
           <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#a16207' }}>
-            🌊 Surcote Moyenne Constatée
+            🏖️ Bande Mangée Moy. (vs Théo)
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-            {stats.count > 0 ? `${stats.avgRawSurcote > 0 ? `+${stats.avgRawSurcote}` : stats.avgRawSurcote} cm` : '—'}
+          <div
+            style={{
+              fontSize: stats.avgDeltaVsTheoM != null ? '1.8rem' : '1.15rem',
+              fontWeight: 900,
+              color:
+                stats.avgDeltaVsTheoM == null
+                  ? '#64748b'
+                  : stats.avgDeltaVsTheoM < 0
+                  ? '#c2410c'
+                  : '#166534',
+              marginTop: '4px',
+            }}
+          >
+            {stats.avgDeltaVsTheoM != null
+              ? `${stats.avgDeltaVsTheoM > 0 ? `+${stats.avgDeltaVsTheoM}` : stats.avgDeltaVsTheoM} m`
+              : '—'}
           </div>
           <div style={{ fontSize: '0.70rem', color: '#854d0e', marginTop: '2px' }}>
-            par rapport au SHOM astronomique pur
+            {stats.measuredCount > 0
+              ? `Terrain GPS − SHOM brut sur ${stats.measuredCount} relevé${stats.measuredCount > 1 ? 's' : ''} (négatif = mangé)`
+              : 'Aucun point GPS dans la baie Lestrevet–Pentrez'}
           </div>
         </div>
 
         <div className="card" style={{ padding: '14px 16px', background: '#ffffff', border: '1.5px solid #10b981', borderRadius: '10px' }}>
           <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#047857' }}>
-            🎯 Précision Modèle Corrigé École
+            📏 Largeur Utile Moy. Terrain
           </div>
-          <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-            {stats.count > 0 ? `${stats.avgCorrSurcote > 0 ? `+${stats.avgCorrSurcote}` : stats.avgCorrSurcote} cm` : '—'}
+          <div
+            style={{
+              fontSize: stats.avgTerrainUsableM != null ? '1.8rem' : '1.15rem',
+              fontWeight: 900,
+              color: stats.avgTerrainUsableM != null ? '#0f172a' : '#64748b',
+              marginTop: '4px',
+            }}
+          >
+            {stats.avgTerrainUsableM != null ? `${stats.avgTerrainUsableM} m` : '—'}
           </div>
           <div style={{ fontSize: '0.70rem', color: '#047857', fontWeight: 700, marginTop: '2px' }}>
-            Écart moyen résiduel avec nos corrections (+1cm/hPa)
+            {stats.measuredCount > 0
+              ? `Distance GPS pied de dune − ${softMarginM} m sable mou`
+              : 'Calculé automatiquement dès le 1er relevé en baie'}
           </div>
         </div>
       </div>
@@ -1369,10 +1434,10 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
               <div>
                 <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1', letterSpacing: '0.04em' }}>
-                  🔬 Diagnostic Mesuré · Palier 20 Relevés GPS
+                  🔬 Diagnostic Mesuré · Palier 20 Relevés GPS · dès le 20/11/2026
                 </div>
                 <h3 style={{ margin: '2px 0 0', fontSize: '1.0rem', fontWeight: 900, color: '#0f172a' }}>
-                  Vérification du Seuil Réel de Lestrevet ({settings.L.toFixed(2)} m)
+                  Vérification du Seuil Réel de Lestrevet ({settings.L.toFixed(2)} m · vs SHOM brut)
                 </h3>
               </div>
               <span
@@ -1440,56 +1505,142 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               </div>
             ) : (
               <>
-                {/* 4 chiffres clés du diagnostic */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '8px', marginBottom: '12px' }}>
-                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
-                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
-                      Hauteur corrigée moy.
+                {/* 4 chiffres clés du diagnostic : Houle empirique, Bande mangée, Brest réel, Seuil & Bâches */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '8px', marginBottom: '10px' }}>
+                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#0369a1', textTransform: 'uppercase' }}>
+                      🌊 Effet Houle Empirique
                     </div>
-                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
-                      {diag.avgCorrectedWaterM?.toFixed(2)} m
+                    <div
+                      style={{
+                        fontSize: '1.15rem',
+                        fontWeight: 900,
+                        color:
+                          diag.swellImpactMPerM == null
+                            ? '#64748b'
+                            : diag.swellImpactMPerM < 0
+                            ? '#c2410c'
+                            : '#166534',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {diag.swellImpactMPerM != null
+                        ? `${diag.swellImpactMPerM > 0 ? `+${diag.swellImpactMPerM}` : diag.swellImpactMPerM} m / m houle`
+                        : '—'}
                     </div>
-                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
-                      vs seuil {settings.L.toFixed(2)} m ({diag.deltaFromCurrentCm != null && diag.deltaFromCurrentCm > 0 ? `+${diag.deltaFromCurrentCm}` : diag.deltaFromCurrentCm} cm)
+                    <div style={{ fontSize: '0.67rem', color: '#475569' }}>
+                      {diag.swellImpactSampleCount > 0
+                        ? `Moy. sur ${diag.swellImpactSampleCount} relevé${diag.swellImpactSampleCount > 1 ? 's' : ''} (houle ≥ 0,8 m)`
+                        : 'En attente de relevés avec houle'}
                     </div>
                   </div>
 
                   <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
                     <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
-                      SHOM pur vs Brest réel
+                      🏖️ Bande Mangée par Houle
                     </div>
-                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+                    <div style={{ fontSize: '0.73rem', fontWeight: 800, color: '#0f172a', marginTop: '4px', lineHeight: 1.45 }}>
+                      <div>
+                        Calme &lt;1m :{' '}
+                        <span style={{ color: '#0369a1' }}>
+                          {diag.swellCalm.avgDeltaVsCorrM != null
+                            ? `${diag.swellCalm.avgDeltaVsCorrM > 0 ? '+' : ''}${diag.swellCalm.avgDeltaVsCorrM} m`
+                            : '—'}
+                        </span>{' '}
+                        <span style={{ color: '#64748b', fontWeight: 600 }}>({diag.swellCalm.count})</span>
+                      </div>
+                      <div>
+                        Moy. 1–1,8m :{' '}
+                        <span style={{ color: '#b45309' }}>
+                          {diag.swellModerate.avgDeltaVsCorrM != null
+                            ? `${diag.swellModerate.avgDeltaVsCorrM > 0 ? '+' : ''}${diag.swellModerate.avgDeltaVsCorrM} m`
+                            : '—'}
+                        </span>{' '}
+                        <span style={{ color: '#64748b', fontWeight: 600 }}>({diag.swellModerate.count})</span>
+                      </div>
+                      <div>
+                        Forte ≥1,8m :{' '}
+                        <span style={{ color: '#c2410c' }}>
+                          {diag.swellStrong.avgDeltaVsCorrM != null
+                            ? `${diag.swellStrong.avgDeltaVsCorrM > 0 ? '+' : ''}${diag.swellStrong.avgDeltaVsCorrM} m`
+                            : '—'}
+                        </span>{' '}
+                        <span style={{ color: '#64748b', fontWeight: 600 }}>({diag.swellStrong.count})</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      SHOM DZ vs Brest (eq. DZ)
+                    </div>
+                    <div style={{ fontSize: '1.12rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
                       {diag.avgTheoreticalWaterM?.toFixed(2)} m
-                      {diag.avgShomBrestWaterM != null ? ` · ${diag.avgShomBrestWaterM.toFixed(2)} m` : ''}
+                      {diag.avgShomBrestEqDouarnenezM != null ? ` · ${diag.avgShomBrestEqDouarnenezM.toFixed(2)} m` : ''}
                     </div>
-                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
-                      {diag.consolidatedCount}/{diag.totalCount} consolidé{diag.consolidatedCount > 1 ? 's' : ''} H+2
-                    </div>
-                  </div>
-
-                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
-                    <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
-                      Dépression &amp; Vent Ouest
-                    </div>
-                    <div style={{ fontSize: '0.84rem', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
-                      &lt;1005 hPa : {diag.lowPressureAvgRawCm != null ? `${diag.lowPressureAvgRawCm > 0 ? '+' : ''}${diag.lowPressureAvgRawCm} cm` : '—'} ({diag.lowPressureCount})
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 700, marginTop: '2px' }}>
-                      Secteur mer : {diag.seaWindAvgRawCm != null ? `${diag.seaWindAvgRawCm > 0 ? '+' : ''}${diag.seaWindAvgRawCm} cm` : '—'} ({diag.seaWindCount})
+                    <div style={{ fontSize: '0.67rem', color: '#475569' }}>
+                      {diag.avgBrestSurgeVsCorrCm != null
+                        ? `Surcote Brest vs SHOM : ${diag.avgBrestSurgeVsCorrCm > 0 ? `+${diag.avgBrestSurgeVsCorrCm}` : diag.avgBrestSurgeVsCorrCm} cm · `
+                        : ''}
+                      {diag.consolidatedCount}/{diag.totalCount} consolidé{diag.consolidatedCount > 1 ? 's' : ''}
                     </div>
                   </div>
 
                   <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px' }}>
                     <div style={{ fontSize: '0.64rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
-                      Bâches signalées
+                      SHOM moy. &amp; Bâches
                     </div>
-                    <div style={{ fontSize: '1.15rem', fontWeight: 900, color: diag.bachesCount > 0 ? '#b45309' : '#166534', marginTop: '2px' }}>
-                      {diag.bachesCount} ({diag.bachesPct}%)
+                    <div style={{ fontSize: '1.12rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+                      {diag.avgTheoreticalWaterM?.toFixed(2)} m
                     </div>
-                    <div style={{ fontSize: '0.68rem', color: '#475569' }}>
-                      sur {diag.totalCount} relevé{diag.totalCount > 1 ? 's' : ''} plage
+                    <div style={{ fontSize: '0.67rem', color: '#475569' }}>
+                      Bâches : <strong style={{ color: diag.bachesCount > 0 ? '#b45309' : '#166534' }}>{diag.bachesCount} ({diag.bachesPct}%)</strong>
+                      {' · '}Seuil {settings.L.toFixed(2)} m
                     </div>
                   </div>
+                </div>
+
+                {/* Plan de couverture des scénarios pour verrouiller le modèle empirique */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    padding: '7px 10px',
+                    background: '#f8fafc',
+                    border: '1px dashed #cbd5e1',
+                    borderRadius: '8px',
+                    marginBottom: '10px',
+                    fontSize: '0.68rem',
+                    color: '#475569',
+                  }}
+                >
+                  <strong style={{ color: '#0f172a' }}>Couverture calibrage :</strong>
+                  {[
+                    { label: 'Mer calme (<1m)', count: diag.swellCalm.count, target: 3 },
+                    { label: 'Houle moy. (1–1,8m)', count: diag.swellModerate.count, target: 3 },
+                    { label: 'Forte houle (≥1,8m)', count: diag.swellStrong.count, target: 3 },
+                    { label: 'Secteurs baie', count: diag.coveredZonesCount, target: 3 },
+                  ].map(item => {
+                    const ok = item.count >= item.target;
+                    return (
+                      <span
+                        key={item.label}
+                        style={{
+                          padding: '2px 7px',
+                          borderRadius: '6px',
+                          fontWeight: 800,
+                          background: ok ? '#dcfce7' : item.count > 0 ? '#fef3c7' : '#ffffff',
+                          color: ok ? '#166534' : item.count > 0 ? '#92400e' : '#64748b',
+                          border: `1px solid ${ok ? '#86efac' : item.count > 0 ? '#fcd34d' : '#cbd5e1'}`,
+                        }}
+                      >
+                        {ok ? '✓ ' : ''}
+                        {item.label} : {item.count}/{item.target}
+                      </span>
+                    );
+                  })}
                 </div>
 
                 {/* Ventilation par zone de la baie */}
@@ -1511,8 +1662,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       </div>
                       <div style={{ color: '#475569', marginTop: '3px' }}>
                         {z.count > 0
-                          ? `Largeur utile moy. : ${z.avgUsableWidthM != null ? `${z.avgUsableWidthM} m` : '—'} · Écart : ${
-                              z.avgCorrDeltaCm != null ? `${z.avgCorrDeltaCm > 0 ? '+' : ''}${z.avgCorrDeltaCm} cm` : '—'
+                          ? `Terrain utile moy. : ${z.avgUsableWidthM != null ? `${z.avgUsableWidthM} m` : '—'} · vs corrigé : ${
+                              z.avgDeltaVsCorrM != null ? `${z.avgDeltaVsCorrM > 0 ? '+' : ''}${z.avgDeltaVsCorrM} m` : '—'
                             }`
                           : 'Aucun relevé sur cette zone'}
                       </div>
@@ -1536,7 +1687,13 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
       {/* MODULE LITTO3D FINISTÈRE (IGN / SHOM) : COUPE 2D & LARGEUR DE ROULAGE (POINT 8) */}
       <div style={{ marginBottom: '20px' }}>
-        <Litto3DBeachSection settings={settings} EX={EX} logs={displayedLogs} activeCadre={activeCadreProfile} />
+        <Litto3DBeachSection
+          settings={settings}
+          EX={EX}
+          windList={windList}
+          logs={displayedLogs}
+          activeCadre={activeCadreProfile}
+        />
       </div>
 
       {/* TABLEAU DES RELEVÉS GPS AVEC FILTRES ET EXPORT */}
@@ -1710,11 +1867,20 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 <th style={{ padding: '8px 10px' }}>Auteur</th>
                 <th style={{ padding: '8px 10px' }}>Coordonnées GPS</th>
                 <th style={{ padding: '8px 10px' }}>Précision</th>
-                <th style={{ padding: '8px 10px' }}>Largeur Dune / Zone</th>
+                <th style={{ padding: '8px 10px' }}>Zone</th>
                 <th style={{ padding: '8px 10px' }}>Météo Théo vs Réel</th>
-                <th style={{ padding: '8px 10px' }}>Modèle SHOM brut</th>
-                <th style={{ padding: '8px 10px' }}>Modèle Corrigé</th>
-                <th style={{ padding: '8px 10px' }}>Surcote réelle</th>
+                <th
+                  style={{ padding: '8px 10px' }}
+                  title={`Bande de sable utile théorique (SHOM brut sur profil réel IGN RGE ALTI 1 m du secteur, après déduction de ${softMarginM} m de sable mou)`}
+                >
+                  Bande sable SHOM brut
+                </th>
+                <th
+                  style={{ padding: '8px 10px' }}
+                  title={`Bande de sable utile réellement mesurée sur le terrain (distance GPS depuis la ligne de dune − ${softMarginM} m de sable mou) et écart mangé/gagné vs SHOM brut`}
+                >
+                  Bande sable terrain (vs SHOM)
+                </th>
                 <th style={{ padding: '8px 10px' }}>État & Notes</th>
                 <th style={{ padding: '8px 10px', textAlign: 'center' }}>Action</th>
               </tr>
@@ -1722,7 +1888,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <tbody>
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
+                  <td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
                     <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📍</div>
                     <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.90rem', marginBottom: '4px' }}>
                       Aucun relevé GPS pour cette période / zone
@@ -1733,9 +1899,23 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredEntries.map(({ log, dyn: dynEval, zone, rawWidth: widthDune, usableWidthM, isEstimatedWidth }, idx) => {
-                  const latPct = dynEval.lateralPosPct ?? log.lateralPosPct;
-                  const inZone = dynEval.isInsideZone ?? log.isInsideZone;
+                filteredEntries.map(
+                  (
+                    {
+                      log,
+                      dyn: dynEval,
+                      zone,
+                      rawWidth: widthDune,
+                      widthSource,
+                      theoTotalX,
+                      theoUsableM,
+                      terrainUsableM,
+                    },
+                    idx
+                  ) => {
+                    const latPct = dynEval.lateralPosPct ?? log.lateralPosPct;
+                    const inZone = dynEval.isInsideZone ?? log.isInsideZone;
+                    const terrainVsTheoM = terrainUsableM != null ? terrainUsableM - theoUsableM : null;
 
                   return (
                   <tr
@@ -1796,40 +1976,62 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                         >
                           {zone.shortLabel}
                         </span>
-                        <div style={{ fontSize: '0.70rem' }}>
-                          <strong style={{ color: '#0f172a' }}>{usableWidthM} m utile</strong>
-                          {widthDune != null ? (
-                            <span style={{ fontSize: '0.64rem', color: inZone === false ? '#b45309' : '#64748b', marginLeft: '4px' }}>
-                              (Dune {widthDune} m{latPct != null ? ` · ${latPct}%` : ''}{inZone === false ? ' hors zone' : ''})
-                            </span>
-                          ) : (
-                            isEstimatedWidth && (
-                              <span style={{ fontSize: '0.64rem', color: '#94a3b8', marginLeft: '4px' }}>
-                                (est. Litto3D)
-                              </span>
-                            )
-                          )}
-                        </div>
+                        {(latPct != null || inZone === false) && (
+                          <span style={{ fontSize: '0.64rem', color: inZone === false ? '#b45309' : '#64748b' }}>
+                            {latPct != null ? `Couloir ${latPct}%` : ''}
+                            {inZone === false ? ' · hors zone' : ''}
+                          </span>
+                        )}
                       </div>
                     </td>
-                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
+                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155', lineHeight: 1.45 }}>
                       <div>
-                        <span style={{ fontSize: '0.64rem', fontWeight: 700, color: '#64748b' }}>Théo :</span>{' '}
-                        <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> ({log.weatherSnapshot.windDirectionComp}) · {log.weatherSnapshot.pressureHpa} hPa
-                        {log.weatherSnapshot.waveHeightM != null ? ` · ${log.weatherSnapshot.waveHeightM}m` : ''}
+                        <span style={{ display: 'inline-block', minWidth: '34px', fontSize: '0.64rem', fontWeight: 800, color: '#64748b' }}>
+                          Théo
+                        </span>
+                        <span>
+                          Vent <strong>{log.weatherSnapshot.windSpeedKts} nds</strong> {log.weatherSnapshot.windDirectionComp} · {log.weatherSnapshot.pressureHpa} hPa
+                          {log.weatherSnapshot.waveHeightM != null ? (
+                            <>
+                              {' · '}
+                              <span style={{ color: '#0369a1', fontWeight: 700 }}>
+                                Houle {log.weatherSnapshot.waveHeightM} m
+                                {log.weatherSnapshot.wavePeriodS != null ? ` (${log.weatherSnapshot.wavePeriodS}s)` : ''}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
                       </div>
                       {log.realWeatherSnapshot ? (
                         <div style={{ fontSize: '0.68rem', color: '#166534', marginTop: '2px' }}>
-                          <strong>Réel :</strong>{' '}
-                          {log.realWeatherSnapshot.windSpeedKts != null
-                            ? `${log.realWeatherSnapshot.windSpeedKts} nds ${log.realWeatherSnapshot.windDirectionComp || ''}`
-                            : 'vent H+2'}
-                          {log.realWeatherSnapshot.pressureHpa != null
-                            ? ` · ${log.realWeatherSnapshot.pressureHpa} hPa (${log.realWeatherSnapshot.pressureStation || 'METAR'})`
-                            : ''}
-                          {log.realWeatherSnapshot.shomBrestHeightM != null
-                            ? ` · Brest ${log.realWeatherSnapshot.shomBrestHeightM}m`
-                            : ''}
+                          <span style={{ display: 'inline-block', minWidth: '34px', fontSize: '0.64rem', fontWeight: 800 }}>
+                            Réel
+                          </span>
+                          <span>
+                            {log.realWeatherSnapshot.windSpeedKts != null ? (
+                              <>
+                                Vent <strong>{log.realWeatherSnapshot.windSpeedKts} nds</strong> {log.realWeatherSnapshot.windDirectionComp || ''}
+                              </>
+                            ) : (
+                              'Vent H+2'
+                            )}
+                            {log.realWeatherSnapshot.pressureHpa != null
+                              ? ` · ${log.realWeatherSnapshot.pressureHpa} hPa (${log.realWeatherSnapshot.pressureStation || 'METAR'})`
+                              : ''}
+                            {log.realWeatherSnapshot.shomBrestHeightM != null ? (
+                              <span
+                                title={`Mesure marégraphe SHOM Brest : ${log.realWeatherSnapshot.shomBrestHeightM} m · converti au zéro hydrographique de Douarnenez (-0,63 m)`}
+                              >
+                                {' · '}Marée <strong>{convertBrestHeightToDouarnenezM(log.realWeatherSnapshot.shomBrestHeightM)} m</strong> eq. DZ{' '}
+                                <span style={{ color: '#64748b', fontSize: '0.64rem' }}>
+                                  (Brest {log.realWeatherSnapshot.shomBrestHeightM} m)
+                                </span>
+                              </span>
+                            ) : null}
+                            {log.realWeatherSnapshot.waveHeightM != null
+                              ? ` · Houle ${log.realWeatherSnapshot.waveHeightM} m`
+                              : ''}
+                          </span>
                         </div>
                       ) : (
                         <div style={{ fontSize: '0.64rem', color: log.offlineQueued ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
@@ -1837,16 +2039,49 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#64748b' }}>
-                      {log.theoreticalWaterHeightM} m
+                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      <div style={{ fontWeight: 800, color: '#334155' }}>{theoUsableM} m utile</div>
+                      <div style={{ fontSize: '0.64rem', color: '#64748b' }}>
+                        Dune {theoTotalX} m · SHOM {log.theoreticalWaterHeightM} m
+                      </div>
                     </td>
-                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#0369a1', fontWeight: 700 }}>
-                      {log.correctedWaterHeightM} m
-                    </td>
-                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
-                      <strong style={{ color: log.rawSurcoteCm > 0 ? '#0284c7' : '#166534' }}>
-                        {log.rawSurcoteCm > 0 ? `+${log.rawSurcoteCm}` : log.rawSurcoteCm} cm
-                      </strong>
+                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {terrainUsableM != null ? (
+                        <>
+                          <div style={{ fontWeight: 900, color: '#0f172a' }}>
+                            {terrainUsableM} m utile
+                            {terrainVsTheoM != null && (
+                              <span
+                                style={{
+                                  marginLeft: '5px',
+                                  fontSize: '0.66rem',
+                                  fontWeight: 800,
+                                  color: terrainVsTheoM < 0 ? '#c2410c' : '#166534',
+                                }}
+                                title={`Écart terrain GPS (${terrainUsableM} m) vs SHOM brut (${theoUsableM} m)`}
+                              >
+                                ({terrainVsTheoM > 0 ? `+${terrainVsTheoM}` : terrainVsTheoM} m
+                                {terrainVsTheoM < 0 ? ' mangés' : ''})
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            style={{ fontSize: '0.64rem', color: '#64748b' }}
+                            title={
+                              widthSource === 'builtin_dune'
+                                ? 'Calcul automatique depuis la ligne de pied de dune Lestrevet–Pentrez (IGN/OSM) − 50 m de sable mou'
+                                : 'Calcul depuis les repères personnalisés du Cadre Terrain'
+                            }
+                          >
+                            Dune {widthDune} m · vs SHOM brut
+                          </div>
+                        </>
+                      ) : (
+                        <div title="Point GPS situé en dehors de la baie Lestrevet / Pentrez">
+                          <div style={{ fontWeight: 700, color: '#94a3b8' }}>Hors baie</div>
+                          <div style={{ fontSize: '0.63rem', color: '#94a3b8' }}>GPS hors Lestrevet–Pentrez</div>
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '8px 10px', color: '#475569', fontSize: '0.68rem', maxWidth: '220px' }}>
                       {log.beachState === 'dur' ? 'Sable dur' : log.beachState === 'mou' ? 'Sable mou' : log.beachState ? 'Bâches' : ''}
@@ -1949,11 +2184,11 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 marginBottom: '18px',
               }}
             >
-              « Vous avez passé les 300 mesures ! Vous avez déverrouillé l'option Mode Réel !! Félicitations !!! »
+              « Vous avez passé les 300 mesures ! Le modèle réel empirique de Lestrevet atteint sa précision maximale ! »
             </div>
 
             <p style={{ fontSize: '0.82rem', color: '#475569', lineHeight: 1.5, margin: '0 0 20px' }}>
-              Grâce à vos relevés constants sur la plage de Pentrez / Lestrevet, le modèle mathématique dispose désormais de données statistiques réelles suffisantes pour corriger les heures et seuils théoriques avec une précision millimétrique.
+              Grâce à vos relevés constants sur la plage de Pentrez / Lestrevet, le modèle réel empirique dispose désormais d&apos;une base terrain complète pour anticiper la largeur de plage et la surcote avec une grande fiabilité.
             </p>
 
             <button
@@ -1971,7 +2206,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
               }}
             >
-              🚀 Activer le Mode Réel & Continuer
+              🚀 Continuer avec le Modèle Empirique
             </button>
           </div>
         </div>

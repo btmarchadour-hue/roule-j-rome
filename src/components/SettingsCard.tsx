@@ -295,13 +295,18 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           : roulage toute la journée (sans contrainte de marée)
         </label>
 
-        <label className="ck" title="Surcote barométrique : ajoute +1 cm d'eau par hPa sous 1013 hPa selon la prévision AROME/GFS. Voir explications détaillées en bas de page.">
+        <label
+          className="ck"
+          title="Par défaut, les horaires de roulage restent calculés sur la marée SHOM brute (les graphiques et coupes affichent toujours le comparatif SHOM brut vs Modèle réel empirique). Cochez cette option pour appliquer le modèle réel empirique (Pression + Houle + Vent, calibré dès le 20/11/2026) directement aux créneaux de roulage."
+        >
           <input
             type="checkbox"
-            checked={settings.pcor}
-            onChange={e => onUpdateSettings({ pcor: e.target.checked })}
+            checked={settings.calculationMode === 'reel'}
+            onChange={e =>
+              onUpdateSettings({ calculationMode: e.target.checked ? 'reel' : 'theorique' })
+            }
           />{' '}
-          Correction de pression (+1 cm par hPa sous 1013)
+          Appliquer le modèle réel empirique aux horaires de roulage
         </label>
       </div>
 

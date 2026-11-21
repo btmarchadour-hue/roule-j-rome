@@ -38,7 +38,25 @@ import {
   saveObservationToFirestore,
   batchSaveObservationsToFirestore,
   getActiveInstructor,
+  subscribeToWaterlineGpsLogs,
+  subscribeToBeachCadreConfig,
 } from './utils/firebaseSync';
+import {
+  getOfflineGpsQueue,
+  getStoredWaterlineLogs,
+  mergeOfflineQueueWithLogs,
+  saveStoredWaterlineLogs,
+} from './utils/waterlineGpsEngine';
+import {
+  getStoredBeachCadreConfig,
+  saveStoredBeachCadreConfig,
+} from './utils/beachCadreEngine';
+import {
+  buildEmpiricalTidePoints,
+  buildPhysicalObservationPoints,
+  fitEmpiricalTerrainModel,
+  OBSERVATORY_START_DATE,
+} from './utils/physicalCorrelationEngine';
 import {
   CANCELLATION_REASONS_INFO,
   bulkUpsertObservations,
@@ -48,10 +66,12 @@ import {
 import {
   ActiveUserSession,
   AppSettings,
+  BeachCadreConfig,
   CancellationReason,
   CustomSlot,
   CustomSlotsMap,
   DayFocusData,
+  GpsWaterlineLog,
   MAX_CHARS_PER_INSTRUCTOR,
   SessionItem,
   SlotObservation,
@@ -115,7 +135,8 @@ const defaultSettings: AppSettings = {
   cap: 1,
   all: true,
   cmax: 50, // Seuil de roulage toute la journée calé à 50 pour cohérence parfaite avec les carnets de Jérôme
-  pcor: true,
+  pcor: false, // Conservé pour compatibilité ascendante (remplacé par le modèle réel empirique)
+  calculationMode: 'theorique',
   L: 4.5,
   mg: 0,
   lum: -1.1,
@@ -212,6 +233,14 @@ export const App: React.FC = () => {
     getStoredObservations().filter(o => o && o.id && !o.id.startsWith('sample-obs-'))
   );
 
+  // Relevés GPS bord d'eau + cadre plage synchronisés temps réel (pour le modèle réel empirique unifié)
+  const [gpsWaterlineLogs, setGpsWaterlineLogs] = useState<GpsWaterlineLog[]>(() =>
+    getStoredWaterlineLogs()
+  );
+  const [beachCadreConfig, setBeachCadreConfig] = useState<BeachCadreConfig>(() =>
+    getStoredBeachCadreConfig()
+  );
+
   // Clean obsolete tab storage key on startup
   useEffect(() => {
     try {
@@ -287,6 +316,19 @@ export const App: React.FC = () => {
       }
     });
 
+    // 7. Écouter en temps réel les relevés GPS bord d'eau et le cadre plage (modèle empirique unifié)
+    const unsubGpsLogs = subscribeToWaterlineGpsLogs(remoteLogs => {
+      setGpsWaterlineLogs(remoteLogs || []);
+      saveStoredWaterlineLogs(remoteLogs || []);
+    });
+
+    const unsubBeachCadre = subscribeToBeachCadreConfig(remoteCfg => {
+      if (remoteCfg) {
+        setBeachCadreConfig(remoteCfg);
+        saveStoredBeachCadreConfig(remoteCfg);
+      }
+    });
+
     return () => {
       unsubValidations();
       unsubCustomSlots();
@@ -294,6 +336,8 @@ export const App: React.FC = () => {
       unsubBookings();
       unsubTeamNotes();
       unsubObservations();
+      unsubGpsLogs();
+      unsubBeachCadre();
     };
   }, []);
 
@@ -445,15 +489,35 @@ export const App: React.FC = () => {
     notifySync('✓ Vos réglages précédents ont été restaurés !');
   }, [backupSettings]);
 
-  // Calculations for tides and windows
-  const EX: TidePoint[] = useMemo(() => {
-    return build(settings.les, settings.pcor, windList);
-  }, [settings.les, settings.pcor, windList]);
+  // Marée astronomique SHOM brute (sans ancienne correction théorique +1 cm/hPa)
+  const rawEX: TidePoint[] = useMemo(() => {
+    return build(settings.les, false, []);
+  }, [settings.les]);
 
-  // ÉTAPE 3 : Ajustement selon le mode Théorique vs Mode Réel (Modèle Empirique)
+  // Modèle réel empirique unifié (Pression + Houle + Vent, calibré progressivement dès le 20/11/2026)
+  const empiricalTerrainModel = useMemo(() => {
+    const mergedGps = mergeOfflineQueueWithLogs(gpsWaterlineLogs, getOfflineGpsQueue());
+    const activeCadre =
+      beachCadreConfig.profiles[beachCadreConfig.activeProfile] ||
+      beachCadreConfig.profiles.jerome ||
+      null;
+    const { points } = buildPhysicalObservationPoints(
+      mergedGps,
+      observations,
+      activeCadre,
+      OBSERVATORY_START_DATE
+    );
+    return fitEmpiricalTerrainModel(points);
+  }, [gpsWaterlineLogs, observations, beachCadreConfig]);
+
+  const empiricalEX: TidePoint[] = useMemo(() => {
+    return buildEmpiricalTidePoints(rawEX, windList, empiricalTerrainModel);
+  }, [rawEX, windList, empiricalTerrainModel]);
+
+  // Option B : SHOM brut par défaut pour les horaires ; bascule optionnelle vers le Modèle Réel Empirique
   const isRealMode = settings.calculationMode === 'reel';
-  const empiricalOffsetM = isRealMode ? ((settings.empiricalOffsetCm ?? 15) / 100) : 0;
-  const effectiveThreshold = (settings.L + empiricalOffsetM) - (settings.mg || 0) / 100;
+  const EX: TidePoint[] = isRealMode ? empiricalEX : rawEX;
+  const effectiveThreshold = settings.L - (settings.mg || 0) / 100;
 
   const tideW = useMemo(() => {
     return win(EX, effectiveThreshold);
@@ -476,20 +540,35 @@ export const App: React.FC = () => {
         ...customSlotsMap,
         [dateStr]: { replaceDefault, slots },
       };
-      setCustomSlotsMap(nextCustomMap);
-      try {
-        localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
-      } catch {
-        // ignore
-      }
-      saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
-        console.warn('Erreur Firestore custom slots:', err)
-      );
 
-      // Si la journée est déjà publiée en Cycle 1, synchroniser automatiquement les créneaux et migrer sans doublon Cycle 2 / réservations / REX
+      // Garde-fou anti-chevauchement strict avant toute écriture en base
+      const prevFocus = dayFocus(dateStr, settings, tideW, first, last, windList, customSlotsMap);
+      const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
+      const countOverlaps = (list: SessionItem[]) => {
+        const sorted = [...list].sort((a, b) => a.a - b.a);
+        let count = 0;
+        let firstPair: [SessionItem, SessionItem] | null = null;
+        for (let i = 0; i < sorted.length - 1; i++) {
+          if (sorted[i].b > sorted[i + 1].a) {
+            count++;
+            if (!firstPair) firstPair = [sorted[i], sorted[i + 1]];
+          }
+        }
+        return { count, firstPair };
+      };
+      const prevOv = countOverlaps(prevFocus.list);
+      const nextOv = countOverlaps(nextFocus.list);
+      if (nextOv.count > 0 && nextOv.count >= prevOv.count && nextOv.firstPair) {
+        const [ovA, ovB] = nextOv.firstPair;
+        const s1 = `${lc(ovA.a, nextFocus.y, nextFocus.m, nextFocus.d)}–${lc(ovA.b, nextFocus.y, nextFocus.m, nextFocus.d)}`;
+        const s2 = `${lc(ovB.a, nextFocus.y, nextFocus.m, nextFocus.d)}–${lc(ovB.b, nextFocus.y, nextFocus.m, nextFocus.d)}`;
+        notifySync(`⛔ Chevauchement interdit (${s1} et ${s2}) : modification bloquée pour protéger les données`);
+        return;
+      }
+
+      // Si la journée est déjà publiée en Cycle 1, vérifier d'abord qu'aucun créneau engagé (inscrits/REX/C2) ne sera perdu avant toute écriture
       const existingRecord = validations[dateStr];
       if (existingRecord && existingRecord.items && existingRecord.items.length > 0) {
-        const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
         const normTime = (v?: string) => (v || '').trim().replace('h', ':');
         const existingItems = [...existingRecord.items];
         const dayObsList = observations.filter(o => o.ds === dateStr);
@@ -535,16 +614,24 @@ export const App: React.FC = () => {
           }
         });
 
-        // Passe 2 : si un horaire vient d'être déplacé (-15/+15/Ajuster), rattacher la fiche existante (même avec inscrits/REX) au nouvel horaire sans laisser l'ancien en doublon
+        // Passe 2 : décalage léger (-15/+15/Ajuster) UNIQUEMENT pour les créneaux SANS activité Cycle 2 / inscrits / REX
+        // (ne JAMAIS rattacher silencieusement des inscrits d'un créneau vers un autre horaire !)
         nextFocus.list.forEach((x, idx) => {
           if (pairedExistingForNext[idx]) return;
           const startTimeStr = lc(x.a, nextFocus.y, nextFocus.m, nextFocus.d);
           const newStartMin = parseTimeMinutes(startTimeStr);
           if (newStartMin === null) return;
 
-          const remainingExisting = existingItems.filter(it => !usedExistingKeys.has(it.k));
+          const remainingExisting = existingItems.filter(it => {
+            if (usedExistingKeys.has(it.k)) return false;
+            const bChars = getSlotBookingsSummary(
+              bookingsMap[buildReservationKey(dateStr, it.k)] || []
+            ).totalChars;
+            const itObs = matchObsForItem(it);
+            return !hasCycle2Activity(it, bChars, itObs);
+          });
           let bestCandidate: ValidationItem | undefined;
-          let bestDiff = 181; // fenêtre large 3h pour absorber décalage d'un créneau
+          let bestDiff = 61; // fenêtre raisonnable 1h max pour créneau libre (0 inscrit)
 
           for (const cand of remainingExisting) {
             const candTime = cand.actualStart || cand.publishedStart || cand.s;
@@ -562,6 +649,36 @@ export const App: React.FC = () => {
             usedExistingKeys.add(bestCandidate.k);
           }
         });
+
+        // Garde-fou critique : si un créneau avec inscrits / REX / activité Cycle 2 n'existe plus dans la nouvelle grille,
+        // BLOQUER totalement la mise à jour au lieu de créer un reliquat orphelin qui fausse les données !
+        const lostActiveItems = existingItems.filter(rem => {
+          if (usedExistingKeys.has(rem.k)) return false;
+          const bChars = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(dateStr, rem.k)] || []
+          ).totalChars;
+          const remObs = matchObsForItem(rem);
+          return hasCycle2Activity(rem, bChars, remObs);
+        });
+        if (lostActiveItems.length > 0) {
+          const labels = lostActiveItems
+            .map(it => `${it.actualStart || it.s}–${it.actualEnd || it.e}`)
+            .join(', ');
+          notifySync(
+            `⛔ Modification bloquée : créneau(x) avec inscrits/REX encore actif(s) (${labels}). Traitez-les d’abord dans Cycle 2.`
+          );
+          return;
+        }
+
+        setCustomSlotsMap(nextCustomMap);
+        try {
+          localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
+        } catch {
+          // ignore
+        }
+        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
+          console.warn('Erreur Firestore custom slots:', err)
+        );
 
         const bookingMigrations: Array<{ oldKey: string; newKey: string; items: AgendaBookingItem[] }> = [];
         const obsMigrations: SlotObservation[] = [];
@@ -688,38 +805,42 @@ export const App: React.FC = () => {
           return null;
         }).filter((it): it is ValidationItem => it !== null);
 
-        // Ne conserver un reliquat Cycle 2 non apparié QUE s'il a de réelles données non absorbées par un créneau migré
-        for (const rem of existingItems) {
-          if (usedExistingKeys.has(rem.k)) continue;
-          const bChars = getSlotBookingsSummary(
-            bookingsMap[buildReservationKey(dateStr, rem.k)] || []
-          ).totalChars;
-          const remObs = matchObsForItem(rem);
-          if (hasCycle2Activity(rem, bChars, remObs)) {
-            syncedItems.push(rem);
-          }
-        }
-
         if (bookingMigrations.length > 0) {
+          const mergedByNewKey = new Map<string, AgendaBookingItem[]>();
+          for (const mig of bookingMigrations) {
+            const newResKey = buildReservationKey(dateStr, mig.newKey);
+            const existingTargetBookings = mergedByNewKey.get(newResKey) ?? bookingsMap[newResKey] ?? [];
+            const seenIds = new Set(existingTargetBookings.map(b => b.id));
+            const merged = [
+              ...existingTargetBookings,
+              ...mig.items.filter(b => !seenIds.has(b.id)),
+            ];
+            mergedByNewKey.set(newResKey, merged);
+          }
+
           setBookingsMap(prev => {
             const nextMap = { ...prev };
             for (const mig of bookingMigrations) {
               const oldResKey = buildReservationKey(dateStr, mig.oldKey);
-              const newResKey = buildReservationKey(dateStr, mig.newKey);
-              nextMap[newResKey] = mig.items;
               delete nextMap[oldResKey];
             }
+            mergedByNewKey.forEach((items, newResKey) => {
+              nextMap[newResKey] = items;
+            });
             return nextMap;
           });
           for (const mig of bookingMigrations) {
             const oldResKey = buildReservationKey(dateStr, mig.oldKey);
             const newResKey = buildReservationKey(dateStr, mig.newKey);
-            saveBookingToFirestore(newResKey, mig.items).catch(err =>
+            const mergedItems = mergedByNewKey.get(newResKey) || mig.items;
+            saveBookingToFirestore(newResKey, mergedItems).catch(err =>
               console.warn('Erreur Firestore migration réservations:', err)
             );
-            saveBookingToFirestore(oldResKey, []).catch(err =>
-              console.warn('Erreur Firestore purge ancienne clé réservations:', err)
-            );
+            if (!mergedByNewKey.has(oldResKey)) {
+              saveBookingToFirestore(oldResKey, []).catch(err =>
+                console.warn('Erreur Firestore purge ancienne clé réservations:', err)
+              );
+            }
           }
         }
 
@@ -731,36 +852,60 @@ export const App: React.FC = () => {
           );
         }
 
-        const nextValidation: ValidationDayRecord = {
-          sig: sigOf(nextFocus),
-          ts: Date.now(),
-          k: nextFocus.k,
-          cycle1PublishedAt: existingRecord.cycle1PublishedAt || Date.now(),
-          items: syncedItems,
-        };
-
-        setValidations(prev => {
-          const nextVals = { ...prev, [dateStr]: nextValidation };
-          try {
-            localStorage.setItem(VK, JSON.stringify(nextVals));
-          } catch {
-            // ignore
-          }
-          return nextVals;
-        });
-        saveValidationToFirestore(dateStr, nextValidation).catch(err =>
-          console.warn('Erreur Firestore sync validation Cycle 1:', err)
-        );
+        if (syncedItems.length === 0) {
+          setValidations(prev => {
+            const nextVals = { ...prev };
+            delete nextVals[dateStr];
+            try {
+              localStorage.setItem(VK, JSON.stringify(nextVals));
+            } catch {
+              // ignore
+            }
+            return nextVals;
+          });
+          deleteValidationFromFirestore(dateStr).catch(err =>
+            console.warn('Erreur Firestore delete validation vide:', err)
+          );
+        } else {
+          const nextValidation: ValidationDayRecord = {
+            sig: sigOf(nextFocus),
+            ts: Date.now(),
+            k: nextFocus.k,
+            cycle1PublishedAt: existingRecord.cycle1PublishedAt || Date.now(),
+            items: syncedItems,
+          };
+          setValidations(prev => {
+            const nextVals = { ...prev, [dateStr]: nextValidation };
+            try {
+              localStorage.setItem(VK, JSON.stringify(nextVals));
+            } catch {
+              // ignore
+            }
+            return nextVals;
+          });
+          saveValidationToFirestore(dateStr, nextValidation).catch(err =>
+            console.warn('Erreur Firestore sync validation Cycle 1:', err)
+          );
+        }
         notifySync(
           bookingMigrations.length > 0 || obsMigrations.length > 0
             ? '📅 Horaire ajusté et fiches / inscrits migrés sans doublon'
             : '📅 Horaires Cycle 1 mis à jour'
         );
       } else {
+        setCustomSlotsMap(nextCustomMap);
+        try {
+          localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
+        } catch {
+          // ignore
+        }
+        saveCustomSlotsToFirestore(dateStr, { replaceDefault, slots }).catch(err =>
+          console.warn('Erreur Firestore custom slots:', err)
+        );
         notifySync('✏️ Horaires du jour ajustés');
       }
     },
-    [currentUser, customSlotsMap, validations, settings, tideW, first, last, windList, bookingsMap, observations]
+    [isAdminLocked, currentUser, customSlotsMap, validations, settings, tideW, first, last, windList, bookingsMap, observations]
   );
 
   const handleTabChange = (tab: number) => {
@@ -1625,22 +1770,35 @@ export const App: React.FC = () => {
       mode: 'all' | 'wind_only' | 'not_published' = 'all',
       nonPublishReason?: string
     ): ValidationDayRecord => {
+      const usedExistingKeys = new Set<string>();
+      const normT = (v?: string) => (v || '').trim().replace('h', ':');
       const items: ValidationItem[] = record.list.map(x => {
         const slotKey = kOf(x);
         const startTimeStr = lc(x.a, record.y, record.m, record.d);
         const endTimeStr = lc(x.b, record.y, record.m, record.d);
         const existingItem = existingRecord?.items?.find(
-          it => it.k === slotKey || (it.s === startTimeStr && it.e === endTimeStr)
+          it =>
+            !usedExistingKeys.has(it.k) &&
+            (it.k === slotKey ||
+              (normT(it.publishedStart || it.s) === normT(startTimeStr) &&
+                normT(it.publishedEnd || it.e) === normT(endTimeStr)))
         );
+        if (existingItem) usedExistingKeys.add(existingItem.k);
         const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
         const bookingChars = getSlotBookingsSummary(
           bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
             bookingsMap[buildReservationKey(ds, slotKey)] ||
             []
         ).totalChars;
+        const slotObs = findObservationForSlot(
+          ds,
+          effectiveBookingKey,
+          existingItem?.actualStart || existingItem?.publishedStart || startTimeStr,
+          existingItem?.actualEnd || existingItem?.publishedEnd || endTimeStr
+        );
 
         // Préserver intact tout créneau déjà engagé en Cycle 2 (inscrits, décalage, 2e moniteur ou REX)
-        if (existingItem && hasCycle2Activity(existingItem, bookingChars)) {
+        if (existingItem && hasCycle2Activity(existingItem, bookingChars, slotObs)) {
           return {
             ...existingItem,
             publishedStart: existingItem.publishedStart || startTimeStr,
@@ -1698,6 +1856,23 @@ export const App: React.FC = () => {
         };
       });
 
+      // Ne jamais effacer silencieusement un créneau existant portant déjà des inscrits ou un REX
+      for (const oldItem of existingRecord?.items || []) {
+        if (usedExistingKeys.has(oldItem.k)) continue;
+        const bChars = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(ds, oldItem.k)] || []
+        ).totalChars;
+        const oldObs = findObservationForSlot(
+          ds,
+          oldItem.k,
+          oldItem.actualStart || oldItem.publishedStart || oldItem.s,
+          oldItem.actualEnd || oldItem.publishedEnd || oldItem.e
+        );
+        if (hasCycle2Activity(oldItem, bChars, oldObs)) {
+          items.push(oldItem);
+        }
+      }
+
       return {
         sig: sigOf(record),
         ts: Date.now(),
@@ -1706,7 +1881,7 @@ export const App: React.FC = () => {
         items,
       };
     },
-    [bookingsMap]
+    [bookingsMap, findObservationForSlot]
   );
 
   // CYCLE 1 : Publication commerciale ou Non-publication motivée jour par jour (préserve les créneaux déjà en Cycle 2)
@@ -1725,6 +1900,31 @@ export const App: React.FC = () => {
       return;
     }
     const existingRecord = validations[ds];
+
+    if (mode === 'not_published') {
+      const engagedSlots: string[] = [];
+      for (const it of existingRecord?.items || []) {
+        const bChars = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(ds, it.k)] || []
+        ).totalChars;
+        const itObs = findObservationForSlot(
+          ds,
+          it.k,
+          it.actualStart || it.publishedStart || it.s,
+          it.actualEnd || it.publishedEnd || it.e
+        );
+        if (bChars > 0 || Boolean(itObs) || hasCycle2Activity(it, bChars, itObs)) {
+          engagedSlots.push(`${it.actualStart || it.s}–${it.actualEnd || it.e}`);
+        }
+      }
+      if (engagedSlots.length > 0) {
+        notifySync(
+          `⛔ Impossible de fermer toute la journée « À ne pas publier » : créneau(x) déjà engagé(s) avec inscrits/REX (${engagedSlots.join(', ')}). Traitez-les d’abord dans Cycle 2.`
+        );
+        return;
+      }
+    }
+
     const nextRecord = buildCycle1DayRecord(ds, record, existingRecord, mode, nonPublishReason);
 
     persistDayValidation(ds, nextRecord);
@@ -1834,8 +2034,34 @@ export const App: React.FC = () => {
       notifySync('🔒 Archive verrouillée (> 7 jours) : archive Cycle 1 non modifiable');
       return;
     }
+    const existingRecord = validations[ds];
+    const hasDayBookings = Object.entries(bookingsMap).some(
+      ([key, list]) => key.startsWith(`${ds}_`) && getSlotBookingsSummary(list || []).totalChars > 0
+    );
+    const hasDayRex = observations.some(o => o.ds === ds);
+    const engagedLabels = (existingRecord?.items || [])
+      .filter(it => {
+        const bChars = getSlotBookingsSummary(
+          bookingsMap[buildReservationKey(ds, it.k)] || []
+        ).totalChars;
+        const itObs = findObservationForSlot(
+          ds,
+          it.k,
+          it.actualStart || it.publishedStart || it.s,
+          it.actualEnd || it.publishedEnd || it.e
+        );
+        return bChars > 0 || Boolean(itObs) || hasCycle2Activity(it, bChars, itObs);
+      })
+      .map(it => `${it.actualStart || it.s}–${it.actualEnd || it.e}`);
+
+    if (hasDayBookings || hasDayRex || engagedLabels.length > 0) {
+      notifySync(
+        `⛔ Réinitialisation bloquée : cette journée possède déjà des inscrits, un REX ou une activité Cycle 2${engagedLabels.length > 0 ? ` (${engagedLabels.join(', ')})` : ''}. Traitez-les d’abord dans Cycle 2.`
+      );
+      return;
+    }
     persistDayValidation(ds, null);
-  }, [isAdminLocked, persistDayValidation]);
+  }, [isAdminLocked, validations, bookingsMap, observations, findObservationForSlot, persistDayValidation]);
 
   // CYCLE 1 : Action unitaire sur un créneau (à publier, à ne pas publier + motif, clôturer Vie 2, réinitialiser)
   const handleSetSlotCycle1Action = useCallback(
@@ -1854,8 +2080,15 @@ export const App: React.FC = () => {
       const endTimeStr = lc(slot.b, record.y, record.m, record.d);
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
-      const existingItem = currentItems.find(it => it.k === slotKey);
-      const effectiveBookingKey = existingItem ? existingItem.k : slotKey;
+      const normT = (v?: string) => (v || '').trim().replace('h', ':');
+      const existingItem = currentItems.find(
+        it =>
+          it.k === slotKey ||
+          (normT(it.publishedStart || it.s) === normT(startTimeStr) &&
+            normT(it.publishedEnd || it.e) === normT(endTimeStr))
+      );
+      const matchedItemKey = existingItem ? existingItem.k : slotKey;
+      const effectiveBookingKey = matchedItemKey;
       const bSummary = getSlotBookingsSummary(
         bookingsMap[buildReservationKey(ds, effectiveBookingKey)] ||
           bookingsMap[buildReservationKey(ds, slotKey)] ||
@@ -1880,7 +2113,7 @@ export const App: React.FC = () => {
           );
           return;
         }
-        nextItems = currentItems.filter(it => it.k !== slotKey);
+        nextItems = currentItems.filter(it => it.k !== matchedItemKey);
       } else {
         if (
           (action === 'excluded' || action === 'not_published' || action === 'close_no_bookings') &&
@@ -1989,7 +2222,7 @@ export const App: React.FC = () => {
               };
 
         nextItems = existingItem
-          ? currentItems.map(it => (it.k === slotKey ? nextItem : it))
+          ? currentItems.map(it => (it.k === matchedItemKey ? nextItem : it))
           : [...currentItems, nextItem];
       }
 
@@ -2251,6 +2484,50 @@ export const App: React.FC = () => {
       const endTimeStr = lc(slot.b, record.y, record.m, record.d);
       const existingRecord = validations[ds];
       const currentItems = existingRecord?.items || [];
+
+      if (payload.type === 'purge_orphan') {
+        const targetKey = payload.valItemKey || slotKey;
+        const targetItem = currentItems.find(it => it.k === targetKey);
+        const orphanObs = findObservationForSlot(
+          ds,
+          targetKey,
+          targetItem?.actualStart || targetItem?.publishedStart || targetItem?.s || startTimeStr,
+          targetItem?.actualEnd || targetItem?.publishedEnd || targetItem?.e || endTimeStr
+        );
+        if (orphanObs) {
+          notifySync(
+            '⛔ Suppression bloquée : un REX terrain est encore rattaché à ce reliquat. Supprimez ou réconciliez d’abord le REX.'
+          );
+          return;
+        }
+        const nextItems = currentItems.filter(it => it.k !== targetKey);
+        persistDayValidation(
+          ds,
+          nextItems.length === 0
+            ? null
+            : {
+                sig: sigOf(record),
+                ts: Date.now(),
+                k: record.k,
+                cycle1PublishedAt: existingRecord?.cycle1PublishedAt || Date.now(),
+                items: nextItems,
+              }
+        );
+        const resKey = buildReservationKey(ds, targetKey);
+        if ((bookingsMap[resKey]?.length ?? 0) > 0) {
+          setBookingsMap(prev => {
+            const next = { ...prev };
+            delete next[resKey];
+            return next;
+          });
+          saveBookingToFirestore(resKey, []).catch(err =>
+            console.warn('Erreur Firestore purge réservations orphelines:', err)
+          );
+        }
+        notifySync('🗑️ Reliquat orphelin supprimé · planning aligné');
+        return;
+      }
+
       const existingItem = currentItems.find(it => it.k === slotKey);
       const bSummary = getSlotBookingsSummary(
         bookingsMap[buildReservationKey(ds, existingItem ? existingItem.k : slotKey)] ||
@@ -2331,6 +2608,38 @@ export const App: React.FC = () => {
       } else if (payload.type === 'shift') {
         const cleanNewStart = normalizeSlotTimeHHhMM(payload.newStart);
         const cleanNewEnd = normalizeSlotTimeHHhMM(payload.newEnd);
+        const newStartMin = parseTimeMinutes(cleanNewStart);
+        const newEndMin = parseTimeMinutes(cleanNewEnd);
+        if (newStartMin === null || newEndMin === null || newEndMin <= newStartMin) {
+          notifySync('⛔ Horaire décalé invalide : l’heure de fin doit être postérieure à l’heure de début.');
+          return;
+        }
+        // Garde-fou anti-chevauchement avec toute autre séance active / publiée du jour
+        const conflictingActive = currentItems.find(it => {
+          if (it.k === baseItem.k) return false;
+          if (
+            it.status === 'rejected' ||
+            it.cycle1Status === 'excluded' ||
+            it.cycle1Status === 'not_published' ||
+            it.cycle1Status === 'closed_no_bookings' ||
+            it.cycle2Status === 'merged' ||
+            it.cycle2Status === 'cancelled_weather'
+          ) {
+            return false;
+          }
+          const oStart = parseTimeMinutes(it.actualStart || it.publishedStart || it.s);
+          const oEnd = parseTimeMinutes(it.actualEnd || it.publishedEnd || it.e);
+          if (oStart === null || oEnd === null) return false;
+          return newStartMin < oEnd && newEndMin > oStart;
+        });
+        if (conflictingActive) {
+          const cLabel = `${conflictingActive.actualStart || conflictingActive.publishedStart || conflictingActive.s}–${conflictingActive.actualEnd || conflictingActive.publishedEnd || conflictingActive.e}`;
+          notifySync(
+            `⛔ Décalage bloqué : ${cleanNewStart}–${cleanNewEnd} chevauche la séance active ${cLabel}. Décalez d’abord l’autre créneau ou regroupez.`
+          );
+          return;
+        }
+
         const origStart = baseItem.publishedStart || startTimeStr;
         const computedDelta = computeShiftMinutes(origStart, cleanNewStart);
         const effectiveShift = computedDelta ?? payload.shiftMinutes;
@@ -2382,14 +2691,34 @@ export const App: React.FC = () => {
             : `🕒 Séance décalée (${effectiveShift > 0 ? '+' : ''}${effectiveShift} min) ➔ ${cleanNewStart} - ${cleanNewEnd} (mémorisée)`
         );
       } else if (payload.type === 'merge') {
+        const sourceObs = findObservationForSlot(
+          ds,
+          baseItem.k,
+          baseItem.actualStart || baseItem.publishedStart || startTimeStr,
+          baseItem.actualEnd || baseItem.publishedEnd || endTimeStr
+        );
+        if (sourceObs) {
+          notifySync(
+            '⛔ Regroupement bloqué : un REX est déjà enregistré sur cette séance. Supprimez d’abord le REX avant de regrouper.'
+          );
+          return;
+        }
+        if (payload.targetSlotKey === baseItem.k) {
+          notifySync('⛔ Impossible de regrouper un créneau sur lui-même.');
+          return;
+        }
+
         // Vérifier le plafond AVANT toute fusion (blocage strict à 12 / 20 / 24 chars selon encadrement cible)
         const targetSess = record.list.find(s => kOf(s) === payload.targetSlotKey);
+        const sourceResKey = buildReservationKey(ds, baseItem.k);
+        const targetResKey = buildReservationKey(ds, payload.targetSlotKey);
+        const sourceBookings = bookingsMap[sourceResKey] || [];
+        const targetBookings = bookingsMap[targetResKey] || [];
+
         if (targetSess) {
           const existingTarget = currentItems.find(it => it.k === payload.targetSlotKey);
           const tCounts = getValidationItemChars(existingTarget);
-          const tBook = getSlotBookingsSummary(
-            bookingsMap[buildReservationKey(ds, payload.targetSlotKey)] || []
-          );
+          const tBook = getSlotBookingsSummary(targetBookings);
           const sourceEffectiveChars = Math.max(bookingChars, existingCounts.totalChars);
           const targetEffectiveChars = Math.max(tBook.totalChars, tCounts.totalChars);
           const combChars = sourceEffectiveChars + targetEffectiveChars;
@@ -2406,6 +2735,27 @@ export const App: React.FC = () => {
           }
         }
 
+        // Migrer réellement les réservations clients de la source vers la cible (zéro perte & zéro double comptage)
+        let mergedBookingsList = targetBookings;
+        if (sourceBookings.length > 0 && targetSess) {
+          const existingTargetIds = new Set(targetBookings.map(b => b.id));
+          mergedBookingsList = [
+            ...targetBookings,
+            ...sourceBookings.filter(b => !existingTargetIds.has(b.id)),
+          ];
+          setBookingsMap(prev => {
+            const next = { ...prev, [targetResKey]: mergedBookingsList };
+            delete next[sourceResKey];
+            return next;
+          });
+          saveBookingToFirestore(targetResKey, mergedBookingsList).catch(err =>
+            console.warn('Erreur Firestore fusion réservations cible:', err)
+          );
+          saveBookingToFirestore(sourceResKey, []).catch(err =>
+            console.warn('Erreur Firestore purge réservations source fusionnée:', err)
+          );
+        }
+
         updatedSource = {
           ...baseItem,
           publishedStart: baseItem.publishedStart || startTimeStr,
@@ -2416,18 +2766,35 @@ export const App: React.FC = () => {
           mergedLabel: payload.targetLabel,
           status: 'rejected',
           rejectReason: `Regroupé vers ${payload.targetLabel}`,
+          monoCount: 0,
+          biCount: 0,
+          charsCount: 0,
+          pilotsCount: 0,
         };
 
-        // Ajouter les chars déplacés sur le créneau cible pour refléter la jauge combinée
+        // Mettre à jour la jauge combinée sur le créneau cible
         if (targetSess) {
           const tStart = lc(targetSess.a, record.y, record.m, record.d);
           const tEnd = lc(targetSess.b, record.y, record.m, record.d);
           const existingTarget = nextItems.find(it => it.k === payload.targetSlotKey);
           const tCounts = getValidationItemChars(existingTarget);
-          const combMono = tCounts.mono + existingCounts.mono;
-          const combBi = tCounts.bi + existingCounts.bi;
-          const combChars = tCounts.totalChars + existingCounts.totalChars;
-          const combPeople = tCounts.people + existingCounts.people;
+          const mergedBookSum = getSlotBookingsSummary(mergedBookingsList);
+          const combMono =
+            mergedBookSum.totalChars > 0
+              ? mergedBookSum.monoCount
+              : tCounts.mono + existingCounts.mono;
+          const combBi =
+            mergedBookSum.totalChars > 0
+              ? mergedBookSum.biCount
+              : tCounts.bi + existingCounts.bi;
+          const combChars =
+            mergedBookSum.totalChars > 0
+              ? mergedBookSum.totalChars
+              : tCounts.totalChars + existingCounts.totalChars;
+          const combPeople =
+            mergedBookSum.totalChars > 0
+              ? mergedBookSum.totalPeople
+              : tCounts.people + existingCounts.people;
 
           const updatedTarget: ValidationItem = {
             ...(existingTarget || {
@@ -2461,7 +2828,7 @@ export const App: React.FC = () => {
 
           const targetMaxChars = getSlotMaxCapacity(existingTarget);
           notifySync(
-            `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${targetMaxChars} chars)`
+            `🔗 Regroupé sur ${payload.targetLabel} (${combChars}/${targetMaxChars} chars · fiches clients transférées)`
           );
         }
       } else if (payload.type === 'double_instructor') {
@@ -2523,6 +2890,12 @@ export const App: React.FC = () => {
           payload.reason.toLowerCase().includes('pas d\'inscrit') ||
           payload.reason.toLowerCase().includes('0 réservation');
         if (isNoBookings) {
+          if (bookingChars > 0) {
+            notifySync(
+              `⛔ Impossible de clôturer « Pas d'inscrits » : ${bookingChars} char${bookingChars > 1 ? 's' : ''} encore inscrit${bookingChars > 1 ? 's' : ''} sur ce créneau. Retirez ou transférez d’abord les réservations.`
+            );
+            return;
+          }
           updatedSource = {
             ...baseItem,
             publishedStart: baseItem.publishedStart || startTimeStr,
@@ -2611,11 +2984,15 @@ export const App: React.FC = () => {
         items: nextItems,
       });
     },
-    [isAdminLocked, validations, bookingsMap, persistDayValidation]
+    [isAdminLocked, validations, bookingsMap, persistDayValidation, findObservationForSlot]
   );
 
   const handleCreateAndPublishCustomSlot = useCallback(
-    (dateStr: string, newSlot: CustomSlot) => {
+    (
+      dateStr: string,
+      newSlot: CustomSlot,
+      options?: { replaceDefault?: boolean; dropAdaptedClassics?: boolean }
+    ) => {
       if (isAdminLocked) {
         notifySync('🔒 Mode Moniteur / Contrôle : créneaux sur mesure verrouillés');
         return;
@@ -2626,13 +3003,97 @@ export const App: React.FC = () => {
       }
 
       const existingCfg = customSlotsMap[dateStr] || { replaceDefault: false, slots: [] };
-      const updatedSlots = [...existingCfg.slots, newSlot].sort((a, b) =>
+      const nextReplaceDefault =
+        options?.replaceDefault !== undefined ? options.replaceDefault : existingCfg.replaceDefault;
+      const baseSlots = options?.dropAdaptedClassics
+        ? existingCfg.slots.filter(cs => !cs.isAdapted && !cs.id.startsWith('c1-'))
+        : existingCfg.slots;
+      const updatedSlots = [...baseSlots, newSlot].sort((a, b) =>
         a.start.localeCompare(b.start)
       );
       const nextCustomMap: CustomSlotsMap = {
         ...customSlotsMap,
-        [dateStr]: { replaceDefault: existingCfg.replaceDefault, slots: updatedSlots },
+        [dateStr]: { replaceDefault: nextReplaceDefault, slots: updatedSlots },
       };
+
+      const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
+
+      // Garde-fou anti-chevauchement
+      const sortedNext = [...nextFocus.list].sort((a, b) => a.a - b.a);
+      for (let i = 0; i < sortedNext.length - 1; i++) {
+        if (sortedNext[i].b > sortedNext[i + 1].a) {
+          const s1 = `${lc(sortedNext[i].a, nextFocus.y, nextFocus.m, nextFocus.d)}–${lc(sortedNext[i].b, nextFocus.y, nextFocus.m, nextFocus.d)}`;
+          const s2 = `${lc(sortedNext[i + 1].a, nextFocus.y, nextFocus.m, nextFocus.d)}–${lc(sortedNext[i + 1].b, nextFocus.y, nextFocus.m, nextFocus.d)}`;
+          notifySync(`⛔ Chevauchement interdit (${s1} et ${s2}) : création bloquée`);
+          return;
+        }
+      }
+
+      // Vérifier qu'aucun créneau engagé (inscrits/REX/C2) n'est supprimé lors d'un remplacement ou nettoyage des adaptés
+      const existingRecord = validations[dateStr];
+      const prevItems = existingRecord?.items || [];
+      const nextKeySet = new Set(nextFocus.list.map(kOf));
+      const dayObsList = observations.filter(o => o.ds === dateStr);
+      const normTime = (v?: string) => (v || '').trim().replace('h', ':');
+
+      if ((nextReplaceDefault || options?.dropAdaptedClassics) && prevItems.length > 0) {
+        const lostBusy = prevItems.filter(it => {
+          if (nextKeySet.has(it.k)) return false;
+          const bChars = getSlotBookingsSummary(
+            bookingsMap[buildReservationKey(dateStr, it.k)] || []
+          ).totalChars;
+          const itObs = dayObsList.find(
+            o =>
+              o.slotKey === it.k ||
+              (Boolean(o.slotStart) &&
+                Boolean(o.slotEnd) &&
+                normTime(o.slotStart) === normTime(it.actualStart || it.publishedStart || it.s) &&
+                normTime(o.slotEnd) === normTime(it.actualEnd || it.publishedEnd || it.e))
+          );
+          return hasCycle2Activity(it, bChars, itObs);
+        });
+        if (lostBusy.length > 0) {
+          const labels = lostBusy.map(it => `${it.actualStart || it.s}–${it.actualEnd || it.e}`).join(', ');
+          notifySync(
+            `⛔ Remplacement bloqué : créneau(x) classique(s) avec inscrits/REX (${labels}). Traitez-les d’abord dans Cycle 2.`
+          );
+          return;
+        }
+      }
+
+      // Vérifier aussi que le nouveau créneau ne chevauche pas un ancien créneau orphelin actif encore en base
+      const newSlotStartMin = parseTimeMinutes(newSlot.start);
+      const newSlotEndMin = parseTimeMinutes(newSlot.end);
+      if (newSlotStartMin !== null && newSlotEndMin !== null && prevItems.length > 0) {
+        const retainedCheck = nextReplaceDefault
+          ? prevItems.filter(it => nextKeySet.has(it.k))
+          : prevItems;
+        const orphanConflict = retainedCheck.find(it => {
+          if (nextKeySet.has(it.k)) return false;
+          if (
+            it.status === 'rejected' ||
+            it.cycle1Status === 'excluded' ||
+            it.cycle1Status === 'not_published' ||
+            it.cycle1Status === 'closed_no_bookings' ||
+            it.cycle2Status === 'merged' ||
+            it.cycle2Status === 'cancelled_weather'
+          ) {
+            return false;
+          }
+          const oStart = parseTimeMinutes(it.actualStart || it.publishedStart || it.s);
+          const oEnd = parseTimeMinutes(it.actualEnd || it.publishedEnd || it.e);
+          if (oStart === null || oEnd === null) return false;
+          return newSlotStartMin < oEnd && newSlotEndMin > oStart;
+        });
+        if (orphanConflict) {
+          const cLabel = `${orphanConflict.actualStart || orphanConflict.s}–${orphanConflict.actualEnd || orphanConflict.e}`;
+          notifySync(
+            `⛔ Création bloquée : ce créneau chevauche un ancien créneau encore actif en base (${cLabel}). Traitez ou supprimez d’abord ce reliquat.`
+          );
+          return;
+        }
+      }
+
       setCustomSlotsMap(nextCustomMap);
       try {
         localStorage.setItem(CS_KEY, JSON.stringify(nextCustomMap));
@@ -2640,11 +3101,10 @@ export const App: React.FC = () => {
         // ignore
       }
       saveCustomSlotsToFirestore(dateStr, {
-        replaceDefault: existingCfg.replaceDefault,
+        replaceDefault: nextReplaceDefault,
         slots: updatedSlots,
       }).catch(err => console.warn('Erreur Firestore custom slots express:', err));
 
-      const nextFocus = dayFocus(dateStr, settings, tideW, first, last, windList, nextCustomMap);
       const [yy, mm0, dd] = dateStr.split('-').map(Number);
       const [sh, sm] = newSlot.start.split(':').map(Number);
       const targetSlotKey = `${Math.round(toU(yy, mm0 - 1, dd, sh * 60 + sm))}c`;
@@ -2660,31 +3120,53 @@ export const App: React.FC = () => {
         const sKey = kOf(targetSession);
         const startStr = lc(targetSession.a, nextFocus.y, nextFocus.m, nextFocus.d);
         const endStr = lc(targetSession.b, nextFocus.y, nextFocus.m, nextFocus.d);
-        const existingRecord = validations[dateStr];
-        const prevItems = existingRecord?.items || [];
 
-        const publishedItem: ValidationItem = {
-          k: sKey,
-          s: startStr,
-          e: endStr,
-          publishedStart: startStr,
-          publishedEnd: endStr,
-          opt: targetSession.opt,
-          over: targetSession.over,
-          lim: targetSession.lim,
-          customTitle: targetSession.customTitle || newSlot.title,
-          status: 'valid',
-          cycle1Status: 'published',
-          cycle2Status: 'awaiting_booking',
-          charsCount: 0,
-          monoCount: 0,
-          biCount: 0,
-          pilotsCount: 0,
-        };
+        // En mode remplacement propre des créneaux classiques, purger les anciens items classiques vides pour ne pas biaiser les stats
+        const retainedPrev =
+          nextReplaceDefault || options?.dropAdaptedClassics
+            ? prevItems.filter(it => nextKeySet.has(it.k))
+            : prevItems;
 
-        const nextItems = prevItems.some(it => it.k === sKey)
-          ? prevItems.map(it => (it.k === sKey ? { ...it, ...publishedItem } : it))
-          : [...prevItems, publishedItem];
+        const existingTarget = retainedPrev.find(it => it.k === sKey);
+        const existingTargetBookChars = existingTarget
+          ? getSlotBookingsSummary(bookingsMap[buildReservationKey(dateStr, existingTarget.k)] || []).totalChars
+          : 0;
+        const preserveExistingActivity = Boolean(
+          existingTarget && hasCycle2Activity(existingTarget, existingTargetBookChars)
+        );
+
+        const publishedItem: ValidationItem = preserveExistingActivity && existingTarget
+          ? {
+              ...existingTarget,
+              k: sKey,
+              opt: targetSession.opt,
+              over: targetSession.over,
+              lim: targetSession.lim,
+              customTitle: targetSession.customTitle || newSlot.title || existingTarget.customTitle,
+              cycle1Status: 'published',
+            }
+          : {
+              k: sKey,
+              s: startStr,
+              e: endStr,
+              publishedStart: startStr,
+              publishedEnd: endStr,
+              opt: targetSession.opt,
+              over: targetSession.over,
+              lim: targetSession.lim,
+              customTitle: targetSession.customTitle || newSlot.title,
+              status: 'valid',
+              cycle1Status: 'published',
+              cycle2Status: 'awaiting_booking',
+              charsCount: 0,
+              monoCount: 0,
+              biCount: 0,
+              pilotsCount: 0,
+            };
+
+        const nextItems = existingTarget
+          ? retainedPrev.map(it => (it.k === sKey ? publishedItem : it))
+          : [...retainedPrev, publishedItem];
 
         persistDayValidation(dateStr, {
           sig: sigOf(nextFocus),
@@ -2695,9 +3177,26 @@ export const App: React.FC = () => {
         });
       }
 
-      notifySync('⚡ Créneau sur mesure créé et publié en Cycle 2 !');
+      notifySync(
+        nextReplaceDefault
+          ? '⚡ Créneau sur mesure créé (créneaux classiques sans inscrit remplacés)'
+          : '⚡ Créneau sur mesure créé et publié en Cycle 2 !'
+      );
     },
-    [currentUser, customSlotsMap, settings, tideW, first, last, windList, validations, persistDayValidation]
+    [
+      isAdminLocked,
+      currentUser,
+      customSlotsMap,
+      settings,
+      tideW,
+      first,
+      last,
+      windList,
+      validations,
+      bookingsMap,
+      observations,
+      persistDayValidation,
+    ]
   );
 
   const handleOpenCycle2FromCalendar = useCallback((ds: string) => {
@@ -2738,8 +3237,8 @@ export const App: React.FC = () => {
       />
       <main className={activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
         {/* En-tête des marées : affiche la date du calendrier en tab 1, et la date du lendemain en tab 2 */}
-        {activeTab === 1 && <TideHeaderCard selectedDate={selectedDate} EX={EX} />}
-        {activeTab === 2 && <TideHeaderCard selectedDate={focusDate} EX={EX} />}
+        {activeTab === 1 && <TideHeaderCard selectedDate={selectedDate} EX={EX} windList={windList} />}
+        {activeTab === 2 && <TideHeaderCard selectedDate={focusDate} EX={EX} windList={windList} />}
 
         {/* Navigation tabs (100% Digital : Cycle 2, Stat, Étalonnage, Cycle 1, Hypothèses & Notes, Répertoire) */}
         <nav className="tabs noprint">
@@ -2769,7 +3268,7 @@ export const App: React.FC = () => {
             className={activeTab === 1 ? 'on' : ''}
             onClick={() => handleTabChange(1)}
           >
-            📅 Validation des créneaux de roulage
+            ⏳ Validation des créneaux de roulage
           </button>
           {canAccessHypothesesTab && (
             <button

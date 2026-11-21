@@ -47,7 +47,7 @@ import {
   stripReasonAccents,
 } from '../utils/cycleHelpers';
 import { CurveChart } from './CurveChart';
-import { CustomSlotsManager } from './CustomSlotsManager';
+import { CustomSlotsManager, SlotActivityConflict } from './CustomSlotsManager';
 import { SlotBookingsModal } from './SlotBookingsModal';
 import { CALENDAR_INDICATOR_COLORS, getFrenchHolidayInfo, HOLIDAY_ZONE_COLORS } from '../utils/frenchHolidays';
 import { CANCELLATION_REASONS_INFO } from '../utils/statisticsEngine';
@@ -182,7 +182,12 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
   const [activeSlotReasonIdx, setActiveSlotReasonIdx] = useState<number | null>(null);
   const [customSlotReasonInput, setCustomSlotReasonInput] = useState('');
   const [confirmResetSlot, setConfirmResetSlot] = useState<{ date: string; idx: number } | null>(null);
-  const [slotAdjustError, setSlotAdjustError] = useState<{ date: string; idx: number; message: string } | null>(null);
+  const [slotAdjustError, setSlotAdjustError] = useState<{
+    date: string;
+    idx: number;
+    message: string;
+    showCustomCta?: boolean;
+  } | null>(null);
 
   const availableNonPublishReasons = React.useMemo(() => {
     const base = [...DEFAULT_NON_PUBLISH_REASONS];
@@ -493,11 +498,14 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     nextStartMin: number,
     nextEndMin: number,
     editableList: CustomSlot[]
-  ): { start: string; end: string } | null => {
+  ): { start: string; end: string; bookedChars?: number } | null => {
     for (let i = 0; i < editableList.length; i++) {
       if (i === idx) continue;
       const otherCtx = resolveSlotCycle2Context(i);
-      if (otherCtx?.isClosedOrExcluded) continue;
+      const otherIsBusy = Boolean(
+        otherCtx && (otherCtx.effectiveChars > 0 || otherCtx.hasC2Act || otherCtx.slotObs)
+      );
+      if (otherCtx?.isClosedOrExcluded && !otherIsBusy) continue;
       const other = editableList[i];
       const oStart = parseHHMM(other.start);
       const oEnd = parseHHMM(other.end);
@@ -505,6 +513,35 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         return {
           start: normalizeSlotTimeHHhMM(other.start),
           end: normalizeSlotTimeHHhMM(other.end),
+          bookedChars: otherCtx?.effectiveChars || 0,
+        };
+      }
+    }
+
+    // Vérifier aussi les créneaux enregistrés en base (notamment avec inscrits / REX)
+    const currentCtx = resolveSlotCycle2Context(idx);
+    const valItems = validations[selectedDate]?.items || [];
+    for (const vItem of valItems) {
+      if (currentCtx?.valItem && vItem.k === currentCtx.valItem.k) continue;
+      const bChars = getSlotBookingsSummary(
+        bookingsMap[buildReservationKey(selectedDate, vItem.k)] || []
+      ).totalChars;
+      const totalChars = Math.max(bChars, getValidationItemChars(vItem).totalChars);
+      const vStartStr = (vItem.actualStart || vItem.publishedStart || vItem.s || '').replace('h', ':');
+      const vEndStr = (vItem.actualEnd || vItem.publishedEnd || vItem.e || '').replace('h', ':');
+      if (!vStartStr || !vEndStr) continue;
+      const isEngaged =
+        totalChars > 0 ||
+        hasCycle2Activity(vItem, totalChars) ||
+        vItem.status !== 'rejected';
+      if (!isEngaged) continue;
+      const vStart = parseHHMM(vStartStr);
+      const vEnd = parseHHMM(vEndStr);
+      if (nextStartMin < vEnd && nextEndMin > vStart) {
+        return {
+          start: normalizeSlotTimeHHhMM(vStartStr),
+          end: normalizeSlotTimeHHhMM(vEndStr),
+          bookedChars: totalChars,
         };
       }
     }
@@ -538,7 +575,9 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
       setSlotAdjustError({
         date: selectedDate,
         idx,
-        message: `Chevauchement avec le créneau ${overlap.start} - ${overlap.end}`,
+        message: overlap.bookedChars
+          ? `Chevauchement interdit avec ${overlap.start} - ${overlap.end} (${overlap.bookedChars} char(s) inscrit(s)). Traitez d’abord ce créneau dans Cycle 2.`
+          : `Chevauchement interdit avec le créneau ${overlap.start} - ${overlap.end}`,
       });
       return;
     }
@@ -574,21 +613,39 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
     }
 
     const nextList = buildEditableSlotsList();
-    if (!nextList[idx]) return;
+    const target = nextList[idx];
+    if (!target) return;
+
+    // Règle stricte anti-bug : sur un créneau classique, "Ajuster" sert uniquement à recaler l'heure à durée constante.
+    // Pour changer la durée (ex. passer à 1h30) et remplacer proprement les créneaux classiques, imposer l'outil Sur mesure !
+    const isClassicSlot = !ctx.slot.isCustom || Boolean(ctx.slot.isAdapted) || Boolean(ctx.slot.isUnchangedTide);
+    const currentDur = Math.max(15, parseHHMM(target.end) - parseHHMM(target.start));
+    const newDur = eMin - sMin;
+    if (isClassicSlot && newDur !== currentDur) {
+      setSlotAdjustError({
+        date: selectedDate,
+        idx,
+        showCustomCta: true,
+        message: `Changement de durée (${newDur} min au lieu de ${currentDur} min) interdit en ajustement rapide : passez par l’outil « Créneaux sur mesure » ci-dessous pour remplacer proprement les créneaux classiques sans doublon ni biais statistique.`,
+      });
+      return;
+    }
 
     const overlap = findOverlappingSlot(idx, sMin, eMin, nextList);
     if (overlap) {
       setSlotAdjustError({
         date: selectedDate,
         idx,
-        message: `Chevauchement avec le créneau ${overlap.start} - ${overlap.end}`,
+        message: overlap.bookedChars
+          ? `Chevauchement interdit avec ${overlap.start} - ${overlap.end} (${overlap.bookedChars} char(s) inscrit(s)). Traitez d’abord ce créneau dans Cycle 2.`
+          : `Chevauchement interdit avec le créneau ${overlap.start} - ${overlap.end}`,
       });
       return;
     }
 
     setSlotAdjustError(null);
     nextList[idx] = {
-      ...nextList[idx],
+      ...target,
       start: inlineEdit.start,
       end: inlineEdit.end,
     };
@@ -847,7 +904,57 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
         W={tideW}
         first={first}
         last={last}
+        windList={windList}
       />
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+          margin: '12px 0 8px 0',
+          padding: '7px 12px',
+          borderRadius: '8px',
+          background: 'var(--cell)',
+          border: '1px solid var(--bd)',
+          borderLeft: '4px solid var(--ac)',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.95rem',
+            fontWeight: 900,
+            textTransform: 'capitalize',
+            color: 'var(--tx)',
+          }}
+        >
+          {new Date(Date.UTC(y, m, d)).toLocaleDateString('fr-FR', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'UTC',
+          })}
+        </span>
+        {selectedDate === tdy() && (
+          <span
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 900,
+              background: 'var(--ac)',
+              color: '#111',
+              padding: '2px 8px',
+              borderRadius: '8px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.02em',
+            }}
+          >
+            Aujourd&apos;hui
+          </span>
+        )}
+      </div>
 
       {!P.length && (
         <div className="w">
@@ -2112,17 +2219,45 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
                       <div
                         style={{
                           marginTop: '4px',
-                          padding: '3px 7px',
-                          borderRadius: '5px',
+                          padding: '5px 8px',
+                          borderRadius: '6px',
                           background: '#fef2f2',
-                          border: '1px solid #fca5a5',
+                          border: '1.5px solid #fca5a5',
                           color: '#b91c1c',
-                          fontSize: '0.68rem',
+                          fontSize: '0.69rem',
                           fontWeight: 800,
                           textAlign: 'left',
+                          lineHeight: 1.35,
                         }}
                       >
-                        ⛔ {slotAdjustError.message}
+                        <div>⛔ {slotAdjustError.message}</div>
+                        {slotAdjustError.showCustomCta && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInlineEdit(null);
+                              setSlotAdjustError(null);
+                              setIsCustomSlotsOpen(true);
+                              requestAnimationFrame(() => {
+                                const el = document.getElementById('custom-slots-section');
+                                el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                              });
+                            }}
+                            style={{
+                              marginTop: '5px',
+                              padding: '4px 9px',
+                              borderRadius: '5px',
+                              border: 'none',
+                              background: '#0284c7',
+                              color: '#fff',
+                              fontSize: '0.68rem',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✏️ Ouvrir l’outil Créneaux sur mesure
+                          </button>
+                        )}
                       </div>
                     )}
                 </div>
@@ -2496,12 +2631,24 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
       {/* Custom slots manager */}
       {(() => {
         const protectedSlotReasons: Array<{ start: string; end: string; reason: string }> = [];
+        const slotActivityList: SlotActivityConflict[] = [];
         let hasAnyLockedSlot = false;
         allSlots.forEach((_, idx) => {
           const ctx = resolveSlotCycle2Context(idx);
           if (!ctx) return;
           const sHHMM = ctx.startTimeStr.replace('h', ':');
           const eHHMM = ctx.endTimeStr.replace('h', ':');
+          const isClassic =
+            !ctx.slot.isCustom || Boolean(ctx.slot.isAdapted) || Boolean(ctx.slot.isUnchangedTide);
+          slotActivityList.push({
+            start: sHHMM,
+            end: eHHMM,
+            chars: ctx.effectiveChars,
+            hasRex: Boolean(ctx.slotObs),
+            hasC2Decision: Boolean(ctx.hasC2Act),
+            isClassic,
+            label: ctx.slot.title,
+          });
           if (ctx.effectiveChars > 0) {
             protectedSlotReasons.push({ start: sHHMM, end: eHHMM, reason: `≥ 1 inscrit (${ctx.effectiveChars})` });
             hasAnyLockedSlot = true;
@@ -2528,6 +2675,7 @@ export const DayDetailPanel: React.FC<DayDetailPanelProps> = ({
             onToggleOpen={() => setIsCustomSlotsOpen(!isCustomSlotsOpen)}
             isReadOnly={isReadOnly || isPastLocked}
             protectedSlotReasons={protectedSlotReasons}
+            slotActivityList={slotActivityList}
             dayResetLockReason={hasAnyLockedSlot ? 'créneaux < 48h ou avec activité/décision' : null}
           />
         );
