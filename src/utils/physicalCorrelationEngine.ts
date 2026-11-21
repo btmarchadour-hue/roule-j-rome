@@ -12,7 +12,11 @@ import {
   resolveTerrainDuneWidthM,
 } from './beachOrientation';
 import { evaluatePointAgainstCadre } from './beachCadreEngine';
-import { convertBrestHeightToDouarnenezM } from './waterlineGpsEngine';
+import {
+  computeTideCycleAt,
+  computeTideCycleForSlot,
+  convertBrestHeightToDouarnenezM,
+} from './waterlineGpsEngine';
 import { comp, tdy, toU, windAt } from './tides';
 
 /** Date de démarrage officielle de la base physique propre (exclusion des essais antérieurs) */
@@ -34,6 +38,8 @@ export interface PhysicalObservationPoint {
   timestamp: number;
   author: string;
   zoneLabel: string;
+  tideCoef: number | null;
+  tideCycleLabel: string | null;
   /** Surcote constatée vs SHOM pur (cm : + = eau plus haute, - = décote) */
   surcoteCm: number | null;
   surcoteMethodLabel: string;
@@ -382,14 +388,19 @@ export function buildPhysicalObservationPoints(
     );
     const windSector = classifyWindDirection(windDirDeg, windDirComp);
 
+    const gpsTs = log.timestamp || Date.parse(`${log.dateStr}T12:00:00Z`);
+    const gpsTideCycle = computeTideCycleAt(gpsTs, log.dateStr);
+
     points.push({
       id: `gps-${log.id}`,
       source: 'gps',
       dateStr: log.dateStr,
       timeStr: log.timeStr || '—',
-      timestamp: log.timestamp || Date.parse(`${log.dateStr}T12:00:00Z`),
+      timestamp: gpsTs,
       author: log.author || 'Terrain',
       zoneLabel: bayZone.shortLabel,
+      tideCoef: log.tideCoef ?? gpsTideCycle.coef,
+      tideCycleLabel: log.tideCycleLabel ?? gpsTideCycle.label,
       surcoteCm,
       surcoteMethodLabel,
       widthDeltaM,
@@ -439,6 +450,8 @@ export function buildPhysicalObservationPoints(
     const windDirDeg = resolveWindDeg(null, windDirComp);
     const windSector = classifyWindDirection(windDirDeg, windDirComp);
 
+    const rexTideCycle = computeTideCycleForSlot(obs.ds, obs.slotStart);
+
     points.push({
       id: `rex-${obs.id}`,
       source: 'rex',
@@ -447,6 +460,8 @@ export function buildPhysicalObservationPoints(
       timestamp: parsedTs,
       author: obs.author || 'REX',
       zoneLabel: 'Lestrevet',
+      tideCoef: rexTideCycle.coef,
+      tideCycleLabel: rexTideCycle.label,
       surcoteCm: obs.waterDeltaCm != null ? Math.round(obs.waterDeltaCm) : null,
       surcoteMethodLabel: 'REX terrain',
       widthDeltaM: null,

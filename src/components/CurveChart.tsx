@@ -163,6 +163,7 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   const uid = rawUid.replace(/[^a-zA-Z0-9_-]/g, '');
 
   const [selectedZone, setSelectedZone] = useState<BayZoneId>('lestrevet');
+  const [isLegendOpen, setIsLegendOpen] = useState<boolean>(false);
   const [gpsLogs, setGpsLogs] = useState<GpsWaterlineLog[]>(() =>
     mergeOfflineQueueWithLogs(getStoredWaterlineLogs(), getOfflineGpsQueue())
   );
@@ -1368,100 +1369,192 @@ export const CurveChart: React.FC<CurveChartProps> = ({
         </div>
       )}
 
-      {/* Légende enrichie & impact concret sur la plage praticable */}
-      <div className="m" style={{ marginTop: '6px', fontSize: '0.72rem', lineHeight: '1.45' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: '12px', height: '3px', background: '#38bdf8', display: 'inline-block' }} />
-            <strong>Courbe réelle empirique</strong>
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #eab308', display: 'inline-block' }} />
-            <span>Courbe SHOM brut</span>
-          </span>
-          {deltaStats.hasOffset && deltaStats.maxPosCm >= 2 && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+      {/* Tiroir repliable (fermé par défaut) : Légende & impact plage du jour */}
+      <div
+        style={{
+          marginTop: '6px',
+          border: '1px solid rgba(148, 163, 184, 0.35)',
+          borderRadius: '8px',
+          background: 'rgba(255, 255, 255, 0.55)',
+          overflow: 'hidden',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsLegendOpen(prev => !prev)}
+          aria-expanded={isLegendOpen}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            padding: '6px 10px',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            textAlign: 'left',
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            color: '#334155',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span>ℹ️ Légende &amp; impact plage du jour</span>
+            {deltaStats.hasOffset && (
               <span
                 style={{
-                  width: '11px',
-                  height: '11px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  padding: '1px 6px',
+                  borderRadius: '999px',
                   background:
-                    'repeating-linear-gradient(45deg, rgba(249,115,22,0.55), rgba(249,115,22,0.55) 2px, rgba(255,237,213,0.9) 2px, rgba(255,237,213,0.9) 3.5px)',
-                  border: '1px solid #ea580c',
-                  borderRadius: '2px',
-                  display: 'inline-block',
+                    practicableDiffMin < 0
+                      ? 'rgba(249, 115, 22, 0.14)'
+                      : practicableDiffMin > 0
+                        ? 'rgba(16, 185, 129, 0.14)'
+                        : 'rgba(100, 116, 139, 0.12)',
+                  color:
+                    practicableDiffMin < 0
+                      ? '#c2410c'
+                      : practicableDiffMin > 0
+                        ? '#047857'
+                        : '#475569',
                 }}
-              />
-              <strong style={{ color: '#c2410c' }}>Surcote (+cm, plage perdue)</strong>
-            </span>
-          )}
-          {deltaStats.hasOffset && deltaStats.minNegCm <= -2 && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span
-                style={{
-                  width: '11px',
-                  height: '11px',
-                  background:
-                    'repeating-linear-gradient(-45deg, rgba(16,185,129,0.55), rgba(16,185,129,0.55) 2px, rgba(209,250,229,0.9) 2px, rgba(209,250,229,0.9) 3.5px)',
-                  border: '1px solid #059669',
-                  borderRadius: '2px',
-                  display: 'inline-block',
-                }}
-              />
-              <strong style={{ color: '#047857' }}>Sous-cote (−cm, plage gagnée)</strong>
-            </span>
-          )}
-        </div>
-
-        {deltaStats.hasOffset && (
-          <div
-            style={{
-              marginBottom: '4px',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              background:
-                practicableDiffMin < 0
-                  ? 'rgba(249, 115, 22, 0.09)'
+              >
+                {practicableDiffMin < 0
+                  ? `${practicableDiffMin} min`
                   : practicableDiffMin > 0
-                    ? 'rgba(16, 185, 129, 0.09)'
-                    : 'rgba(100, 116, 139, 0.08)',
-              color: '#1e293b',
+                    ? `+${practicableDiffMin} min`
+                    : '0 min'}
+                {' · '}
+                {deltaStats.avgCm > 0 ? `+${deltaStats.avgCm}` : deltaStats.avgCm} cm
+              </span>
+            )}
+          </span>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '20px',
+              height: '20px',
+              borderRadius: '5px',
+              background: 'rgba(148, 163, 184, 0.18)',
+              color: '#334155',
+              fontSize: '0.75rem',
+              fontWeight: 900,
+              flexShrink: 0,
             }}
           >
-            <strong>Impact plage (jour) :</strong>{' '}
-            {practicableDiffMin < 0 ? (
-              <span style={{ color: '#c2410c', fontWeight: 700 }}>
-                {practicableDiffMin} min de roulage praticable par rapport au SHOM
-              </span>
-            ) : practicableDiffMin > 0 ? (
-              <span style={{ color: '#047857', fontWeight: 700 }}>
-                +{practicableDiffMin} min de roulage praticable par rapport au SHOM
-              </span>
-            ) : (
-              <span>aucun impact sur la durée praticable du jour</span>
-            )}
-            {' · '}impact moyen{' '}
-            <b>
-              {deltaStats.avgBeachM > 0
-                ? `+${deltaStats.avgBeachM} m gagnés`
-                : deltaStats.avgBeachM < 0
-                  ? `${Math.abs(deltaStats.avgBeachM)} m perdus`
-                  : '0 m'}
-            </b>{' '}
-            ({deltaStats.avgCm > 0 ? '+' : ''}
-            {deltaStats.avgCm} cm).
-          </div>
-        )}
-
-        Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> ·{' '}
-        <b>fond noir : nuit</b> · barre bleue : plage praticable · barres marine : séances.
-        Survole/touche la courbe ou glisse le curseur pour animer la largeur de piste en direct.
-        {mar != null && (
-          <span>
-            {' '}
-            <b>Marnage du jour : {mar.toFixed(2).replace('.', ',')} m</b> (coef{' '}
-            {COEF[`${y}-${p2(m + 1)}-${p2(d)}`]}).
+            {isLegendOpen ? '▾' : '▸'}
           </span>
+        </button>
+
+        {isLegendOpen && (
+          <div
+            className="m"
+            style={{
+              padding: '6px 10px 8px',
+              borderTop: '1px solid rgba(148, 163, 184, 0.25)',
+              fontSize: '0.72rem',
+              lineHeight: '1.45',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ width: '12px', height: '3px', background: '#38bdf8', display: 'inline-block' }} />
+                <strong>Courbe réelle empirique</strong>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #eab308', display: 'inline-block' }} />
+                <span>Courbe SHOM brut</span>
+              </span>
+              {deltaStats.hasOffset && deltaStats.maxPosCm >= 2 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <span
+                    style={{
+                      width: '11px',
+                      height: '11px',
+                      background:
+                        'repeating-linear-gradient(45deg, rgba(249,115,22,0.55), rgba(249,115,22,0.55) 2px, rgba(255,237,213,0.9) 2px, rgba(255,237,213,0.9) 3.5px)',
+                      border: '1px solid #ea580c',
+                      borderRadius: '2px',
+                      display: 'inline-block',
+                    }}
+                  />
+                  <strong style={{ color: '#c2410c' }}>Surcote (+cm, plage perdue)</strong>
+                </span>
+              )}
+              {deltaStats.hasOffset && deltaStats.minNegCm <= -2 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <span
+                    style={{
+                      width: '11px',
+                      height: '11px',
+                      background:
+                        'repeating-linear-gradient(-45deg, rgba(16,185,129,0.55), rgba(16,185,129,0.55) 2px, rgba(209,250,229,0.9) 2px, rgba(209,250,229,0.9) 3.5px)',
+                      border: '1px solid #059669',
+                      borderRadius: '2px',
+                      display: 'inline-block',
+                    }}
+                  />
+                  <strong style={{ color: '#047857' }}>Sous-cote (−cm, plage gagnée)</strong>
+                </span>
+              )}
+            </div>
+
+            {deltaStats.hasOffset && (
+              <div
+                style={{
+                  marginBottom: '4px',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  background:
+                    practicableDiffMin < 0
+                      ? 'rgba(249, 115, 22, 0.09)'
+                      : practicableDiffMin > 0
+                        ? 'rgba(16, 185, 129, 0.09)'
+                        : 'rgba(100, 116, 139, 0.08)',
+                  color: '#1e293b',
+                }}
+              >
+                <strong>Impact plage (jour) :</strong>{' '}
+                {practicableDiffMin < 0 ? (
+                  <span style={{ color: '#c2410c', fontWeight: 700 }}>
+                    {practicableDiffMin} min de roulage praticable par rapport au SHOM
+                  </span>
+                ) : practicableDiffMin > 0 ? (
+                  <span style={{ color: '#047857', fontWeight: 700 }}>
+                    +{practicableDiffMin} min de roulage praticable par rapport au SHOM
+                  </span>
+                ) : (
+                  <span>aucun impact sur la durée praticable du jour</span>
+                )}
+                {' · '}impact moyen{' '}
+                <b>
+                  {deltaStats.avgBeachM > 0
+                    ? `+${deltaStats.avgBeachM} m gagnés`
+                    : deltaStats.avgBeachM < 0
+                      ? `${Math.abs(deltaStats.avgBeachM)} m perdus`
+                      : '0 m'}
+                </b>{' '}
+                ({deltaStats.avgCm > 0 ? '+' : ''}
+                {deltaStats.avgCm} cm).
+              </div>
+            )}
+
+            Courbe de marée (heures locales, hauteur en m). <b>Fond vert : journée</b> ·{' '}
+            <b>fond noir : nuit</b> · barre bleue : plage praticable · barres marine : séances.
+            Survole/touche la courbe ou glisse le curseur pour animer la largeur de piste en direct.
+            {mar != null && (
+              <span>
+                {' '}
+                <b>Marnage du jour : {mar.toFixed(2).replace('.', ',')} m</b> (coef{' '}
+                {COEF[`${y}-${p2(m + 1)}-${p2(d)}`]}).
+              </span>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -404,6 +404,13 @@ export const PhysicalCorrelationObservatory: React.FC<
                     <tr key={pt.id}>
                       <td style={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
                         {fmtDateShort(pt.dateStr)} · {pt.timeStr}
+                        {(pt.tideCoef != null || pt.tideCycleLabel) && (
+                          <div style={{ fontSize: '0.64rem', fontWeight: 700, opacity: 0.78 }}>
+                            {pt.tideCoef != null ? `Coef ${pt.tideCoef}` : ''}
+                            {pt.tideCoef != null && pt.tideCycleLabel ? ' · ' : ''}
+                            {pt.tideCycleLabel || ''}
+                          </div>
+                        )}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         {pt.source === 'gps' ? '📍 GPS' : '📝 REX'}

@@ -18,6 +18,7 @@ import {
   buildWaterlineSnapshot,
   calculateGpsDistanceM,
   computeGpsDiagnosticSummary,
+  computeTideCycleAt,
   consolidateGpsLogWithRealData,
   convertBrestHeightToDouarnenezM,
   enqueueOfflineGpsLog,
@@ -85,9 +86,10 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   const syncInFlightRef = useRef<boolean>(false);
   const gpsAbortRef = useRef<AbortController | null>(null);
 
-  // Filtre d'affichage
+  // Filtre d'affichage & tiroirs repliables
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
   const [filterZone, setFilterZone] = useState<'all' | BayZoneId>('all');
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState<boolean>(false);
 
   const displayedLogs = useMemo(
     () => mergeOfflineQueueWithLogs(logs, offlineQueue),
@@ -184,6 +186,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
       let syncedOfflineCount = 0;
       let consolidatedCount = 0;
+      let backfilledTideCount = 0;
 
       try {
         // 1. Vider la file hors-ligne vers Firestore (+ récupération capteurs réels immédiate)
@@ -191,8 +194,14 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         for (const qItem of currentQueue) {
           try {
             const { id: _oldOfflineId, offlineQueued: _oq, ...payloadBase } = qItem;
+            const qCycle = computeTideCycleAt(qItem.timestamp, qItem.dateStr);
             let readyPayload: Omit<GpsWaterlineLog, 'id'> = {
               ...payloadBase,
+              tideCoef: payloadBase.tideCoef ?? qCycle.coef ?? undefined,
+              tideCycleLabel: payloadBase.tideCycleLabel ?? qCycle.label ?? undefined,
+              tideDirection: payloadBase.tideDirection ?? qCycle.direction ?? undefined,
+              tideMinutesSinceExtreme:
+                payloadBase.tideMinutesSinceExtreme ?? qCycle.minutesSinceExtreme ?? undefined,
               consolidationStatus: 'pending_real',
             };
             const realData = await fetchRealConditionsAt(qItem.timestamp, Boolean(options?.forceRefresh));
@@ -216,6 +225,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         // 2. Consolider les relevés récents en attente (ex: après H+2 pour Winds-Up)
         const now = Date.now();
         const maxAgeMs = 14 * 24 * 3600 * 1000;
+        const updatedDocIds = new Set<string>();
         const candidates = logs.filter(l => {
           if (l.consolidationStatus === 'consolidated') return false;
           const ageMs = now - l.timestamp;
@@ -234,19 +244,57 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             Boolean(options?.forceRefresh)
           );
           if (changed) {
-            const { id: docId, ...restPayload } = updatedLog;
+            const tc = computeTideCycleAt(updatedLog.timestamp, updatedLog.dateStr);
+            const enrichedLog: GpsWaterlineLog = {
+              ...updatedLog,
+              tideCoef: updatedLog.tideCoef ?? tc.coef ?? undefined,
+              tideCycleLabel: updatedLog.tideCycleLabel ?? tc.label ?? undefined,
+              tideDirection: updatedLog.tideDirection ?? tc.direction ?? undefined,
+              tideMinutesSinceExtreme:
+                updatedLog.tideMinutesSinceExtreme ?? tc.minutesSinceExtreme ?? undefined,
+            };
+            const { id: docId, ...restPayload } = enrichedLog;
             await upsertWaterlineGpsLogToFirestore(restPayload, docId);
+            updatedDocIds.add(docId);
             if (lastLoggedItem?.id === docId) {
-              setLastLoggedItem(updatedLog);
+              setLastLoggedItem(enrichedLog);
             }
             consolidatedCount++;
           }
         }
 
-        if (!options?.silent || syncedOfflineCount > 0 || consolidatedCount > 0) {
+        // 2b. Rétroactivité Firestore : compléter Coef + BM+/HM+ sur les relevés déjà enregistrés
+        const missingTideLogs = logs.filter(l => {
+          if (updatedDocIds.has(l.id) || l.offlineQueued) return false;
+          if (l.tideCoef != null && l.tideCycleLabel) return false;
+          const tc = computeTideCycleAt(l.timestamp, l.dateStr);
+          return tc.coef != null || tc.label != null;
+        });
+        for (const item of missingTideLogs.slice(0, 40)) {
+          const tc = computeTideCycleAt(item.timestamp, item.dateStr);
+          const enriched: GpsWaterlineLog = {
+            ...item,
+            tideCoef: item.tideCoef ?? tc.coef ?? undefined,
+            tideCycleLabel: item.tideCycleLabel ?? tc.label ?? undefined,
+            tideDirection: item.tideDirection ?? tc.direction ?? undefined,
+            tideMinutesSinceExtreme:
+              item.tideMinutesSinceExtreme ?? tc.minutesSinceExtreme ?? undefined,
+          };
+          const { id: docId, ...restPayload } = enriched;
+          await upsertWaterlineGpsLogToFirestore(restPayload, docId);
+          if (lastLoggedItem?.id === docId) {
+            setLastLoggedItem(enriched);
+          }
+          backfilledTideCount++;
+        }
+
+        if (!options?.silent || syncedOfflineCount > 0 || consolidatedCount > 0 || backfilledTideCount > 0) {
           const parts: string[] = [];
           if (syncedOfflineCount > 0) parts.push(`${syncedOfflineCount} relevé(s) hors-ligne envoyé(s)`);
           if (consolidatedCount > 0) parts.push(`${consolidatedCount} relevé(s) consolidé(s) avec Winds-Up/METAR/SHOM`);
+          if (backfilledTideCount > 0) {
+            parts.push(`${backfilledTideCount} relevé(s) complété(s) rétroactivement (Coef & BM+/HM+)`);
+          }
           setConsolidationFeedback(
             parts.length > 0
               ? `✓ ${parts.join(' · ')}`
@@ -1254,6 +1302,32 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               </div>
               <div style={{ fontSize: '0.74rem', color: '#334155', marginTop: '4px' }}>
                 Marée SHOM brute : <strong>{lastLoggedItem.theoreticalWaterHeightM} m</strong>
+                {(() => {
+                  const tc = computeTideCycleAt(lastLoggedItem.timestamp, lastLoggedItem.dateStr);
+                  const coef = lastLoggedItem.tideCoef ?? tc.coef;
+                  const label = lastLoggedItem.tideCycleLabel ?? tc.label;
+                  const dir = lastLoggedItem.tideDirection ?? tc.direction;
+                  if (coef == null && !label) return null;
+                  return (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        marginLeft: '6px',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        background: dir === 'montante' ? '#dbeafe' : '#fef3c7',
+                        color: dir === 'montante' ? '#1e40af' : '#92400e',
+                      }}
+                    >
+                      {coef != null ? `Coef ${coef}` : ''}
+                      {coef != null && label ? ' · ' : ''}
+                      {label || ''}
+                      {dir === 'montante' ? ' ↗' : dir === 'descendante' ? ' ↘' : ''}
+                    </span>
+                  );
+                })()}
               </div>
               <div style={{ fontSize: '0.80rem', fontWeight: 900, color: lastLoggedItem.rawSurcoteCm > 0 ? '#0369a1' : '#166534', marginTop: '4px' }}>
                 Surcote observée : {lastLoggedItem.rawSurcoteCm > 0 ? `+${lastLoggedItem.rawSurcoteCm}` : lastLoggedItem.rawSurcoteCm} cm
@@ -1426,12 +1500,29 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
               background: '#ffffff',
               border: diag.isReady ? '2px solid #0284c7' : '1.5px solid #cbd5e1',
               borderRadius: '12px',
-              padding: '16px 18px',
+              padding: isDiagnosticOpen ? '14px 18px 16px' : '12px 18px',
               marginBottom: '20px',
               boxShadow: '0 2px 10px rgba(15, 23, 42, 0.04)',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            <button
+              type="button"
+              onClick={() => setIsDiagnosticOpen(prev => !prev)}
+              aria-expanded={isDiagnosticOpen}
+              style={{
+                width: '100%',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
               <div>
                 <div style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1', letterSpacing: '0.04em' }}>
                   🔬 Diagnostic Mesuré · Palier 20 Relevés GPS · dès le 20/11/2026
@@ -1440,36 +1531,57 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   Vérification du Seuil Réel de Lestrevet ({settings.L.toFixed(2)} m · vs SHOM brut)
                 </h3>
               </div>
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  padding: '4px 10px',
-                  borderRadius: '12px',
-                  background: diag.isReady ? '#dcfce7' : diag.totalCount > 0 ? '#fef3c7' : '#f1f5f9',
-                  color: diag.isReady ? '#166534' : diag.totalCount > 0 ? '#92400e' : '#475569',
-                  border: `1px solid ${diag.isReady ? '#86efac' : diag.totalCount > 0 ? '#fcd34d' : '#cbd5e1'}`,
-                }}
-              >
-                {diag.isReady
-                  ? `✅ Palier atteint (${diag.totalCount} relevés · diagnostic exploitable)`
-                  : diag.totalCount > 0
-                  ? `⏳ Tendance préliminaire (${diag.totalCount} / ${diag.threshold})`
-                  : `🔒 En attente (${diag.totalCount} / ${diag.threshold} relevés)`}
-              </span>
-            </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    padding: '4px 10px',
+                    borderRadius: '12px',
+                    background: diag.isReady ? '#dcfce7' : diag.totalCount > 0 ? '#fef3c7' : '#f1f5f9',
+                    color: diag.isReady ? '#166534' : diag.totalCount > 0 ? '#92400e' : '#475569',
+                    border: `1px solid ${diag.isReady ? '#86efac' : diag.totalCount > 0 ? '#fcd34d' : '#cbd5e1'}`,
+                  }}
+                >
+                  {diag.isReady
+                    ? `✅ Palier atteint (${diag.totalCount} relevés · diagnostic exploitable)`
+                    : diag.totalCount > 0
+                    ? `⏳ Tendance préliminaire (${diag.totalCount} / ${diag.threshold})`
+                    : `🔒 En attente (${diag.totalCount} / ${diag.threshold} relevés)`}
+                </span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '26px',
+                    height: '26px',
+                    borderRadius: '6px',
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    fontSize: '0.82rem',
+                    fontWeight: 900,
+                  }}
+                  title={isDiagnosticOpen ? 'Replier le tiroir' : 'Ouvrir le tiroir'}
+                >
+                  {isDiagnosticOpen ? '▾' : '▸'}
+                </span>
+              </div>
+            </button>
 
-            {/* Barre de progression dédiée au palier 20 */}
-            <div style={{ height: '7px', borderRadius: '4px', background: '#e2e8f0', overflow: 'hidden', marginBottom: '10px' }}>
-              <div
-                style={{
-                  height: '100%',
-                  width: `${diag.progressPct}%`,
-                  background: diag.isReady ? '#16a34a' : '#0284c7',
-                  transition: 'width 0.35s ease',
-                }}
-              />
-            </div>
+            {isDiagnosticOpen && (
+              <div style={{ marginTop: '12px' }}>
+                {/* Barre de progression dédiée au palier 20 */}
+                <div style={{ height: '7px', borderRadius: '4px', background: '#e2e8f0', overflow: 'hidden', marginBottom: '10px' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${diag.progressPct}%`,
+                      background: diag.isReady ? '#16a34a' : '#0284c7',
+                      transition: 'width 0.35s ease',
+                    }}
+                  />
+                </div>
 
             {/* Bandeau conclusion / verdict */}
             <div
@@ -1662,7 +1774,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       </div>
                       <div style={{ color: '#475569', marginTop: '3px' }}>
                         {z.count > 0
-                          ? `Terrain utile moy. : ${z.avgUsableWidthM != null ? `${z.avgUsableWidthM} m` : '—'} · vs corrigé : ${
+                          ? `Terrain utile moy. : ${z.avgUsableWidthM != null ? `${z.avgUsableWidthM} m` : '—'} · vs SHOM : ${
                               z.avgDeltaVsCorrM != null ? `${z.avgDeltaVsCorrM > 0 ? '+' : ''}${z.avgDeltaVsCorrM} m` : '—'
                             }`
                           : 'Aucun relevé sur cette zone'}
@@ -1671,6 +1783,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   ))}
                 </div>
               </>
+            )}
+              </div>
             )}
           </div>
         );
@@ -1864,6 +1978,12 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <thead>
               <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', color: '#475569', fontSize: '0.66rem', textTransform: 'uppercase' }}>
                 <th style={{ padding: '8px 10px' }}>Date & Heure</th>
+                <th
+                  style={{ padding: '8px 10px' }}
+                  title="Coefficient SHOM du jour et position exacte dans le cycle de marée (BM+ = montante / flot, HM+ = descendante / jusant)"
+                >
+                  Marée (Coef / Cycle)
+                </th>
                 <th style={{ padding: '8px 10px' }}>Auteur</th>
                 <th style={{ padding: '8px 10px' }}>Coordonnées GPS</th>
                 <th style={{ padding: '8px 10px' }}>Précision</th>
@@ -1888,7 +2008,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             <tbody>
               {filteredEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
+                  <td colSpan={11} style={{ padding: '40px 16px', textAlign: 'center', color: '#64748b' }}>
                     <div style={{ fontSize: '1.8rem', marginBottom: '8px' }}>📍</div>
                     <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.90rem', marginBottom: '4px' }}>
                       Aucun relevé GPS pour cette période / zone
@@ -1916,6 +2036,10 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                     const latPct = dynEval.lateralPosPct ?? log.lateralPosPct;
                     const inZone = dynEval.isInsideZone ?? log.isInsideZone;
                     const terrainVsTheoM = terrainUsableM != null ? terrainUsableM - theoUsableM : null;
+                    const tc = computeTideCycleAt(log.timestamp, log.dateStr);
+                    const tideCoef = log.tideCoef ?? tc.coef;
+                    const tideCycleLabel = log.tideCycleLabel ?? tc.label;
+                    const tideDir = log.tideDirection ?? tc.direction;
 
                   return (
                   <tr
@@ -1927,6 +2051,41 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                   >
                     <td style={{ padding: '8px 10px', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
                       {log.dateStr} à {log.timeStr}
+                    </td>
+                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {tideCoef != null || tideCycleLabel ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                            {tideCoef != null ? `Coef ${tideCoef}` : 'Coef —'}
+                          </div>
+                          {tideCycleLabel && (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                width: 'fit-content',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.64rem',
+                                fontWeight: 800,
+                                background: tideDir === 'montante' ? '#dbeafe' : '#fef3c7',
+                                color: tideDir === 'montante' ? '#1e40af' : '#92400e',
+                              }}
+                              title={
+                                tideDir === 'montante'
+                                  ? 'Marée montante (flot après basse mer)'
+                                  : tideDir === 'descendante'
+                                  ? 'Marée descendante (jusant après haute mer)'
+                                  : 'Cycle de marée SHOM'
+                              }
+                            >
+                              {tideCycleLabel}
+                              {tideDir === 'montante' ? ' ↗' : tideDir === 'descendante' ? ' ↘' : ''}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
                       {log.author}

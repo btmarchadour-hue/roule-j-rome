@@ -28,6 +28,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
   userRole = 'admin',
   userName = 'Jérôme',
 }) => {
+  const [isOpen, setIsOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const isLocked = isReadOnly || userRole === 'moniteur';
 
@@ -41,9 +42,140 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
     return isNaN(n) ? fallback : n;
   };
 
+  const isEmpiricalSchedule = settings.calculationMode === 'reel';
+
   return (
     <>
-      <div className="card ctl nop" style={{ opacity: isLocked ? 0.88 : 1 }}>
+      <div
+        className="card nop"
+        style={{
+          padding: '12px 16px',
+          marginBottom: isOpen ? '10px' : '14px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsOpen(prev => !prev)}
+          aria-expanded={isOpen}
+          style={{
+            flex: '1 1 260px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '8px',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: '0.86rem',
+                fontWeight: 900,
+                color: 'var(--tx, #0f172a)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>⚙️</span>
+              <span>Réglages séances, marée &amp; météo</span>
+            </div>
+            <div
+              style={{
+                fontSize: '0.72rem',
+                color: 'var(--mu, #64748b)',
+                marginTop: '3px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px',
+                alignItems: 'center',
+              }}
+            >
+              <span>Seuil <strong>{settings.L.toFixed(2).replace('.', ',')} m</strong></span>
+              <span>·</span>
+              <span>Coef ≤ <strong>{settings.cmax}</strong></span>
+              <span>·</span>
+              <span
+                style={{
+                  fontWeight: 800,
+                  color: isEmpiricalSchedule ? '#15803d' : '#0369a1',
+                }}
+              >
+                {isEmpiricalSchedule ? '✨ Modèle empirique' : '📐 SHOM brut'}
+              </span>
+              <span>·</span>
+              <span>Vent {settings.vmin}–{settings.vmax} nds</span>
+            </div>
+          </div>
+
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '26px',
+              height: '26px',
+              borderRadius: '6px',
+              background: 'rgba(148, 163, 184, 0.18)',
+              color: 'var(--tx, #334155)',
+              fontSize: '0.82rem',
+              fontWeight: 900,
+              flexShrink: 0,
+            }}
+            title={isOpen ? 'Replier les réglages' : 'Ouvrir les réglages'}
+          >
+            {isOpen ? '▾' : '▸'}
+          </span>
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
+          <a
+            href="https://www.windguru.cz/48456"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '6px 11px',
+              background: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              fontSize: '0.76rem',
+              fontWeight: 700,
+              textDecoration: 'none',
+            }}
+            title="Ouvrir les prévisions Windguru Pentrez"
+          >
+            <span>Windguru Pentrez ↗</span>
+          </a>
+          <button
+            type="button"
+            className="wbtn"
+            disabled={isLoadingWind}
+            onClick={onRefreshWind}
+            title={windStatusText || 'Recharger les prévisions vent / houle / pression AROME HD'}
+            style={{ margin: 0, flexShrink: 0 }}
+          >
+            {isLoadingWind ? 'Chargement…' : '🔄 Actualiser le vent'}
+          </button>
+        </div>
+      </div>
+
+      {isOpen && (
+        <>
+          <div className="card ctl nop" style={{ opacity: isLocked ? 0.88 : 1 }}>
         {isReadOnly || userRole === 'moniteur' ? (
           <div
             style={{
@@ -616,6 +748,8 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* MODALE DE CONFIRMATION AVANT RÉINITIALISATION */}
       {showConfirmModal && (

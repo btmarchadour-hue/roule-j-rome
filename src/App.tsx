@@ -3348,18 +3348,7 @@ export const App: React.FC = () => {
               isReadOnly={isAdminLocked}
             />
 
-            <TableView
-              year={year}
-              month={month}
-              settings={settings}
-              EX={EX}
-              W={tideW}
-              first={first}
-              last={last}
-              windList={windList}
-            />
-
-            {/* Positionnement du bloc Marnage directement en dessous du bloc Export (Exigence 1) */}
+            {/* Bloc Marnage */}
             <div className="card nop">
               <MarnageChart
                 year={year}
@@ -3371,7 +3360,7 @@ export const App: React.FC = () => {
               />
             </div>
 
-            {/* Formulaire des Réglages (Séances, seuils, vent, actualisation, réinitialisation) */}
+            {/* Formulaire des Réglages (tiroir fermé par défaut + vent / Windguru) */}
             <SettingsCard
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
@@ -3386,62 +3375,17 @@ export const App: React.FC = () => {
               userName={currentUser?.displayName || currentUser?.username || 'Jérôme'}
             />
 
-            {/* Lien d'accès direct vers l'onglet Hypothèses & Notes (réservé à Jérôme et Benoît) */}
-            {canAccessHypothesesTab && (
-              <div
-                className="card nop"
-                style={{
-                  marginTop: '14px',
-                  background: 'var(--card)',
-                  border: '1.5px dashed var(--bd)',
-                  borderRadius: '12px',
-                  padding: '14px 18px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '1.5rem' }}>💡</span>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--tx)' }}>
-                      Réglages validés et hypothèses du moniteur &amp; notes de calcul
-                    </div>
-                    <div style={{ fontSize: '0.74rem', color: 'var(--mu)', marginTop: '2px' }}>
-                      Règles d&apos;enchaînement, pauses, surcote barométrique détaillée et explications techniques.
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="fbtn"
-                  onClick={() => {
-                    handleTabChange(6);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  style={{
-                    margin: 0,
-                    padding: '8px 16px',
-                    fontSize: '0.8rem',
-                    fontWeight: 800,
-                    borderRadius: '8px',
-                    background: 'var(--cell, #f1f5f9)',
-                    color: 'var(--tx, #111)',
-                    border: '1.5px solid var(--bd, #cbd5e1)',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <span>Consulter les Hypothèses &amp; Notes</span>
-                  <span style={{ fontSize: '0.95rem' }}>➔</span>
-                </button>
-              </div>
-            )}
+            {/* Outil d'Export en bas de page */}
+            <TableView
+              year={year}
+              month={month}
+              settings={settings}
+              EX={EX}
+              W={tideW}
+              first={first}
+              last={last}
+              windList={windList}
+            />
           </div>
         )}
 

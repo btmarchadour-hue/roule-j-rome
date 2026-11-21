@@ -5,7 +5,7 @@ import {
   estimateLitto3dUsableWidthM,
   resolveTerrainDuneWidthM,
 } from './beachOrientation';
-import { build, comp, hAt, windAt } from './tides';
+import { build, COEF, comp, hAt, toU, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
 const OFFLINE_QUEUE_KEY = 'cv_waterline_offline_queue_v1';
@@ -18,6 +18,108 @@ export const SHOM_BREST_TO_DOUARNENEZ_ZH_OFFSET_M = -0.63;
 
 export function convertBrestHeightToDouarnenezM(brestHeightM: number): number {
   return Number((brestHeightM + SHOM_BREST_TO_DOUARNENEZ_ZH_OFFSET_M).toFixed(2));
+}
+
+export interface TideCycleInfo {
+  coef: number | null;
+  phaseKind: 'BM' | 'HM' | null;
+  minutesSinceExtreme: number | null;
+  label: string | null; // ex: "BM + 1h45" ou "HM + 2h10"
+  direction: 'montante' | 'descendante' | null;
+}
+
+let cachedRawShomEx: TidePoint[] | null = null;
+function getCachedRawShomEx(): TidePoint[] {
+  if (!cachedRawShomEx) {
+    cachedRawShomEx = build(false, false, []);
+  }
+  return cachedRawShomEx;
+}
+
+/**
+ * Calcule le coefficient de marée et la position exacte dans le cycle (BM + XhYY ou HM + XhYY)
+ * à partir d'un timestamp (ms) en s'appuyant sur les extrema SHOM bruts.
+ */
+export function computeTideCycleAt(
+  timestampMs: number,
+  dateStr?: string,
+  les: boolean = false
+): TideCycleInfo {
+  const validTs = Number.isFinite(timestampMs) && timestampMs > 0;
+  const resolvedDate =
+    dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+      ? dateStr
+      : validTs
+      ? new Date(timestampMs).toISOString().slice(0, 10)
+      : '';
+  const coef = resolvedDate && COEF[resolvedDate] != null ? COEF[resolvedDate] : null;
+
+  if (!validTs) {
+    return { coef, phaseKind: null, minutesSinceExtreme: null, label: null, direction: null };
+  }
+
+  const utcMin = Math.floor(timestampMs / 60000);
+  const ex = les ? build(true, false, []) : getCachedRawShomEx();
+
+  let prev: TidePoint | null = null;
+  for (let i = 0; i < ex.length; i++) {
+    if (ex[i].t <= utcMin) {
+      prev = ex[i];
+    } else {
+      break;
+    }
+  }
+
+  if (!prev) {
+    return { coef, phaseKind: null, minutesSinceExtreme: null, label: null, direction: null };
+  }
+
+  const diffMin = Math.max(0, Math.round(utcMin - prev.t));
+  // Garde-fou si la date est hors plage de la table SHOM (> 9 h après le dernier extrême connu)
+  if (diffMin > 9 * 60) {
+    return { coef, phaseKind: null, minutesSinceExtreme: null, label: null, direction: null };
+  }
+
+  const phaseKind: 'BM' | 'HM' = prev.pm ? 'HM' : 'BM';
+  const direction: 'montante' | 'descendante' = prev.pm ? 'descendante' : 'montante';
+  const h = Math.floor(diffMin / 60);
+  const mm = String(diffMin % 60).padStart(2, '0');
+  const label = `${phaseKind} + ${h}h${mm}`;
+
+  return {
+    coef,
+    phaseKind,
+    minutesSinceExtreme: diffMin,
+    label,
+    direction,
+  };
+}
+
+/**
+ * Variante pour un créneau horaire local France (ex: dateStr "2026-11-21", slotStart "14h15" ou "14:15").
+ */
+export function computeTideCycleForSlot(
+  dateStr: string,
+  slotStart?: string,
+  les: boolean = false
+): TideCycleInfo {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return { coef: null, phaseKind: null, minutesSinceExtreme: null, label: null, direction: null };
+  }
+  const m = (slotStart || '').trim().match(/^(\d{1,2})[:hH](\d{2})/);
+  if (!m) {
+    return {
+      coef: COEF[dateStr] ?? null,
+      phaseKind: null,
+      minutesSinceExtreme: null,
+      label: null,
+      direction: null,
+    };
+  }
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const mins = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  const tsMs = toU(y, mo - 1, d, mins) * 60000;
+  return computeTideCycleAt(tsMs, dateStr, les);
 }
 
 export function getStoredWaterlineLogs(): GpsWaterlineLog[] {
@@ -789,6 +891,8 @@ export function buildWaterlineSnapshot(
       ? Math.max(0, resolvedDune.widthFromDuneM - softMarginM)
       : estimateLitto3dUsableWidthM(correctedWaterHeightM, softMarginM, bayZone.zoneId);
 
+  const tideCycle = computeTideCycleAt(gps.timestamp, dateStr, settings.les);
+
   return {
     timestamp: gps.timestamp,
     dateStr,
@@ -803,6 +907,10 @@ export function buildWaterlineSnapshot(
     theoreticalWaterHeightM,
     correctedWaterHeightM,
     schoolThresholdM: settings.L,
+    tideCoef: tideCycle.coef ?? undefined,
+    tideCycleLabel: tideCycle.label ?? undefined,
+    tideDirection: tideCycle.direction ?? undefined,
+    tideMinutesSinceExtreme: tideCycle.minutesSinceExtreme ?? undefined,
     rawSurcoteCm,
     correctedSurcoteCm,
     measuredWidthFromDuneM: resolvedDune.widthFromDuneM ?? undefined,
@@ -865,6 +973,9 @@ export function exportWaterlineLogsAsCsv(
     'Periode_Houle_Reelle_s',
     'Statut_Consolidation',
     'Hauteur_Theorique_SHOM_m',
+    'Coef_Maree',
+    'Cycle_Maree',
+    'Sens_Maree',
     'Hauteur_Corrigee_Ecole_m',
     'Seuil_Roulage_Ecole_m',
     'Surcote_Brute_SHOM_cm',
@@ -905,6 +1016,10 @@ export function exportWaterlineLogsAsCsv(
         ? 'dune_auto_lestrevet_pentrez'
         : l.cadreProfileUsed || '';
     const rw = l.realWeatherSnapshot;
+    const cycle = computeTideCycleAt(l.timestamp, l.dateStr);
+    const tideCoef = l.tideCoef ?? cycle.coef ?? '';
+    const tideCycleLabel = l.tideCycleLabel ?? cycle.label ?? '';
+    const tideDir = l.tideDirection ?? cycle.direction ?? '';
 
     return [
       l.id,
@@ -946,6 +1061,9 @@ export function exportWaterlineLogsAsCsv(
       rw?.wavePeriodS != null ? rw.wavePeriodS : '',
       l.consolidationStatus || '',
       l.theoreticalWaterHeightM,
+      tideCoef,
+      tideCycleLabel,
+      tideDir === 'montante' ? 'Montante' : tideDir === 'descendante' ? 'Descendante' : '',
       l.correctedWaterHeightM,
       l.schoolThresholdM,
       l.rawSurcoteCm,

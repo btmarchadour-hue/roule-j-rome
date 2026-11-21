@@ -21,6 +21,7 @@ import {
 } from '../utils/firebaseSync';
 import { getStoredBeachCadreConfig } from '../utils/beachCadreEngine';
 import {
+  computeTideCycleForSlot,
   getOfflineGpsQueue,
   getStoredWaterlineLogs,
   mergeOfflineQueueWithLogs,
@@ -1756,6 +1757,12 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '0.64rem', textTransform: 'uppercase' }}>
                   <th style={{ padding: '6px 8px' }}>Date</th>
                   <th style={{ padding: '6px 8px' }}>Séance</th>
+                  <th
+                    style={{ padding: '6px 8px' }}
+                    title="Coefficient SHOM du jour et cycle de marée au début de séance (BM+ = montante, HM+ = descendante)"
+                  >
+                    Marée (Coef / Cycle)
+                  </th>
                   <th style={{ padding: '6px 8px' }}>Statut</th>
                   <th style={{ padding: '6px 8px' }}>Écart Roulage</th>
                   <th style={{ padding: '6px 8px' }}>Surcote (cm)</th>
@@ -1769,7 +1776,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
               <tbody>
                 {sortedObservations.length === 0 ? (
                   <tr>
-                    <td colSpan={10} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
+                    <td colSpan={11} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
                       <div style={{ fontSize: '1.4rem', marginBottom: '6px' }}>📝</div>
                       <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.88rem', marginBottom: '4px' }}>
                         Carnet de relevés vierge (prêt pour la saison)
@@ -1784,6 +1791,7 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                 ) : (
                   sortedObservations.map((obs, idx) => {
                     const isRealized = obs.status === 'realized';
+                    const tc = computeTideCycleForSlot(obs.ds, obs.slotStart);
                     return (
                       <tr
                         key={obs.id || idx}
@@ -1799,6 +1807,32 @@ export const StatisticsTab: React.FC<StatisticsTabProps> = ({
                         </td>
                         <td style={{ padding: '6px 8px', color: '#334155', whiteSpace: 'nowrap' }}>
                           {obs.slotStart}–{obs.slotEnd} {obs.customTitle ? `(${obs.customTitle})` : ''}
+                        </td>
+                        <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                          {tc.coef != null || tc.label ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                                {tc.coef != null ? `C.${tc.coef}` : '—'}
+                              </span>
+                              {tc.label && (
+                                <span
+                                  style={{
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.62rem',
+                                    fontWeight: 800,
+                                    background: tc.direction === 'montante' ? '#dbeafe' : '#fef3c7',
+                                    color: tc.direction === 'montante' ? '#1e40af' : '#92400e',
+                                  }}
+                                >
+                                  {tc.label}
+                                  {tc.direction === 'montante' ? ' ↗' : tc.direction === 'descendante' ? ' ↘' : ''}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>—</span>
+                          )}
                         </td>
                         <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
                           {isRealized ? (

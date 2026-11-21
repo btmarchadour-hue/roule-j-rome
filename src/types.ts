@@ -361,10 +361,14 @@ export interface GpsWaterlineLog {
     wavePeriodS?: number;      // Période de houle (s)
   };
 
-  // Modèles hydrodynamiques à cet instant T
+  // Modèles hydrodynamiques & cycle de marée à cet instant T
   theoreticalWaterHeightM: number; // Modèle SHOM pur sans correction barométrique/vent (m)
   correctedWaterHeightM: number;   // Modèle corrigé école (avec surcote barométrique +1cm/hPa et vent) (m)
   schoolThresholdM: number;        // Seuil de roulage de l'école (ex: 4.50 m)
+  tideCoef?: number;               // Coefficient de marée du jour (SHOM, ex: 60)
+  tideCycleLabel?: string;         // Position dans le cycle (ex: "BM + 1h45" ou "HM + 2h10")
+  tideDirection?: 'montante' | 'descendante'; // Sens du flux (BM+ = montante, HM+ = descendante)
+  tideMinutesSinceExtreme?: number; // Minutes écoulées depuis la dernière BM ou HM
 
   // Écarts mesurés vs modèles
   rawSurcoteCm: number;            // Surcote constatée vs modèle brut SHOM (cm)
