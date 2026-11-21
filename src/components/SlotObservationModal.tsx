@@ -7,6 +7,7 @@ import {
   getMonitorBadgeStyle,
   stripReasonAccents,
 } from '../utils/cycleHelpers';
+import { computeTideCycleForSlot } from '../utils/waterlineGpsEngine';
 
 interface SlotObservationModalProps {
   isOpen: boolean;
@@ -292,6 +293,9 @@ export const SlotObservationModal: React.FC<SlotObservationModalProps> = ({
       observedGustKts: observedGustKts !== '' ? Number(observedGustKts) : undefined,
       observedWindDir: observedWindDir || undefined,
       observedWaveH: observedWaveH !== '' ? Number(observedWaveH) : undefined,
+      tideCoef: initialObservation?.tideCoef ?? computeTideCycleForSlot(dateStr, slotStart).coef ?? undefined,
+      tideCycleLabel:
+        initialObservation?.tideCycleLabel ?? computeTideCycleForSlot(dateStr, slotStart).label ?? undefined,
       beachCondition: beachCondition || undefined,
       charsCount: status === 'realized' ? effectiveChars : undefined,
       participantsCount: status === 'realized' ? effectiveParticipants : undefined,

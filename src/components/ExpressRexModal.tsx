@@ -27,6 +27,7 @@ import {
   getSlotWeatherRexDefaults,
   SlotWeatherRexDefaults,
 } from '../utils/slotWeatherRex';
+import { computeTideCycleForSlot } from '../utils/waterlineGpsEngine';
 
 export interface ExpressRexModalProps {
   isOpen: boolean;
@@ -485,12 +486,15 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
 
     const obsList: SlotObservation[] = rowsToSave.map(r => {
       const now = Date.now();
+      const tideCycle = computeTideCycleForSlot(activeDate, r.slotStart, settings.les);
       const baseWeather = {
         observedPressure: r.observedPressure,
         observedWindKts: r.observedWindKts,
         observedGustKts: r.observedGustKts,
         observedWindDir: r.observedWindDir || undefined,
         observedWaveH: r.observedWaveH,
+        tideCoef: tideCycle.coef ?? undefined,
+        tideCycleLabel: tideCycle.label ?? undefined,
         beachCondition: r.beachCondition,
       };
 
@@ -898,6 +902,18 @@ export const ExpressRexModal: React.FC<ExpressRexModalProps> = ({
                             )}
                             {row.observedPressure != null && ` · ${row.observedPressure} hPa`}
                             {row.observedWaveH != null && ` · ${row.observedWaveH} m`}
+                            {(() => {
+                              const tc = computeTideCycleForSlot(activeDate, row.slotStart, settings.les);
+                              return tc.label ? (
+                                <>
+                                  {' · '}
+                                  <span style={{ color: '#0f766e', fontWeight: 700 }}>
+                                    {tc.coef != null ? `Coef ${tc.coef} · ` : ''}
+                                    {tc.label}
+                                  </span>
+                                </>
+                              ) : null;
+                            })()}
                             {' · '}
                             <span style={{ color: row.weatherMeta.windSource === 'windsup' ? '#15803d' : '#64748b' }}>
                               {row.weatherMeta.windSourceLabel}

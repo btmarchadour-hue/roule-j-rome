@@ -18,6 +18,7 @@ import { AppLockScreen } from './components/AppLockScreen';
 import { UserManagementModal } from './components/UserManagementModal';
 import { TeamExchangeModal } from './components/TeamExchangeModal';
 import { ExpressRexModal } from './components/ExpressRexModal';
+import { TerrainBriefingView } from './components/TerrainBriefingView';
 import { getSlotWeatherRexDefaults } from './utils/slotWeatherRex';
 import {
   AgendaBookingItem,
@@ -167,6 +168,9 @@ export const App: React.FC = () => {
     }
     return 2; // Démarrage direct sur Adaptation météo & prise de décisions (Cycle 2 avec calendrier)
   });
+
+  // Mode d'affichage : 'cockpit' par défaut (tous les graphes/onglets), bascule 1-clic vers 'terrain' (briefing épuré mobile)
+  const [viewMode, setViewMode] = useState<'cockpit' | 'terrain'>('cockpit');
 
   // Current year, month, selectedDate (Cycle 1) & focusDate (Cycle 2) defaulting to today (clamped to valid range)
   const initialToday = useMemo(() => {
@@ -3235,7 +3239,107 @@ export const App: React.FC = () => {
         onLock={handleLock}
         onOpenUserManagement={() => setIsUserModalOpen(true)}
       />
-      <main className={activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
+      <main className={viewMode === 'cockpit' && activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
+        {/* Bascule rapide Mode Cockpit (complet) / Mode Terrain (briefing épuré mobile) */}
+        <div
+          className="noprint"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            marginBottom: '10px',
+            padding: '6px 10px',
+            borderRadius: '10px',
+            background: '#f8fafc',
+            border: '1px solid #cbd5e1',
+          }}
+        >
+          <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#475569' }}>
+            {viewMode === 'terrain'
+              ? '🏖️ Mode Terrain · Briefing rapide plage'
+              : '📊 Mode Cockpit · Pilotage complet'}
+          </span>
+          <div
+            role="group"
+            aria-label="Mode d'affichage"
+            style={{
+              display: 'inline-flex',
+              background: '#e2e8f0',
+              borderRadius: '8px',
+              padding: '3px',
+              gap: '3px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('cockpit')}
+              style={{
+                minHeight: '34px',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                background: viewMode === 'cockpit' ? '#0f172a' : 'transparent',
+                color: viewMode === 'cockpit' ? '#ffffff' : '#334155',
+                fontSize: '0.76rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              📊 Cockpit
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('terrain')}
+              style={{
+                minHeight: '34px',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                background: viewMode === 'terrain' ? '#0f766e' : 'transparent',
+                color: viewMode === 'terrain' ? '#ffffff' : '#334155',
+                fontSize: '0.76rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              🏖️ Mode Terrain
+            </button>
+          </div>
+        </div>
+
+        {viewMode === 'terrain' ? (
+          <TerrainBriefingView
+            dateStr={focusDate}
+            onChangeDate={handleFocusDateChange}
+            settings={settings}
+            EX={EX}
+            W={tideW}
+            first={first}
+            last={last}
+            windList={windList}
+            validations={validations}
+            bookingsMap={bookingsMap}
+            customSlotsMap={customSlotsMap}
+            observations={observations}
+            isReadOnly={isAdminLocked}
+            onSaveSlotBookings={handleSaveSlotBookings}
+            onOpenExpressRex={ds => setExpressRexDate(ds)}
+            onOpenObservationModal={slot => setActiveObservationSlot(slot)}
+            onOpenGpsTab={() => {
+              setViewMode('cockpit');
+              handleTabChange(7);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onSwitchToCockpit={() => {
+              setViewMode('cockpit');
+              setActiveTab(2);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : (
+          <>
         {/* En-tête des marées : affiche la date du calendrier en tab 1, et la date du lendemain en tab 2 */}
         {activeTab === 1 && <TideHeaderCard selectedDate={selectedDate} EX={EX} windList={windList} />}
         {activeTab === 2 && <TideHeaderCard selectedDate={focusDate} EX={EX} windList={windList} />}
@@ -3582,6 +3686,8 @@ export const App: React.FC = () => {
               onAddCustomNonPublishReason={handleAddCustomNonPublishReason}
             />
           </div>
+        )}
+          </>
         )}
 
         {/* Modal de saisie rapide d'un relevé terrain depuis le calendrier */}

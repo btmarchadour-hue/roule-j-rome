@@ -230,6 +230,8 @@ export interface SlotObservation {
   observedWindDir?: string;     // Secteur réel (ex: "O", "SO", "ONO")
   observedWaveH?: number;       // Hauteur de houle réelle (m)
   observedWavePeriod?: number;  // Période de houle (s)
+  tideCoef?: number;            // Coefficient de marée SHOM du jour (ex: 60)
+  tideCycleLabel?: string;      // Position dans le cycle de marée au début du créneau (ex: "BM + 1h45")
   beachCondition?: 'dur' | 'mou' | 'baches_faibles' | 'baches_fortes';
   // Bilan chars & participants (Séances réalisées ou annulées avec inscrits)
   charsCount?: number;                  // Nombre total de chars (Mono + Bi, max 12 / moniteur)
