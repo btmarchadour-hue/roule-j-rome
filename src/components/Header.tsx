@@ -112,8 +112,16 @@ export const Header: React.FC<HeaderProps> = ({
     setShowInstallGuide(true);
   };
 
+  const getAppBaseUrl = (): string => {
+    if (typeof window === 'undefined') return '';
+    const { origin, pathname } = window.location;
+    const cleanPath = pathname.replace(/\/index\.html$/i, '/');
+    const normalizedPath = cleanPath.endsWith('/') ? cleanPath : `${cleanPath}/`;
+    return `${origin}${normalizedPath}`;
+  };
+
   const handleCopyAppUrl = async () => {
-    const url = window.location.origin + '/';
+    const url = getAppBaseUrl();
     try {
       await navigator.clipboard.writeText(url);
       setLinkCopied(true);
@@ -138,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleShareAppUrl = async () => {
-    const url = window.location.origin + '/';
+    const url = getAppBaseUrl();
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
@@ -315,7 +323,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
               <img
-                src="/apple-touch-icon.png"
+                src="./apple-touch-icon.png"
                 alt="Icône Ça roule ?"
                 style={{
                   width: '52px',
@@ -432,7 +440,7 @@ export const Header: React.FC<HeaderProps> = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {typeof window !== 'undefined' ? `${window.location.origin}/` : ''}
+                {getAppBaseUrl()}
               </span>
               <button
                 type="button"
@@ -551,7 +559,9 @@ export const Header: React.FC<HeaderProps> = ({
                       color: '#1e3a8a',
                     }}
                   >
-                    <strong>💡 Si vous utilisez Samsung Internet</strong> (icône planète violette) : touchez le menu <strong>≡</strong> en bas à droite → <strong>+ Ajouter la page à</strong> → <strong>Écran d&apos;accueil</strong>.
+                    <strong>💡 Si vous aviez déjà un ancien raccourci :</strong> supprimez l&apos;ancienne icône sur votre écran d&apos;accueil, rechargez la page dans Chrome, puis recommencez.
+                    <br />
+                    <strong>Samsung Internet</strong> (planète violette) : menu <strong>≡</strong> en bas à droite → <strong>+ Ajouter la page à</strong> → <strong>Écran d&apos;accueil</strong>.
                   </div>
                 </div>
               )}
