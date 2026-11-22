@@ -3232,6 +3232,20 @@ export const App: React.FC = () => {
       <Header
         onOpenExchange={() => setIsExchangeModalOpen(true)}
         unreadExchangeCount={teamNotes.filter(n => !n.isResolved).length}
+        unreadBenoitCount={
+          teamNotes.filter(n => {
+            if (n.isResolved) return false;
+            const low = (n.author || '').toLowerCase();
+            return !(low.includes('jérôme') || low.includes('jerome'));
+          }).length
+        }
+        unreadJeromeCount={
+          teamNotes.filter(n => {
+            if (n.isResolved) return false;
+            const low = (n.author || '').toLowerCase();
+            return low.includes('jérôme') || low.includes('jerome');
+          }).length
+        }
       />
       <SyncStatusBar
         isOnline={true}

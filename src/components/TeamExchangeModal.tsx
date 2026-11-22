@@ -80,7 +80,15 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
     return true;
   });
 
-  const openCount = notes.filter(n => !n.isResolved).length;
+  const isJeromeAuthor = (name: string) => {
+    const low = (name || '').toLowerCase();
+    return low.includes('jérôme') || low.includes('jerome');
+  };
+
+  const openNotes = notes.filter(n => !n.isResolved);
+  const openCount = openNotes.length;
+  const jeromeOpenCount = openNotes.filter(n => isJeromeAuthor(n.author)).length;
+  const benoitOpenCount = openCount - jeromeOpenCount;
 
   const formatDate = (ts: number) => {
     const d = new Date(ts);
@@ -149,24 +157,39 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '1.3rem' }}>💬</span>
               <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 900, color: '#0f172a' }}>
                 Espace d'échange Ben ↔ Jérôme
               </h2>
-              {openCount > 0 && (
+              {benoitOpenCount > 0 && (
                 <span
                   style={{
-                    background: '#ef4444',
+                    background: '#0284c7',
                     color: '#ffffff',
                     fontSize: '0.72rem',
                     fontWeight: 800,
-                    padding: '2px 8px',
+                    padding: '2px 9px',
                     borderRadius: '12px',
                   }}
-                  title={`${openCount} note(s) en attente`}
+                  title={`${benoitOpenCount} message(s) de Benoît en attente de réponse`}
                 >
-                  {openCount} en cours
+                  Ben : {benoitOpenCount}
+                </span>
+              )}
+              {jeromeOpenCount > 0 && (
+                <span
+                  style={{
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    padding: '2px 9px',
+                    borderRadius: '12px',
+                  }}
+                  title={`${jeromeOpenCount} message(s) de Jérôme en attente de réponse`}
+                >
+                  Jérôme : {jeromeOpenCount}
                 </span>
               )}
             </div>
@@ -224,9 +247,9 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
                     fontSize: '0.75rem',
                     fontWeight: 800,
                     cursor: 'pointer',
-                    border: author === 'Jérôme' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                    background: author === 'Jérôme' ? '#e0f2fe' : '#ffffff',
-                    color: author === 'Jérôme' ? '#0369a1' : '#475569',
+                    border: author === 'Jérôme' ? '1.5px solid #dc2626' : '1px solid #cbd5e1',
+                    background: author === 'Jérôme' ? '#fee2e2' : '#ffffff',
+                    color: author === 'Jérôme' ? '#991b1b' : '#475569',
                   }}
                 >
                   ⛵ Jérôme
@@ -240,9 +263,9 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
                     fontSize: '0.75rem',
                     fontWeight: 800,
                     cursor: 'pointer',
-                    border: author === 'Benoît' ? '1.5px solid #d97706' : '1px solid #cbd5e1',
-                    background: author === 'Benoît' ? '#fef3c7' : '#ffffff',
-                    color: author === 'Benoît' ? '#92400e' : '#475569',
+                    border: author === 'Benoît' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                    background: author === 'Benoît' ? '#e0f2fe' : '#ffffff',
+                    color: author === 'Benoît' ? '#0369a1' : '#475569',
                   }}
                 >
                   💻 Concepteur : Benoît
@@ -400,13 +423,17 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {filteredNotes.map(n => {
                 const badge = getCategoryBadge(n.category);
-                const isJerome = n.author.toLowerCase().includes('jérôme') || n.author.toLowerCase().includes('jerome');
+                const isJerome = isJeromeAuthor(n.author);
+                const pendingBorder = isJerome ? '#fca5a5' : '#93c5fd';
+                const pendingAccent = isJerome ? '#dc2626' : '#0284c7';
+                const pendingBg = isJerome ? '#fff5f5' : '#f0f9ff';
                 return (
                   <div
                     key={n.id}
                     style={{
-                      background: n.isResolved ? '#f8fafc' : '#ffffff',
-                      border: n.isResolved ? '1px solid #e2e8f0' : '1.5px solid #cbd5e1',
+                      background: n.isResolved ? '#f8fafc' : pendingBg,
+                      border: n.isResolved ? '1px solid #e2e8f0' : `1.5px solid ${pendingBorder}`,
+                      borderLeft: n.isResolved ? '1px solid #e2e8f0' : `4px solid ${pendingAccent}`,
                       borderRadius: '10px',
                       padding: '12px 14px',
                       opacity: n.isResolved ? 0.75 : 1,
@@ -421,9 +448,9 @@ export const TeamExchangeModal: React.FC<TeamExchangeModalProps> = ({
                             fontWeight: 800,
                             padding: '2px 8px',
                             borderRadius: '5px',
-                            background: isJerome ? '#e0f2fe' : '#fef3c7',
-                            color: isJerome ? '#0369a1' : '#92400e',
-                            border: `1px solid ${isJerome ? '#bae6fd' : '#fde68a'}`,
+                            background: isJerome ? '#fee2e2' : '#e0f2fe',
+                            color: isJerome ? '#991b1b' : '#0369a1',
+                            border: `1px solid ${isJerome ? '#fca5a5' : '#bae6fd'}`,
                           }}
                         >
                           {isJerome ? '⛵ Jérôme (Moniteur)' : '💻 Concepteur : Benoît'}

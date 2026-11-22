@@ -4,11 +4,15 @@ import { APP_VERSION_INFO } from '../version';
 interface HeaderProps {
   onOpenExchange?: () => void;
   unreadExchangeCount?: number;
+  unreadBenoitCount?: number;
+  unreadJeromeCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenExchange,
   unreadExchangeCount = 0,
+  unreadBenoitCount = 0,
+  unreadJeromeCount = 0,
 }) => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
@@ -200,7 +204,15 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenExchange}
-              title="Ouvrir le carnet de liaison et d'échange Ben ↔ Jérôme"
+              title={
+                unreadBenoitCount > 0 || unreadJeromeCount > 0
+                  ? `Carnet Ben ↔ Jérôme · ${
+                      unreadBenoitCount > 0 ? `Benoît en attente : ${unreadBenoitCount} (bleu)` : ''
+                    }${unreadBenoitCount > 0 && unreadJeromeCount > 0 ? ' · ' : ''}${
+                      unreadJeromeCount > 0 ? `Jérôme en attente : ${unreadJeromeCount} (rouge)` : ''
+                    }`
+                  : "Ouvrir le carnet de liaison et d'échange Ben ↔ Jérôme"
+              }
               style={{
                 background: '#fef3c7',
                 border: '1.5px solid #fde68a',
@@ -212,16 +224,50 @@ export const Header: React.FC<HeaderProps> = ({
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '5px',
                 boxShadow: '0 1px 2px rgba(217, 119, 6, 0.1)',
               }}
             >
               <span>💬</span>
               <span className="header-btn-text">Ben ↔ Jérôme</span>
-              {unreadExchangeCount > 0 && (
+              {unreadBenoitCount > 0 && (
                 <span
+                  title={`${unreadBenoitCount} message${unreadBenoitCount > 1 ? 's' : ''} de Benoît en attente de réponse`}
+                  style={{
+                    background: '#0284c7',
+                    color: '#ffffff',
+                    borderRadius: '10px',
+                    padding: '1px 6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 900,
+                    minWidth: '18px',
+                    textAlign: 'center',
+                  }}
+                >
+                  {unreadBenoitCount}
+                </span>
+              )}
+              {unreadJeromeCount > 0 && (
+                <span
+                  title={`${unreadJeromeCount} message${unreadJeromeCount > 1 ? 's' : ''} de Jérôme en attente de réponse`}
                   style={{
                     background: '#dc2626',
+                    color: '#ffffff',
+                    borderRadius: '10px',
+                    padding: '1px 6px',
+                    fontSize: '0.65rem',
+                    fontWeight: 900,
+                    minWidth: '18px',
+                    textAlign: 'center',
+                  }}
+                >
+                  {unreadJeromeCount}
+                </span>
+              )}
+              {unreadBenoitCount === 0 && unreadJeromeCount === 0 && unreadExchangeCount > 0 && (
+                <span
+                  style={{
+                    background: '#64748b',
                     color: '#ffffff',
                     borderRadius: '10px',
                     padding: '1px 6px',
