@@ -564,7 +564,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
         <div
           style={{
             background: 'var(--card, #fff)',
-            border: '1px solid var(--bd, #e2e8f0)',
+            borderTop: '1px solid var(--bd, #e2e8f0)',
+            borderRight: '1px solid var(--bd, #e2e8f0)',
+            borderBottom: '1px solid var(--bd, #e2e8f0)',
             borderLeft: '4px solid #0284c7',
             borderRadius: '8px',
             padding: '12px 14px',
@@ -584,7 +586,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
         <div
           style={{
             background: 'var(--card, #fff)',
-            border: '1px solid var(--bd, #e2e8f0)',
+            borderTop: '1px solid var(--bd, #e2e8f0)',
+            borderRight: '1px solid var(--bd, #e2e8f0)',
+            borderBottom: '1px solid var(--bd, #e2e8f0)',
             borderLeft: '4px solid #16a34a',
             borderRadius: '8px',
             padding: '12px 14px',
@@ -609,7 +613,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
             textAlign: 'left',
             cursor: 'pointer',
             background: onlyRegulars ? '#f5f3ff' : 'var(--card, #fff)',
-            border: onlyRegulars ? '2px solid #7c3aed' : '1px solid var(--bd, #e2e8f0)',
+            borderTop: onlyRegulars ? '2px solid #7c3aed' : '1px solid var(--bd, #e2e8f0)',
+            borderRight: onlyRegulars ? '2px solid #7c3aed' : '1px solid var(--bd, #e2e8f0)',
+            borderBottom: onlyRegulars ? '2px solid #7c3aed' : '1px solid var(--bd, #e2e8f0)',
             borderLeft: '4px solid #8b5cf6',
             borderRadius: '8px',
             padding: '12px 14px',
@@ -640,7 +646,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
         <div
           style={{
             background: 'var(--card, #fff)',
-            border: '1px solid var(--bd, #e2e8f0)',
+            borderTop: '1px solid var(--bd, #e2e8f0)',
+            borderRight: '1px solid var(--bd, #e2e8f0)',
+            borderBottom: '1px solid var(--bd, #e2e8f0)',
             borderLeft: '4px solid #f59e0b',
             borderRadius: '8px',
             padding: '12px 14px',
@@ -1057,7 +1065,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ isReadOnly = false }) =>
                 key={c.id}
                 style={{
                   background: 'var(--card, #ffffff)',
-                  border: '1px solid var(--bd, #e2e8f0)',
+                  borderTop: '1px solid var(--bd, #e2e8f0)',
+                  borderRight: '1px solid var(--bd, #e2e8f0)',
+                  borderBottom: '1px solid var(--bd, #e2e8f0)',
                   borderLeft:
                     (c.totalSessions || 0) >= 2
                       ? '5px solid #8b5cf6'
