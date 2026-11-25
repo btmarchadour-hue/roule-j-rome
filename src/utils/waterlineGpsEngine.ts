@@ -1,14 +1,17 @@
 import { AppSettings, BeachCadreProfile, GpsWaterlineLog, TidePoint, WindPoint } from '../types';
 import { evaluatePointAgainstCadre } from './beachCadreEngine';
 import {
+  BayZoneId,
   classifyBayZone,
   estimateLitto3dUsableWidthM,
+  estimateLitto3dWaterlineXExactM,
   resolveTerrainDuneWidthM,
 } from './beachOrientation';
 import { build, COEF, comp, hAt, toU, windAt } from './tides';
 
 const STORAGE_KEY = 'cv_waterline_gps_logs_v1';
 const OFFLINE_QUEUE_KEY = 'cv_waterline_offline_queue_v1';
+const DAILY_UPPER_LIMIT_KEY = 'cv_daily_upper_limit_v1';
 
 /**
  * Écart fixe de Zéro Hydrographique entre Brest (-4,02 m IGN69) et Douarnenez/Morgat (-3,39 m IGN69)
@@ -120,6 +123,206 @@ export function computeTideCycleForSlot(
   const mins = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
   const tsMs = toU(y, mo - 1, d, mins) * 60000;
   return computeTideCycleAt(tsMs, dateStr, les);
+}
+
+export interface PrevHighTideUpperLimit {
+  marginM: number;
+  prevPmHeightM: number;
+  prevPmTimeStr: string;
+  prevPmDateStr: string;
+}
+
+export interface DailyUpperLimitOverride {
+  dateStr: string;
+  marginM: number;
+  source: 'gps_high_mark' | 'manual_day';
+  lat?: number;
+  lon?: number;
+  accuracyM?: number;
+  updatedAt: number;
+  updatedBy?: string;
+}
+
+export interface ResolvedUpperMargin {
+  marginM: number;
+  source: 'gps_high_mark' | 'manual_day' | 'prev_pm_auto' | 'fixed';
+  shortLabel: string;
+  prevPmHeightM?: number;
+  prevPmTimeStr?: string;
+}
+
+/**
+ * Estime automatiquement la limite haute du sable dur (laisse de pleine mer)
+ * à partir de la plus haute pleine mer SHOM des 28 dernières heures,
+ * projetée sur le profil altimétrique réel IGN RGE ALTI / Litto3D de la zone.
+ */
+export function computePreviousHighTideUpperLimit(
+  timestampMs: number,
+  zoneId: BayZoneId = 'lestrevet',
+  les: boolean = false
+): PrevHighTideUpperLimit | null {
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) return null;
+  const utcMin = Math.floor(timestampMs / 60000);
+  const ex = les ? build(true, false, []) : getCachedRawShomEx();
+
+  const windowStart = utcMin - 28 * 60;
+  let bestPm: TidePoint | null = null;
+  let fallbackLastPm: TidePoint | null = null;
+
+  for (let i = 0; i < ex.length; i++) {
+    const pt = ex[i];
+    if (!pt.pm) continue;
+    if (pt.t > utcMin) break;
+    fallbackLastPm = pt;
+    if (pt.t >= windowStart) {
+      if (!bestPm || pt.h > bestPm.h) {
+        bestPm = pt;
+      }
+    }
+  }
+
+  const chosen = bestPm || fallbackLastPm;
+  if (!chosen || utcMin - chosen.t > 48 * 60) return null;
+
+  const prevPmHeightM = Number(chosen.h.toFixed(2));
+  const rawX = estimateLitto3dWaterlineXExactM(prevPmHeightM, zoneId);
+  const marginM = Math.max(0, Math.min(220, Math.round(rawX)));
+
+  const pmDate = new Date(chosen.t * 60000);
+  const refDate = new Date(timestampMs);
+  const prevPmDateStr = pmDate.toISOString().slice(0, 10);
+  const refDateStr = refDate.toISOString().slice(0, 10);
+  const hhmm = pmDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const dayPrefix = prevPmDateStr === refDateStr ? "auj." : "veille";
+
+  return {
+    marginM,
+    prevPmHeightM,
+    prevPmTimeStr: `${dayPrefix} ${hhmm}`,
+    prevPmDateStr,
+  };
+}
+
+export function getStoredDailyUpperLimit(dateStr: string): DailyUpperLimitOverride | null {
+  try {
+    const raw = localStorage.getItem(DAILY_UPPER_LIMIT_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, DailyUpperLimitOverride>;
+    const entry = map?.[dateStr];
+    if (!entry || typeof entry.marginM !== 'number' || !Number.isFinite(entry.marginM)) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredDailyUpperLimit(override: DailyUpperLimitOverride): void {
+  try {
+    const raw = localStorage.getItem(DAILY_UPPER_LIMIT_KEY);
+    const map: Record<string, DailyUpperLimitOverride> = raw ? JSON.parse(raw) : {};
+    map[override.dateStr] = override;
+    // Garder les 30 derniers jours au max en localStorage
+    const keys = Object.keys(map).sort();
+    while (keys.length > 30) {
+      const oldest = keys.shift();
+      if (oldest) delete map[oldest];
+    }
+    localStorage.setItem(DAILY_UPPER_LIMIT_KEY, JSON.stringify(map));
+  } catch (err) {
+    console.warn('Erreur sauvegarde limite haute du jour:', err);
+  }
+}
+
+export function clearStoredDailyUpperLimit(dateStr: string): void {
+  try {
+    const raw = localStorage.getItem(DAILY_UPPER_LIMIT_KEY);
+    if (!raw) return;
+    const map = JSON.parse(raw) as Record<string, DailyUpperLimitOverride>;
+    if (map && dateStr in map) {
+      delete map[dateStr];
+      localStorage.setItem(DAILY_UPPER_LIMIT_KEY, JSON.stringify(map));
+    }
+  } catch (err) {
+    console.warn('Erreur réinitialisation limite haute du jour:', err);
+  }
+}
+
+/**
+ * Résout la bande haute de sable mou (m depuis la dune) pour un relevé ou une journée :
+ * 1. Relevé réel du jour enregistré (GPS laisse PM ou ajustement terrain manuel du jour)
+ * 2. Sinon mode fixe si explicitement choisi dans le Cadre Terrain
+ * 3. Sinon (par défaut) : calcul automatique depuis la plus haute PM des 28 dernières heures (SHOM + Litto3D)
+ */
+export function resolveEffectiveUpperMargin(
+  params: {
+    timestampMs: number;
+    zoneId?: BayZoneId;
+    storedUpperMarginM?: number | null;
+    storedUpperSource?: GpsWaterlineLog['upperLimitSource'];
+    storedPrevPmHeightM?: number | null;
+    dailyOverride?: DailyUpperLimitOverride | null;
+    activeCadre?: BeachCadreProfile | null;
+    les?: boolean;
+  }
+): ResolvedUpperMargin {
+  const zoneId = params.zoneId || 'lestrevet';
+  const prevPm = computePreviousHighTideUpperLimit(params.timestampMs, zoneId, Boolean(params.les));
+
+  if (
+    params.storedUpperMarginM != null &&
+    Number.isFinite(params.storedUpperMarginM) &&
+    (params.storedUpperSource === 'gps_high_mark' || params.storedUpperSource === 'manual_day')
+  ) {
+    return {
+      marginM: Math.max(0, Math.round(params.storedUpperMarginM)),
+      source: params.storedUpperSource,
+      shortLabel:
+        params.storedUpperSource === 'gps_high_mark'
+          ? 'GPS laisse PM'
+          : 'Ajusté terrain',
+      prevPmHeightM: params.storedPrevPmHeightM ?? prevPm?.prevPmHeightM,
+      prevPmTimeStr: prevPm?.prevPmTimeStr,
+    };
+  }
+
+  if (params.dailyOverride && Number.isFinite(params.dailyOverride.marginM)) {
+    return {
+      marginM: Math.max(0, Math.round(params.dailyOverride.marginM)),
+      source: params.dailyOverride.source,
+      shortLabel:
+        params.dailyOverride.source === 'gps_high_mark'
+          ? 'GPS laisse PM'
+          : 'Ajusté terrain',
+      prevPmHeightM: prevPm?.prevPmHeightM,
+      prevPmTimeStr: prevPm?.prevPmTimeStr,
+    };
+  }
+
+  if (params.activeCadre?.softSandMarginMode === 'fixed' && params.activeCadre.softSandMarginM != null) {
+    return {
+      marginM: Math.max(0, Math.round(params.activeCadre.softSandMarginM)),
+      source: 'fixed',
+      shortLabel: 'Marge fixe',
+      prevPmHeightM: prevPm?.prevPmHeightM,
+      prevPmTimeStr: prevPm?.prevPmTimeStr,
+    };
+  }
+
+  if (prevPm) {
+    return {
+      marginM: prevPm.marginM,
+      source: 'prev_pm_auto',
+      shortLabel: `Auto PM ${prevPm.prevPmHeightM.toFixed(2).replace('.', ',')} m`,
+      prevPmHeightM: prevPm.prevPmHeightM,
+      prevPmTimeStr: prevPm.prevPmTimeStr,
+    };
+  }
+
+  return {
+    marginM: params.activeCadre?.softSandMarginM ?? 50,
+    source: 'fixed',
+    shortLabel: 'Marge défaut',
+  };
 }
 
 export function getStoredWaterlineLogs(): GpsWaterlineLog[] {
@@ -840,7 +1043,8 @@ export function buildWaterlineSnapshot(
   windList: WindPoint[],
   beachState?: GpsWaterlineLog['beachState'],
   note?: string,
-  activeCadre?: BeachCadreProfile | null
+  activeCadre?: BeachCadreProfile | null,
+  dailyUpperOverride?: DailyUpperLimitOverride | null
 ): Omit<GpsWaterlineLog, 'id'> {
   const d = new Date(gps.timestamp);
   const dateStr = d.toISOString().slice(0, 10);
@@ -878,7 +1082,6 @@ export function buildWaterlineSnapshot(
   const cadreEval = activeCadre
     ? evaluatePointAgainstCadre(gps.latitude, gps.longitude, activeCadre)
     : null;
-  const softMarginM = activeCadre?.softSandMarginM ?? 50;
   const resolvedDune = resolveTerrainDuneWidthM(
     gps.latitude,
     gps.longitude,
@@ -886,6 +1089,14 @@ export function buildWaterlineSnapshot(
     null
   );
   const bayZone = classifyBayZone(gps.latitude, gps.longitude, cadreEval?.lateralPosPct);
+  const upperResolved = resolveEffectiveUpperMargin({
+    timestampMs: gps.timestamp,
+    zoneId: bayZone.zoneId,
+    dailyOverride: dailyUpperOverride ?? getStoredDailyUpperLimit(dateStr),
+    activeCadre,
+    les: settings.les,
+  });
+  const softMarginM = upperResolved.marginM;
   const usableWidthM =
     resolvedDune.widthFromDuneM != null
       ? Math.max(0, resolvedDune.widthFromDuneM - softMarginM)
@@ -915,6 +1126,11 @@ export function buildWaterlineSnapshot(
     correctedSurcoteCm,
     measuredWidthFromDuneM: resolvedDune.widthFromDuneM ?? undefined,
     usableWidthM,
+    upperSoftMarginM: upperResolved.marginM,
+    upperLimitSource: upperResolved.source,
+    upperLimitLat: dailyUpperOverride?.lat,
+    upperLimitLon: dailyUpperOverride?.lon,
+    prevPmHeightM: upperResolved.prevPmHeightM,
     beachZone: bayZone.zoneId,
     lateralPosFromLeftM: cadreEval?.lateralPosFromLeftM ?? undefined,
     lateralPosPct: cadreEval?.lateralPosPct ?? undefined,
@@ -945,6 +1161,9 @@ export function exportWaterlineLogsAsCsv(
     'Qualite_GPS',
     'Zone_Plage',
     'Largeur_Dune_Mer_Terrain_m',
+    'Limite_Haute_Sable_Mou_m',
+    'Source_Limite_Haute',
+    'PM_Veille_SHOM_m',
     'Bande_Sable_Theorique_Utile_m',
     'Bande_Sable_Modele_Corrige_Utile_m',
     'Bande_Sable_Terrain_Utile_m',
@@ -984,7 +1203,6 @@ export function exportWaterlineLogsAsCsv(
     'Notes',
   ];
 
-  const softMarginM = activeCadre?.softSandMarginM ?? 50;
   const rows = logs.map(l => {
     const dynEval = activeCadre ? evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadre) : null;
     const resolvedDune = resolveTerrainDuneWidthM(
@@ -996,6 +1214,15 @@ export function exportWaterlineLogsAsCsv(
     const widthNum = resolvedDune.widthFromDuneM;
     const widthM = widthNum ?? '';
     const bayZone = classifyBayZone(l.latitude, l.longitude, dynEval?.lateralPosPct ?? l.lateralPosPct);
+    const upper = resolveEffectiveUpperMargin({
+      timestampMs: l.timestamp,
+      zoneId: bayZone.zoneId,
+      storedUpperMarginM: l.upperSoftMarginM,
+      storedUpperSource: l.upperLimitSource,
+      storedPrevPmHeightM: l.prevPmHeightM,
+      activeCadre,
+    });
+    const softMarginM = upper.marginM;
     const theoUsableM = estimateLitto3dUsableWidthM(l.theoreticalWaterHeightM, softMarginM, bayZone.zoneId);
     const corrUsableM = estimateLitto3dUsableWidthM(l.correctedWaterHeightM, softMarginM, bayZone.zoneId);
     const terrainUsableM = widthNum != null ? Math.max(0, widthNum - softMarginM) : '';
@@ -1033,6 +1260,9 @@ export function exportWaterlineLogsAsCsv(
       l.accuracyQuality,
       bayZone.shortLabel,
       widthM,
+      softMarginM,
+      upper.shortLabel,
+      upper.prevPmHeightM != null ? upper.prevPmHeightM : '',
       theoUsableM,
       corrUsableM,
       terrainUsableM,
@@ -1248,7 +1478,6 @@ export function computeGpsDiagnosticSummary(
     };
   }
 
-  const softMarginM = activeCadre?.softSandMarginM ?? 50;
   let sumTheo = 0;
   let sumCorr = 0;
   let sumRawCm = 0;
@@ -1340,6 +1569,15 @@ export function computeGpsDiagnosticSummary(
       dynEval?.widthFromDuneM,
       l.measuredWidthFromDuneM
     );
+    const upper = resolveEffectiveUpperMargin({
+      timestampMs: l.timestamp,
+      zoneId: bayZone.zoneId,
+      storedUpperMarginM: l.upperSoftMarginM,
+      storedUpperSource: l.upperLimitSource,
+      storedPrevPmHeightM: l.prevPmHeightM,
+      activeCadre,
+    });
+    const softMarginM = upper.marginM;
 
     const theoUsableM = estimateLitto3dUsableWidthM(l.theoreticalWaterHeightM, softMarginM, bayZone.zoneId);
 

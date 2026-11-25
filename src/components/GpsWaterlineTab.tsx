@@ -17,15 +17,19 @@ import {
   applyRealConditionsToLog,
   buildWaterlineSnapshot,
   calculateGpsDistanceM,
+  clearStoredDailyUpperLimit,
   computeGpsDiagnosticSummary,
+  computePreviousHighTideUpperLimit,
   computeTideCycleAt,
   consolidateGpsLogWithRealData,
   convertBrestHeightToDouarnenezM,
+  DailyUpperLimitOverride,
   enqueueOfflineGpsLog,
   exportWaterlineLogsAsCsv,
   fetchRealConditionsAt,
   findRecentDuplicateGpsLog,
   getOfflineGpsQueue,
+  getStoredDailyUpperLimit,
   getStoredWaterlineLogs,
   GPS_DIAGNOSTIC_THRESHOLD,
   GpsCaptureResult,
@@ -33,7 +37,9 @@ import {
   mergeOfflineQueueWithLogs,
   removeOfflineGpsLog,
   requestSmoothedHighAccuracyGps,
+  resolveEffectiveUpperMargin,
   runGpsPrecisionDiagnostic,
+  saveStoredDailyUpperLimit,
   saveStoredWaterlineLogs,
 } from '../utils/waterlineGpsEngine';
 import {
@@ -74,6 +80,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   
   // États de capture & consolidation réel H+2
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [isCapturingUpper, setIsCapturingUpper] = useState<boolean>(false);
   const [isTestingGps, setIsTestingGps] = useState<boolean>(false);
   const [liveProgress, setLiveProgress] = useState<GpsLiveProgress | null>(null);
   const [gpsTestResult, setGpsTestResult] = useState<GpsCaptureResult | null>(null);
@@ -85,6 +92,12 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   const [consolidationFeedback, setConsolidationFeedback] = useState<string>('');
   const syncInFlightRef = useRef<boolean>(false);
   const gpsAbortRef = useRef<AbortController | null>(null);
+
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [dailyUpperOverride, setDailyUpperOverride] = useState<DailyUpperLimitOverride | null>(() =>
+    getStoredDailyUpperLimit(new Date().toISOString().slice(0, 10))
+  );
+  const [isApplyingUpperToToday, setIsApplyingUpperToToday] = useState<boolean>(false);
 
   // Filtre d'affichage & tiroirs repliables
   const [filterPeriod, setFilterPeriod] = useState<'all' | 'today' | 'month'>('all');
@@ -429,7 +442,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         windList,
         beachState,
         quickNote.trim() || undefined,
-        activeCadreProfile
+        activeCadreProfile,
+        dailyUpperOverride
       );
 
       // 3. Détection anti-doublon sur tous les relevés visibles (y compris file hors-ligne)
@@ -556,9 +570,188 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
   };
 
   // Filtrage des logs (période + zone de la baie)
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const currentMonthStr = useMemo(() => todayStr.slice(0, 7), [todayStr]);
-  const softMarginM = activeCadreProfile?.softSandMarginM ?? 50;
+  const todayPrevPmAuto = useMemo(
+    () => computePreviousHighTideUpperLimit(Date.now(), 'lestrevet', settings.les),
+    [settings.les]
+  );
+  const todayEffectiveUpper = useMemo(
+    () =>
+      resolveEffectiveUpperMargin({
+        timestampMs: Date.now(),
+        zoneId: 'lestrevet',
+        dailyOverride: dailyUpperOverride,
+        activeCadre: activeCadreProfile,
+        les: settings.les,
+      }),
+    [dailyUpperOverride, activeCadreProfile, settings.les]
+  );
+  const softMarginM = todayEffectiveUpper.marginM;
+
+  const todayCloudLogsCount = useMemo(
+    () =>
+      logs.filter(
+        l =>
+          l.dateStr === todayStr &&
+          (l.upperSoftMarginM !== todayEffectiveUpper.marginM ||
+            l.upperLimitSource !== todayEffectiveUpper.source)
+      ).length,
+    [logs, todayStr, todayEffectiveUpper]
+  );
+
+  const handleSetManualUpperMargin = (nextM: number) => {
+    const clamped = Math.max(0, Math.min(220, Math.round(nextM)));
+    const override: DailyUpperLimitOverride = {
+      dateStr: todayStr,
+      marginM: clamped,
+      source: 'manual_day',
+      updatedAt: Date.now(),
+      updatedBy: author,
+    };
+    saveStoredDailyUpperLimit(override);
+    setDailyUpperOverride(override);
+  };
+
+  const handleResetUpperToAuto = () => {
+    clearStoredDailyUpperLimit(todayStr);
+    setDailyUpperOverride(null);
+  };
+
+  const handleApplyUpperToTodayLogs = async (overrideToApply?: DailyUpperLimitOverride | null) => {
+    if (isReadOnly) return;
+    const targetLogs = logs.filter(l => l.dateStr === todayStr);
+    if (targetLogs.length === 0) return;
+    setIsApplyingUpperToToday(true);
+    try {
+      const effectiveOverride = overrideToApply !== undefined ? overrideToApply : dailyUpperOverride;
+      for (const l of targetLogs) {
+        const dyn = evaluatePointAgainstCadre(l.latitude, l.longitude, activeCadreProfile);
+        const zone = classifyBayZone(l.latitude, l.longitude, dyn.lateralPosPct ?? l.lateralPosPct);
+        const resolvedDune = resolveTerrainDuneWidthM(
+          l.latitude,
+          l.longitude,
+          dyn.widthFromDuneM,
+          l.measuredWidthFromDuneM
+        );
+        const nextUpper = resolveEffectiveUpperMargin({
+          timestampMs: l.timestamp,
+          zoneId: zone.zoneId,
+          dailyOverride: effectiveOverride,
+          activeCadre: activeCadreProfile,
+          les: settings.les,
+        });
+        const nextUsableW =
+          resolvedDune.widthFromDuneM != null
+            ? Math.max(0, resolvedDune.widthFromDuneM - nextUpper.marginM)
+            : estimateLitto3dUsableWidthM(l.correctedWaterHeightM, nextUpper.marginM, zone.zoneId);
+
+        const { id, ...rest } = l;
+        await upsertWaterlineGpsLogToFirestore(
+          {
+            ...rest,
+            upperSoftMarginM: nextUpper.marginM,
+            upperLimitSource: nextUpper.source,
+            upperLimitLat: effectiveOverride?.lat,
+            upperLimitLon: effectiveOverride?.lon,
+            prevPmHeightM: nextUpper.prevPmHeightM,
+            usableWidthM: nextUsableW,
+          },
+          id
+        );
+      }
+      setCaptureStatus(
+        `✓ Limite haute du jour (${todayEffectiveUpper.marginM} m) appliquée aux ${targetLogs.length} relevé${targetLogs.length > 1 ? 's' : ''} d'aujourd'hui.`
+      );
+      setTimeout(() => setCaptureStatus(''), 6000);
+    } catch (err) {
+      console.error('Erreur mise à jour limite haute du jour:', err);
+      setCaptureError('Impossible de mettre à jour les relevés du jour.');
+    } finally {
+      setIsApplyingUpperToToday(false);
+    }
+  };
+
+  const handleCaptureUpperLimitGps = async () => {
+    if (isReadOnly) return;
+    const controller = new AbortController();
+    gpsAbortRef.current = controller;
+    setIsCapturingUpper(true);
+    setCaptureError(null);
+    setLiveProgress({
+      elapsedSec: 0,
+      maxDurationSec: 15,
+      rawCount: 0,
+      validCount: 0,
+      targetValidCount: 4,
+      lastAccM: null,
+      bestAccM: null,
+      phase: 'warming',
+      trajectoryAcc: [],
+    });
+    setCaptureStatus('📌 Relevé GPS de la limite haute (laisse PM / début sable dur) en cours...');
+
+    try {
+      const gpsResult = await requestSmoothedHighAccuracyGps(4, 600, undefined, {
+        signal: controller.signal,
+        onLiveProgress: prog => {
+          setLiveProgress(prog);
+          const accLabel = prog.lastAccM != null ? `±${prog.lastAccM} m` : 'recherche satellites…';
+          setCaptureStatus(
+            `📌 Limite haute GPS (${prog.elapsedSec.toFixed(0)}s/${prog.maxDurationSec}s) · ${prog.validCount}/${prog.targetValidCount} lectures (${accLabel})`
+          );
+        },
+      });
+
+      const dyn = evaluatePointAgainstCadre(gpsResult.latitude, gpsResult.longitude, activeCadreProfile);
+      const resolvedDune = resolveTerrainDuneWidthM(
+        gpsResult.latitude,
+        gpsResult.longitude,
+        dyn.widthFromDuneM,
+        null
+      );
+
+      if (resolvedDune.widthFromDuneM == null) {
+        setCaptureError(
+          'Position GPS détectée hors de la baie Lestrevet–Pentrez : impossible de calculer la distance depuis la dune. Ajustez la limite haute manuellement en mètres.'
+        );
+        setCaptureStatus('');
+        return;
+      }
+
+      const measuredUpperM = Math.max(0, Math.min(220, Math.round(resolvedDune.widthFromDuneM)));
+      const override: DailyUpperLimitOverride = {
+        dateStr: todayStr,
+        marginM: measuredUpperM,
+        source: 'gps_high_mark',
+        lat: gpsResult.latitude,
+        lon: gpsResult.longitude,
+        accuracyM: gpsResult.accuracyM,
+        updatedAt: Date.now(),
+        updatedBy: author,
+      };
+      saveStoredDailyUpperLimit(override);
+      setDailyUpperOverride(override);
+      setCaptureStatus(
+        `✓ Limite haute réelle du jour calée au GPS : ${measuredUpperM} m depuis la dune (±${gpsResult.accuracyM} m).`
+      );
+      setTimeout(() => setCaptureStatus(''), 7000);
+
+      // Si des points limite basse existent déjà aujourd'hui, les mettre à jour immédiatement
+      if (logs.some(l => l.dateStr === todayStr)) {
+        await handleApplyUpperToTodayLogs(override);
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Erreur lors de la capture GPS limite haute.';
+      if (!errMsg.includes('annulée')) {
+        setCaptureError(errMsg);
+      }
+      setCaptureStatus('');
+    } finally {
+      gpsAbortRef.current = null;
+      setIsCapturingUpper(false);
+      setLiveProgress(null);
+    }
+  };
 
   const logsWithZone = useMemo(() => {
     return displayedLogs.map(l => {
@@ -570,10 +763,20 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         dyn.widthFromDuneM,
         l.measuredWidthFromDuneM
       );
+      const upper = resolveEffectiveUpperMargin({
+        timestampMs: l.timestamp,
+        zoneId: zone.zoneId,
+        storedUpperMarginM: l.upperSoftMarginM,
+        storedUpperSource: l.upperLimitSource,
+        storedPrevPmHeightM: l.prevPmHeightM,
+        dailyOverride: l.dateStr === todayStr ? dailyUpperOverride : null,
+        activeCadre: activeCadreProfile,
+        les: settings.les,
+      });
       const rawWidth = resolvedDune.widthFromDuneM;
       const theoTotalX = Math.round(estimateLitto3dWaterlineXExactM(l.theoreticalWaterHeightM, zone.zoneId));
-      const theoUsableM = Math.max(0, theoTotalX - softMarginM);
-      const terrainUsableM = rawWidth != null ? Math.max(0, rawWidth - softMarginM) : null;
+      const theoUsableM = Math.max(0, theoTotalX - upper.marginM);
+      const terrainUsableM = rawWidth != null ? Math.max(0, rawWidth - upper.marginM) : null;
       const usableWidthM = terrainUsableM ?? theoUsableM;
       return {
         log: l,
@@ -581,6 +784,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         zone,
         rawWidth,
         widthSource: resolvedDune.source,
+        upper,
         theoTotalX,
         theoUsableM,
         terrainUsableM,
@@ -588,7 +792,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
         isEstimatedWidth: rawWidth == null,
       };
     });
-  }, [displayedLogs, activeCadreProfile, softMarginM]);
+  }, [displayedLogs, activeCadreProfile, todayStr, dailyUpperOverride, settings.les]);
 
   const zoneSummaries = useMemo(() => {
     const order: BayZoneId[] = ['lestrevet', 'lieue_de_greve', 'pentrez'];
@@ -860,24 +1064,208 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             />
           </div>
 
+          {/* BANDE HAUTE DU JOUR : LAISSE DE PLEINE MER VEILLE / RÉEL TERRAIN */}
+          <div
+            style={{
+              maxWidth: '580px',
+              margin: '0 auto 14px',
+              padding: '10px 12px',
+              background:
+                todayEffectiveUpper.source === 'gps_high_mark'
+                  ? '#f0fdf4'
+                  : todayEffectiveUpper.source === 'manual_day'
+                  ? '#fffbeb'
+                  : '#f8fafc',
+              border:
+                todayEffectiveUpper.source === 'gps_high_mark'
+                  ? '1.5px solid #86efac'
+                  : todayEffectiveUpper.source === 'manual_day'
+                  ? '1.5px solid #fcd34d'
+                  : '1px solid #cbd5e1',
+              borderRadius: '10px',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+              <div style={{ fontSize: '0.73rem', fontWeight: 900, color: '#0f172a' }}>
+                🏖️ Limite haute du jour (laisse PM / début sable dur) :{' '}
+                <span style={{ color: '#0369a1', fontSize: '0.86rem' }}>{todayEffectiveUpper.marginM} m</span>
+                <span style={{ fontWeight: 600, color: '#64748b', fontSize: '0.68rem' }}> depuis la dune</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.66rem',
+                  fontWeight: 800,
+                  padding: '2px 7px',
+                  borderRadius: '6px',
+                  background:
+                    todayEffectiveUpper.source === 'gps_high_mark'
+                      ? '#dcfce7'
+                      : todayEffectiveUpper.source === 'manual_day'
+                      ? '#fef3c7'
+                      : '#e0f2fe',
+                  color:
+                    todayEffectiveUpper.source === 'gps_high_mark'
+                      ? '#166534'
+                      : todayEffectiveUpper.source === 'manual_day'
+                      ? '#92400e'
+                      : '#0369a1',
+                }}
+              >
+                {todayEffectiveUpper.source === 'gps_high_mark'
+                  ? '📌 Calé au GPS (réel)'
+                  : todayEffectiveUpper.source === 'manual_day'
+                  ? '✏️ Ajusté terrain'
+                  : todayPrevPmAuto
+                  ? `🌊 Auto PM ${todayPrevPmAuto.prevPmTimeStr} (${todayPrevPmAuto.prevPmHeightM.toFixed(2).replace('.', ',')} m)`
+                  : todayEffectiveUpper.shortLabel}
+              </span>
+            </div>
+
+            {todayPrevPmAuto && todayEffectiveUpper.source !== 'prev_pm_auto' && (
+              <div style={{ fontSize: '0.66rem', color: '#64748b', marginTop: '3px' }}>
+                Estimation théorique laisse PM ({todayPrevPmAuto.prevPmTimeStr}, {todayPrevPmAuto.prevPmHeightM.toFixed(2).replace('.', ',')} m) :{' '}
+                <strong>{todayPrevPmAuto.marginM} m</strong>
+                {' · '}écart constaté :{' '}
+                <strong style={{ color: todayEffectiveUpper.marginM - todayPrevPmAuto.marginM <= 0 ? '#15803d' : '#c2410c' }}>
+                  {todayEffectiveUpper.marginM - todayPrevPmAuto.marginM > 0 ? '+' : ''}
+                  {todayEffectiveUpper.marginM - todayPrevPmAuto.marginM} m
+                </strong>
+              </div>
+            )}
+
+            {!isReadOnly && (
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  disabled={isCapturing || isCapturingUpper || isTestingGps}
+                  onClick={handleCaptureUpperLimitGps}
+                  style={{
+                    border: '1px solid #0284c7',
+                    background: isCapturingUpper ? '#e0f2fe' : '#ffffff',
+                    color: '#0369a1',
+                    borderRadius: '6px',
+                    padding: '4px 9px',
+                    fontSize: '0.70rem',
+                    fontWeight: 800,
+                    cursor: isCapturing || isCapturingUpper || isTestingGps ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isCapturingUpper ? '📡 GPS limite haute...' : '📌 Relever laisse PM au GPS'}
+                </button>
+
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSetManualUpperMargin(todayEffectiveUpper.marginM - 10)}
+                    style={{ border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: '5px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer' }}
+                  >
+                    −10
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetManualUpperMargin(todayEffectiveUpper.marginM - 5)}
+                    style={{ border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: '5px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer' }}
+                  >
+                    −5
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={220}
+                    step={5}
+                    aria-label="Limite haute sable mou du jour en mètres"
+                    value={todayEffectiveUpper.marginM}
+                    onChange={e => handleSetManualUpperMargin(Number(e.target.value) || 0)}
+                    style={{
+                      width: '56px',
+                      padding: '3px 6px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '5px',
+                      fontSize: '0.74rem',
+                      fontWeight: 800,
+                      textAlign: 'center',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSetManualUpperMargin(todayEffectiveUpper.marginM + 5)}
+                    style={{ border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: '5px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer' }}
+                  >
+                    +5
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetManualUpperMargin(todayEffectiveUpper.marginM + 10)}
+                    style={{ border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: '5px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer' }}
+                  >
+                    +10
+                  </button>
+                </div>
+
+                {dailyUpperOverride && (
+                  <button
+                    type="button"
+                    onClick={handleResetUpperToAuto}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: '#f1f5f9',
+                      color: '#475569',
+                      borderRadius: '6px',
+                      padding: '4px 8px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ↺ Auto PM veille
+                  </button>
+                )}
+
+                {todayCloudLogsCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={isApplyingUpperToToday}
+                    onClick={() => handleApplyUpperToTodayLogs()}
+                    style={{
+                      border: 'none',
+                      background: '#0f766e',
+                      color: '#ffffff',
+                      borderRadius: '6px',
+                      padding: '4px 9px',
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      cursor: isApplyingUpperToToday ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {isApplyingUpperToToday
+                      ? 'Mise à jour...'
+                      : `Appliquer aux ${todayCloudLogsCount} relevé${todayCloudLogsCount > 1 ? 's' : ''} du jour`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* GROS BOUTON MOBILE */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
             <button
               type="button"
-              disabled={isCapturing || isTestingGps || isReadOnly}
+              disabled={isCapturing || isCapturingUpper || isTestingGps || isReadOnly}
               onClick={handleCaptureNow}
               style={{
                 width: '100%',
                 maxWidth: '480px',
                 padding: '16px 24px',
-                background: isCapturing || isTestingGps ? '#94a3b8' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                background: isCapturing || isCapturingUpper || isTestingGps ? '#94a3b8' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '12px',
                 fontSize: '1.05rem',
                 fontWeight: 900,
                 letterSpacing: '0.02em',
-                cursor: isCapturing || isTestingGps || isReadOnly ? 'not-allowed' : 'pointer',
+                cursor: isCapturing || isCapturingUpper || isTestingGps || isReadOnly ? 'not-allowed' : 'pointer',
                 boxShadow: '0 6px 18px rgba(2, 132, 199, 0.35)',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -901,7 +1289,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
 
             <button
               type="button"
-              disabled={isCapturing || isTestingGps}
+              disabled={isCapturing || isCapturingUpper || isTestingGps}
               onClick={handleRunGpsTest}
               style={{
                 padding: '7px 14px',
@@ -911,8 +1299,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 borderRadius: '8px',
                 fontSize: '0.76rem',
                 fontWeight: 800,
-                cursor: isCapturing || isTestingGps ? 'not-allowed' : 'pointer',
-                opacity: isCapturing || isTestingGps ? 0.6 : 1,
+                cursor: isCapturing || isCapturingUpper || isTestingGps ? 'not-allowed' : 'pointer',
+                opacity: isCapturing || isCapturingUpper || isTestingGps ? 0.6 : 1,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
@@ -963,7 +1351,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: '#0369a1' }}>
-                  📡 {isTestingGps ? 'Test GPS' : 'Acquisition GPS'} · {liveProgress.validCount}/{liveProgress.targetValidCount} mesures ≤ 15 m ({Math.floor(liveProgress.elapsedSec)}s / {liveProgress.maxDurationSec}s)
+                  📡 {isTestingGps ? 'Test GPS' : isCapturingUpper ? 'GPS Limite Haute (Laisse PM)' : 'Acquisition GPS'} · {liveProgress.validCount}/{liveProgress.targetValidCount} mesures ≤ 15 m ({Math.floor(liveProgress.elapsedSec)}s / {liveProgress.maxDurationSec}s)
                 </span>
                 <button
                   type="button"
@@ -1346,11 +1734,21 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 const wDune = resolvedDune.widthFromDuneM;
                 const latPct = dyn.lateralPosPct ?? lastLoggedItem.lateralPosPct;
                 const zone = classifyBayZone(lastLoggedItem.latitude, lastLoggedItem.longitude, latPct);
+                const upper = resolveEffectiveUpperMargin({
+                  timestampMs: lastLoggedItem.timestamp,
+                  zoneId: zone.zoneId,
+                  storedUpperMarginM: lastLoggedItem.upperSoftMarginM,
+                  storedUpperSource: lastLoggedItem.upperLimitSource,
+                  storedPrevPmHeightM: lastLoggedItem.prevPmHeightM,
+                  dailyOverride: lastLoggedItem.dateStr === todayStr ? dailyUpperOverride : null,
+                  activeCadre: activeCadreProfile,
+                  les: settings.les,
+                });
                 const usableW =
                   wDune != null
-                    ? Math.max(0, wDune - softMarginM)
+                    ? Math.max(0, wDune - upper.marginM)
                     : lastLoggedItem.usableWidthM ??
-                      estimateLitto3dUsableWidthM(lastLoggedItem.theoreticalWaterHeightM, softMarginM, zone.zoneId);
+                      estimateLitto3dUsableWidthM(lastLoggedItem.theoreticalWaterHeightM, upper.marginM, zone.zoneId);
                 return (
                   <div style={{ fontSize: '0.74rem', color: '#0f172a', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div>
@@ -1373,12 +1771,12 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       Bande exploitable utile : <strong>{usableW} m</strong>
                       {wDune != null ? (
                         <span style={{ color: '#64748b' }}>
-                          {' '}(Dune → Mer {wDune} m − {softMarginM} m sable mou
+                          {' '}(Dune → Mer {wDune} m − {upper.marginM} m haut · {upper.shortLabel}
                           {resolvedDune.source === 'builtin_dune' ? ' · dune auto' : ''}
                           {latPct != null ? ` · ${latPct}%` : ''})
                         </span>
                       ) : (
-                        <span style={{ color: '#64748b' }}> (est. Litto3D)</span>
+                        <span style={{ color: '#64748b' }}> (est. Litto3D · haut {upper.marginM} m)</span>
                       )}
                     </div>
                   </div>
@@ -1459,8 +1857,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           </div>
           <div style={{ fontSize: '0.70rem', color: '#047857', fontWeight: 700, marginTop: '2px' }}>
             {stats.measuredCount > 0
-              ? `Distance GPS pied de dune − ${softMarginM} m sable mou`
-              : 'Calculé automatiquement dès le 1er relevé en baie'}
+              ? `Distance GPS pied de dune − limite haute du jour (${todayEffectiveUpper.shortLabel} : ${softMarginM} m auj.)`
+              : `Limite haute du jour : ${softMarginM} m (${todayEffectiveUpper.shortLabel})`}
           </div>
         </div>
       </div>
@@ -1807,6 +2205,8 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
           windList={windList}
           logs={displayedLogs}
           activeCadre={activeCadreProfile}
+          dailyUpperMarginM={todayEffectiveUpper.marginM}
+          dailyUpperLabel={todayEffectiveUpper.shortLabel}
         />
       </div>
 
@@ -1991,13 +2391,13 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                 <th style={{ padding: '8px 10px' }}>Météo Théo vs Réel</th>
                 <th
                   style={{ padding: '8px 10px' }}
-                  title={`Bande de sable utile théorique (SHOM brut sur profil réel IGN RGE ALTI 1 m du secteur, après déduction de ${softMarginM} m de sable mou)`}
+                  title="Bande de sable utile théorique (SHOM brut sur profil réel IGN RGE ALTI 1 m du secteur, après déduction de la limite haute du jour)"
                 >
                   Bande sable SHOM brut
                 </th>
                 <th
                   style={{ padding: '8px 10px' }}
-                  title={`Bande de sable utile réellement mesurée sur le terrain (distance GPS depuis la ligne de dune − ${softMarginM} m de sable mou) et écart mangé/gagné vs SHOM brut`}
+                  title="Bande de sable utile réellement mesurée sur le terrain (distance GPS depuis la ligne de dune − limite haute du jour : GPS laisse PM ou Auto PM veille) et écart mangé/gagné vs SHOM brut"
                 >
                   Bande sable terrain (vs SHOM)
                 </th>
@@ -2027,6 +2427,7 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                       zone,
                       rawWidth: widthDune,
                       widthSource,
+                      upper,
                       theoTotalX,
                       theoUsableM,
                       terrainUsableM,
@@ -2228,11 +2629,11 @@ export const GpsWaterlineTab: React.FC<GpsWaterlineTabProps> = ({
                             style={{ fontSize: '0.64rem', color: '#64748b' }}
                             title={
                               widthSource === 'builtin_dune'
-                                ? 'Calcul automatique depuis la ligne de pied de dune Lestrevet–Pentrez (IGN/OSM) − 50 m de sable mou'
-                                : 'Calcul depuis les repères personnalisés du Cadre Terrain'
+                                ? `Calcul automatique depuis la ligne de pied de dune Lestrevet–Pentrez − ${upper.marginM} m limite haute (${upper.shortLabel})`
+                                : `Calcul depuis le Cadre Terrain − ${upper.marginM} m limite haute (${upper.shortLabel})`
                             }
                           >
-                            Dune {widthDune} m · vs SHOM brut
+                            Dune {widthDune} m − haut {upper.marginM} m ({upper.shortLabel})
                           </div>
                         </>
                       ) : (

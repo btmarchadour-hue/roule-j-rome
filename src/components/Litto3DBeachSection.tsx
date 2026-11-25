@@ -26,6 +26,8 @@ interface Litto3DBeachSectionProps {
   windList?: WindPoint[];
   logs?: GpsWaterlineLog[];
   activeCadre?: BeachCadreProfile | null;
+  dailyUpperMarginM?: number;
+  dailyUpperLabel?: string;
 }
 
 export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
@@ -34,6 +36,8 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   windList = [],
   logs = [],
   activeCadre = null,
+  dailyUpperMarginM,
+  dailyUpperLabel,
 }) => {
 
   // Heure actuelle en minute UTC
@@ -46,14 +50,16 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
   // Curseur libre de surcote (+) / sous-cote (−) simulée (-40 cm à +50 cm)
   const [simulatedSurcoteCm, setSimulatedSurcoteCm] = useState<number>(0);
 
-  // Marge de sable sec/mou en haut de plage (synchronisée avec le Cadre de Roulage, fixée à 50 m par défaut)
-  const [softSandMarginM, setSoftSandMarginM] = useState<number>(activeCadre?.softSandMarginM ?? 50);
+  // Marge de sable sec/mou en haut de plage (synchronisée avec la limite haute du jour : PM veille / GPS / terrain)
+  const effectiveDefaultMarginM =
+    typeof dailyUpperMarginM === 'number'
+      ? dailyUpperMarginM
+      : activeCadre?.softSandMarginM ?? 50;
+  const [softSandMarginM, setSoftSandMarginM] = useState<number>(effectiveDefaultMarginM);
 
   useEffect(() => {
-    if (typeof activeCadre?.softSandMarginM === 'number') {
-      setSoftSandMarginM(activeCadre.softSandMarginM);
-    }
-  }, [activeCadre?.softSandMarginM]);
+    setSoftSandMarginM(effectiveDefaultMarginM);
+  }, [effectiveDefaultMarginM]);
 
   // Mode d'affichage visuel : 'aerial' (Vue du dessus / Piste de char) ou 'profile' (Coupe transversale)
   const [viewMode, setViewMode] = useState<'aerial' | 'profile'>('aerial');
@@ -738,14 +744,15 @@ export const Litto3DBeachSection: React.FC<Litto3DBeachSectionProps> = ({
           <input
             type="range"
             min="0"
-            max="100"
+            max="200"
             step="5"
             value={softSandMarginM}
             onChange={e => setSoftSandMarginM(Number(e.target.value))}
             style={{ width: '100%', marginTop: '6px', cursor: 'pointer' }}
           />
           <div style={{ fontSize: '0.68rem', color: '#b45309', marginTop: '4px', lineHeight: 1.35 }}>
-            <strong>Réglage acté : 50 m</strong> (synchronisé avec le Cadre de Roulage ci-dessus ; curseur libre si vous souhaitez tester un autre scénario).
+            <strong>Limite haute du jour : {effectiveDefaultMarginM} m</strong>
+            {dailyUpperLabel ? ` (${dailyUpperLabel})` : ''} · curseur libre pour simuler un autre niveau de laisse PM.
           </div>
         </div>
 

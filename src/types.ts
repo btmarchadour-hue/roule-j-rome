@@ -378,7 +378,12 @@ export interface GpsWaterlineLog {
 
   // Mesures géométriques calculées par rapport au Cadre Terrain (Dune + Gauche/Droite)
   measuredWidthFromDuneM?: number;   // Largeur plage mesurée depuis la ligne de dune jusqu'à l'eau (m)
-  usableWidthM?: number;             // Largeur exploitable utile (déduction marge haute 50 m)
+  usableWidthM?: number;             // Largeur exploitable utile (après déduction bande haute sable mou du jour)
+  upperSoftMarginM?: number;         // Limite haute sable mou retenue ce jour-là (m depuis la dune)
+  upperLimitSource?: 'gps_high_mark' | 'manual_day' | 'prev_pm_auto' | 'fixed'; // Origine de la limite haute
+  upperLimitLat?: number;            // Latitude du point GPS limite haute (si relevé laisse PM du jour)
+  upperLimitLon?: number;            // Longitude du point GPS limite haute (si relevé laisse PM du jour)
+  prevPmHeightM?: number;            // Hauteur de la plus haute PM des 28 dernières heures (m ZH DZ)
   beachZone?: 'lestrevet' | 'lieue_de_greve' | 'pentrez'; // Classement auto 3 zones de la baie
   lateralPosFromLeftM?: number;      // Position le long de la plage depuis la borne Gauche (m)
   lateralPosPct?: number;            // Position relative 0% (Gauche) -> 100% (Droite)
@@ -435,7 +440,9 @@ export interface BeachCadreProfile {
   leftBoundary: BeachReferencePoint | null;
   /** Limite latérale Droite (côté Nord / Pentrez en regardant la mer) */
   rightBoundary: BeachReferencePoint | null;
-  /** Marge de sable sec/mou haute (m) entre la dune et le sable roulable */
+  /** Mode de calcul de la bande haute de sable mou : auto selon la PM de la veille (défaut) ou fixe manuel */
+  softSandMarginMode?: 'auto_prev_pm' | 'fixed';
+  /** Marge de sable sec/mou haute (m) entre la dune et le sable roulable (utilisée en mode fixe ou repli) */
   softSandMarginM?: number;
   notes?: string;
   updatedAt?: number;

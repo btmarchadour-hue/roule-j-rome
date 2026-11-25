@@ -13,7 +13,11 @@ import {
   latLonToLocalMeters,
   parseLatLonInput,
 } from '../utils/beachCadreEngine';
-import { requestCalibratedStationaryGps } from '../utils/waterlineGpsEngine';
+import {
+  getStoredDailyUpperLimit,
+  requestCalibratedStationaryGps,
+  resolveEffectiveUpperMargin,
+} from '../utils/waterlineGpsEngine';
 
 type SlotKey = 'dunePointA' | 'dunePointB' | 'leftBoundary' | 'rightBoundary';
 
@@ -103,15 +107,34 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
   const selectedGeom = useMemo(() => computeCadreGeometry(selectedProfile), [selectedProfile]);
   const otherGeom = useMemo(() => computeCadreGeometry(otherProfile), [otherProfile]);
 
+  const todayUpperMargin = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return resolveEffectiveUpperMargin({
+      timestampMs: Date.now(),
+      zoneId: 'lestrevet',
+      dailyOverride: getStoredDailyUpperLimit(todayStr),
+      activeCadre: selectedProfile,
+    });
+  }, [selectedProfile]);
+
   const latestMeasuredWidth = useMemo(() => {
     if (logs.length === 0) return null;
     const latest = logs[0];
     const ev = evaluatePointAgainstCadre(latest.latitude, latest.longitude, selectedProfile);
     if (ev.widthFromDuneM == null) return null;
-    const soft = selectedProfile.softSandMarginM ?? 0;
+    const upper = resolveEffectiveUpperMargin({
+      timestampMs: latest.timestamp,
+      zoneId: latest.beachZone || 'lestrevet',
+      storedUpperMarginM: latest.upperSoftMarginM,
+      storedUpperSource: latest.upperLimitSource,
+      storedPrevPmHeightM: latest.prevPmHeightM,
+      activeCadre: selectedProfile,
+    });
     return {
       totalM: ev.widthFromDuneM,
-      usableM: Math.max(0, ev.widthFromDuneM - soft),
+      usableM: Math.max(0, ev.widthFromDuneM - upper.marginM),
+      softM: upper.marginM,
+      softLabel: upper.shortLabel,
       lateralPct: ev.lateralPosPct,
       lateralM: ev.lateralPosFromLeftM,
       isInside: ev.isInsideZone,
@@ -365,9 +388,9 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
       otherZoneMax,
       recentWaterLogs,
       latestLogW,
-      softMarginW: selectedProfile.softSandMarginM ?? 0,
+      softMarginW: latestMeasuredWidth?.softM ?? todayUpperMargin.marginM,
     };
-  }, [selectedGeom, selectedProfile, otherProfile, logs]);
+  }, [selectedGeom, selectedProfile, otherProfile, logs, latestMeasuredWidth, todayUpperMargin]);
 
   const calibratedPointsCount = [
     selectedProfile.dunePointA,
@@ -559,8 +582,8 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
           </div>
           <div style={{ fontSize: '0.68rem', color: '#475569' }}>
             {latestMeasuredWidth
-              ? `Utile (hors ${selectedProfile.softSandMarginM ?? 0}m mou) : ${latestMeasuredWidth.usableM} m`
-              : 'Nécessite 1 point Dune + 1 point Mer'}
+              ? `Utile (hors ${latestMeasuredWidth.softM} m · ${latestMeasuredWidth.softLabel}) : ${latestMeasuredWidth.usableM} m`
+              : `Bande haute du jour : ${todayUpperMargin.marginM} m (${todayUpperMargin.shortLabel})`}
           </div>
         </div>
 
@@ -678,36 +701,98 @@ export const BeachCadrePanel: React.FC<BeachCadrePanelProps> = ({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <label
-                htmlFor="soft-sand-margin-input"
-                style={{ fontSize: '0.74rem', fontWeight: 800, color: '#334155' }}
-              >
-                Marge sable mou haut de dune :
-              </label>
-              <input
-                id="soft-sand-margin-input"
-                type="number"
-                min={0}
-                max={150}
-                step={5}
-                disabled={isReadOnly}
-                value={selectedProfile.softSandMarginM ?? 50}
-                onChange={e =>
-                  persistProfileUpdate(editingProfileKey, {
-                    softSandMarginM: Math.max(0, Math.min(150, Number(e.target.value) || 0)),
-                  })
-                }
+              <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#334155' }}>
+                Bande haute sable mou :
+              </span>
+              <div
                 style={{
-                  width: '74px',
-                  padding: '5px 8px',
+                  display: 'inline-flex',
+                  background: '#f1f5f9',
+                  padding: '2px',
+                  borderRadius: '7px',
                   border: '1px solid #cbd5e1',
-                  borderRadius: '6px',
-                  fontSize: '0.82rem',
-                  fontWeight: 800,
-                  fontVariantNumeric: 'tabular-nums',
                 }}
-              />
-              <span style={{ fontSize: '0.74rem', color: '#64748b' }}>mètres</span>
+              >
+                <button
+                  type="button"
+                  disabled={isReadOnly}
+                  onClick={() =>
+                    persistProfileUpdate(editingProfileKey, {
+                      softSandMarginMode: 'auto_prev_pm',
+                    })
+                  }
+                  style={{
+                    border: 'none',
+                    borderRadius: '5px',
+                    padding: '4px 9px',
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                    background:
+                      selectedProfile.softSandMarginMode !== 'fixed' ? '#0284c7' : 'transparent',
+                    color:
+                      selectedProfile.softSandMarginMode !== 'fixed' ? '#ffffff' : '#475569',
+                  }}
+                >
+                  Auto · PM veille ({todayUpperMargin.marginM} m)
+                </button>
+                <button
+                  type="button"
+                  disabled={isReadOnly}
+                  onClick={() =>
+                    persistProfileUpdate(editingProfileKey, {
+                      softSandMarginMode: 'fixed',
+                      softSandMarginM: selectedProfile.softSandMarginM ?? todayUpperMargin.marginM,
+                    })
+                  }
+                  style={{
+                    border: 'none',
+                    borderRadius: '5px',
+                    padding: '4px 9px',
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    cursor: isReadOnly ? 'not-allowed' : 'pointer',
+                    background:
+                      selectedProfile.softSandMarginMode === 'fixed' ? '#0f172a' : 'transparent',
+                    color:
+                      selectedProfile.softSandMarginMode === 'fixed' ? '#ffffff' : '#475569',
+                  }}
+                >
+                  Fixe manuel
+                </button>
+              </div>
+              {selectedProfile.softSandMarginMode === 'fixed' ? (
+                <>
+                  <input
+                    id="soft-sand-margin-input"
+                    type="number"
+                    min={0}
+                    max={200}
+                    step={5}
+                    disabled={isReadOnly}
+                    value={selectedProfile.softSandMarginM ?? 50}
+                    onChange={e =>
+                      persistProfileUpdate(editingProfileKey, {
+                        softSandMarginM: Math.max(0, Math.min(200, Number(e.target.value) || 0)),
+                      })
+                    }
+                    style={{
+                      width: '74px',
+                      padding: '5px 8px',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      fontSize: '0.82rem',
+                      fontWeight: 800,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  />
+                  <span style={{ fontSize: '0.74rem', color: '#64748b' }}>mètres</span>
+                </>
+              ) : (
+                <span style={{ fontSize: '0.71rem', color: '#0369a1', fontWeight: 700 }}>
+                  Calculée chaque jour sur la laisse de PM précédente (ajustable sur la plage ci-dessous)
+                </span>
+              )}
             </div>
 
             {(selectedProfile.dunePointA || selectedProfile.dunePointB) && (

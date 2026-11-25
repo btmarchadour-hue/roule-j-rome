@@ -916,6 +916,17 @@ export const subscribeToWaterlineGpsLogs = (
           correctedSurcoteCm: Number(d.correctedSurcoteCm) || 0,
           measuredWidthFromDuneM: d.measuredWidthFromDuneM != null ? Number(d.measuredWidthFromDuneM) : undefined,
           usableWidthM: d.usableWidthM != null ? Number(d.usableWidthM) : undefined,
+          upperSoftMarginM: d.upperSoftMarginM != null ? Number(d.upperSoftMarginM) : undefined,
+          upperLimitSource:
+            d.upperLimitSource === 'gps_high_mark' ||
+            d.upperLimitSource === 'manual_day' ||
+            d.upperLimitSource === 'prev_pm_auto' ||
+            d.upperLimitSource === 'fixed'
+              ? d.upperLimitSource
+              : undefined,
+          upperLimitLat: d.upperLimitLat != null ? Number(d.upperLimitLat) : undefined,
+          upperLimitLon: d.upperLimitLon != null ? Number(d.upperLimitLon) : undefined,
+          prevPmHeightM: d.prevPmHeightM != null ? Number(d.prevPmHeightM) : undefined,
           beachZone: d.beachZone,
           lateralPosFromLeftM: d.lateralPosFromLeftM != null ? Number(d.lateralPosFromLeftM) : undefined,
           lateralPosPct: d.lateralPosPct != null ? Number(d.lateralPosPct) : undefined,
