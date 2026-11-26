@@ -130,6 +130,7 @@ export interface PrevHighTideUpperLimit {
   prevPmHeightM: number;
   prevPmTimeStr: string;
   prevPmDateStr: string;
+  prevPmUtcMin: number;
 }
 
 export interface DailyUpperLimitOverride {
@@ -149,6 +150,7 @@ export interface ResolvedUpperMargin {
   shortLabel: string;
   prevPmHeightM?: number;
   prevPmTimeStr?: string;
+  prevPmUtcMin?: number;
 }
 
 /**
@@ -159,7 +161,8 @@ export interface ResolvedUpperMargin {
 export function computePreviousHighTideUpperLimit(
   timestampMs: number,
   zoneId: BayZoneId = 'lestrevet',
-  les: boolean = false
+  les: boolean = false,
+  prevPmSurcoteCm?: number
 ): PrevHighTideUpperLimit | null {
   if (!Number.isFinite(timestampMs) || timestampMs <= 0) return null;
   const utcMin = Math.floor(timestampMs / 60000);
@@ -184,7 +187,11 @@ export function computePreviousHighTideUpperLimit(
   const chosen = bestPm || fallbackLastPm;
   if (!chosen || utcMin - chosen.t > 48 * 60) return null;
 
-  const prevPmHeightM = Number(chosen.h.toFixed(2));
+  const surcoteM =
+    prevPmSurcoteCm != null && Number.isFinite(prevPmSurcoteCm)
+      ? prevPmSurcoteCm / 100
+      : 0;
+  const prevPmHeightM = Number((chosen.h + surcoteM).toFixed(2));
   const rawX = estimateLitto3dWaterlineXExactM(prevPmHeightM, zoneId);
   const marginM = Math.max(0, Math.min(220, Math.round(rawX)));
 
@@ -200,6 +207,7 @@ export function computePreviousHighTideUpperLimit(
     prevPmHeightM,
     prevPmTimeStr: `${dayPrefix} ${hhmm}`,
     prevPmDateStr,
+    prevPmUtcMin: chosen.t,
   };
 }
 
@@ -263,10 +271,16 @@ export function resolveEffectiveUpperMargin(
     dailyOverride?: DailyUpperLimitOverride | null;
     activeCadre?: BeachCadreProfile | null;
     les?: boolean;
+    prevPmSurcoteCm?: number;
   }
 ): ResolvedUpperMargin {
   const zoneId = params.zoneId || 'lestrevet';
-  const prevPm = computePreviousHighTideUpperLimit(params.timestampMs, zoneId, Boolean(params.les));
+  const prevPm = computePreviousHighTideUpperLimit(
+    params.timestampMs,
+    zoneId,
+    Boolean(params.les),
+    params.prevPmSurcoteCm
+  );
 
   if (
     params.storedUpperMarginM != null &&
@@ -282,6 +296,7 @@ export function resolveEffectiveUpperMargin(
           : 'Ajusté terrain',
       prevPmHeightM: params.storedPrevPmHeightM ?? prevPm?.prevPmHeightM,
       prevPmTimeStr: prevPm?.prevPmTimeStr,
+      prevPmUtcMin: prevPm?.prevPmUtcMin,
     };
   }
 
@@ -295,6 +310,7 @@ export function resolveEffectiveUpperMargin(
           : 'Ajusté terrain',
       prevPmHeightM: prevPm?.prevPmHeightM,
       prevPmTimeStr: prevPm?.prevPmTimeStr,
+      prevPmUtcMin: prevPm?.prevPmUtcMin,
     };
   }
 
@@ -305,16 +321,26 @@ export function resolveEffectiveUpperMargin(
       shortLabel: 'Marge fixe',
       prevPmHeightM: prevPm?.prevPmHeightM,
       prevPmTimeStr: prevPm?.prevPmTimeStr,
+      prevPmUtcMin: prevPm?.prevPmUtcMin,
     };
   }
 
   if (prevPm) {
+    const surcoteRounded =
+      params.prevPmSurcoteCm != null && Number.isFinite(params.prevPmSurcoteCm)
+        ? Math.round(params.prevPmSurcoteCm)
+        : 0;
+    const surcoteSuffix =
+      Math.abs(surcoteRounded) >= 3
+        ? ` (${surcoteRounded > 0 ? '+' : ''}${surcoteRounded} cm météo)`
+        : '';
     return {
       marginM: prevPm.marginM,
       source: 'prev_pm_auto',
-      shortLabel: `Auto PM ${prevPm.prevPmHeightM.toFixed(2).replace('.', ',')} m`,
+      shortLabel: `Auto PM ${prevPm.prevPmHeightM.toFixed(2).replace('.', ',')} m${surcoteSuffix}`,
       prevPmHeightM: prevPm.prevPmHeightM,
       prevPmTimeStr: prevPm.prevPmTimeStr,
+      prevPmUtcMin: prevPm.prevPmUtcMin,
     };
   }
 

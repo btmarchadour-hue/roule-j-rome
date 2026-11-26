@@ -3,8 +3,11 @@
 
 interface ImportMetaEnv {
   readonly VITE_WINDSUP_PROXY_URL?: string;
+  readonly VITE_GOOGLE_MAPS_API_KEY?: string;
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare const __GOOGLE_MAPS_API_KEY__: string;

@@ -180,6 +180,8 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
         okCount: 0,
         verifiedCount: 0,
         unverifiedCount: 0,
+        pendingActionCount: 0,
+        autoAlignCount: 0,
         daysAnalyzed: 0,
       };
     }
@@ -215,24 +217,23 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
       {
         id: 'note-audit-coherence-donnees-c1-c2',
         category: 'reunion',
-        categoryLabel: 'Audit & Conformité Données',
+        categoryLabel: 'Cohérence Planning & Bilans',
         categoryColor: '#d97706',
         icon: '🩺',
-        title: 'Note de Mise en Conformité pour Jérôme · État de la Base & Arbitrage Novembre 2026',
+        title: 'Questionnaire rapide pour Jérôme · Mise en cohérence des bilans',
         subtitle:
-          'Octobre purgé · Tout le planning après le 30 novembre 2026 est 100 % conforme (0 rouge, 0 orange) · Seul novembre 2026 reste à arbitrer',
+          'Toutes les journées déjà cohérentes sont masquées · Uniquement les quelques créneaux à trancher en 1 clic',
         summary:
-          'Mise à jour de conformité : les anciennes données de démonstration d’octobre 2026 ont été supprimées et l’ensemble des créneaux futurs après le 30 novembre 2026 (décembre 2026 → septembre 2027, soit 1 464 créneaux) a été remis massivement en cohérence (0 contradiction rouge, 0 alerte orange ; clés optionnelles réalignées et 11 journées de fév./mars 2027 recalées sur la règle automatique Début 09h00). L’export futur prestataire est donc 100 % propre. Il ne reste plus qu’à arbitrer ensemble l’historique de novembre 2026 (anciens créneaux pré-Cycle 1/2 et écarts Planning vs REX) pour figer définitivement les statistiques Vie 1 / Vie 2 et le seuil de Lestrevet.',
+          'Ce questionnaire n’affiche plus que les rares créneaux où le planning et le bilan du soir se contredisent encore. Les créneaux déjà propres ou déjà validés sont automatiquement retirés, et les anciens « Refusé » déjà renseignés dans tes bilans s’alignent en un seul clic.',
         keyPoints: [
-          '1. Déjà réglé (Base propre post-30 novembre) : purge complète d’octobre 2026 + remise en cohérence massive de tous les créneaux orange après le 30/11/2026 (1 464/1 464 créneaux 🟢 verts, 0 🔴, 0 🟠, 0 REX futur parasite).',
-          '2. Ce qui a changé au quotidien : séparation claire Cycle 1 (Offre « À publier ») / Cycle 2 (Terrain) / REX (Bilan Express 30 sec le soir avec ◀ Jour préc.) + GPS Temps 2 hors-ligne consolidé H+2 sans GPX.',
-          '3. Seul périmètre à vérifier avec Jérôme (Novembre 2026 uniquement) : filtre le mois « Novembre 2026 » dans l’outil ci-dessous ➔ 🔴 Contradictions Planning vs REX (« ⚖️ Trancher ») ; 🟠 Anciens créneaux pré-Cycle 1/2 ou motifs « Fermé » vagues (« ✏️ Corriger ») ; 🟢 Lignes propres (« ✅ Valider »).',
-          '4. Bénéfice immédiat : des statistiques Vie 1 / Vie 2 irréprochables dès novembre 2026, un export prestataire de réservation 100 % cohérent jusqu’en septembre 2027 et une calibration Lestrevet sans biais.',
+          'Zéro bruit : les créneaux déjà cohérents et tes réponses déjà enregistrées sont masqués automatiquement.',
+          'Anciens « Refusé » : si la raison est déjà notée dans ton bilan du soir, un seul clic aligne tout le lot.',
+          'Réponse directe en 1 clic : pour chaque écart restant, choisis simplement ce qui s’est passé (Pas d’inscrits, Météo, Effectuée, École fermée).',
         ],
         docUrl: '',
-        docBtnLabel: '🩺 Ouvrir l’outil de vérification & correction',
+        docBtnLabel: '🩺 Ouvrir le questionnaire rapide',
         statusBadge: {
-          label: 'Post-30/11 100 % OK · Reste Nov. 2026',
+          label: 'Simplifié · 1 clic',
           bg: '#dcfce7',
           color: '#166534',
         },
@@ -1152,69 +1153,91 @@ export const NotesAndHypotheses: React.FC<NotesAndHypothesesProps> = ({
                   </div>
                 </div>
 
-                {/* Bandeau live Audit Données si c'est la note d'audit */}
-                {note.id === 'note-audit-coherence-donnees-c1-c2' && settings && (
-                  <div
-                    style={{
-                      background:
-                        dataAuditReport.conflictCount > 0
-                          ? '#fef2f2'
-                          : dataAuditReport.warningCount > 0
-                          ? '#fffbeb'
-                          : '#f0fdf4',
-                      border: `1.5px solid ${
-                        dataAuditReport.conflictCount > 0
-                          ? '#fca5a5'
-                          : dataAuditReport.warningCount > 0
-                          ? '#fcd34d'
-                          : '#86efac'
-                      }`,
-                      borderRadius: '8px',
-                      padding: '8px 10px',
-                      marginBottom: '10px',
-                      fontSize: '0.72rem',
-                      color: '#0f172a',
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, marginBottom: '3px' }}>
-                      📊 État actuel de ta base : {dataAuditReport.totalCount} créneau{dataAuditReport.totalCount > 1 ? 'x' : ''} sur {dataAuditReport.daysAnalyzed} jour{dataAuditReport.daysAnalyzed > 1 ? 's' : ''}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', fontWeight: 800 }}>
-                      <span style={{ color: '#dc2626' }}>🔴 {dataAuditReport.conflictCount} incohérence{dataAuditReport.conflictCount > 1 ? 's' : ''}</span>
-                      <span style={{ color: '#b45309' }}>🟠 {dataAuditReport.warningCount} à préciser</span>
-                      <span style={{ color: '#16a34a' }}>🟢 {dataAuditReport.okCount} cohérente{dataAuditReport.okCount > 1 ? 's' : ''}</span>
-                      <span style={{ color: '#0369a1' }}>✅ {dataAuditReport.verifiedCount}/{dataAuditReport.totalCount} validées</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Barre d'action inférieure : Outil Audit / Bouton QCM in-app / Bouton A4/Word + Marquer traitée */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
-                  {note.id === 'note-audit-coherence-donnees-c1-c2' && (
-                    <button
-                      type="button"
-                      onClick={() => setIsAuditModalOpen(true)}
+                {/* Bandeau live simplifié du questionnaire de cohérence */}
+                {note.id === 'note-audit-coherence-donnees-c1-c2' && settings && (() => {
+                  const totalLeft = dataAuditReport.pendingActionCount + dataAuditReport.autoAlignCount;
+                  const isAllClean = totalLeft === 0;
+                  return (
+                    <div
                       style={{
-                        width: '100%',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        background: '#d97706',
-                        color: '#ffffff',
-                        border: 'none',
-                        padding: '11px 14px',
+                        background: isAllClean
+                          ? '#f0fdf4'
+                          : dataAuditReport.pendingActionCount > 0
+                          ? '#fffbeb'
+                          : '#f0f9ff',
+                        border: `1px solid ${
+                          isAllClean
+                            ? '#86efac'
+                            : dataAuditReport.pendingActionCount > 0
+                            ? '#fcd34d'
+                            : '#bae6fd'
+                        }`,
                         borderRadius: '8px',
-                        fontSize: '0.80rem',
-                        fontWeight: 900,
-                        cursor: 'pointer',
-                        boxShadow: '0 3px 10px rgba(217, 119, 6, 0.35)',
+                        padding: '10px 12px',
+                        marginBottom: '10px',
+                        fontSize: '0.76rem',
+                        color: '#0f172a',
+                        fontVariantNumeric: 'tabular-nums',
                       }}
                     >
-                      <span>🩺</span>
-                      <span>Ouvrir l’outil d’Audit &amp; Mise en Cohérence ({dataAuditReport.totalCount} entrées)</span>
-                    </button>
-                  )}
+                      {isAllClean ? (
+                        <div style={{ fontWeight: 800, color: '#166534' }}>
+                          ✅ Tout est cohérent — 0 question restante ({dataAuditReport.totalCount.toLocaleString('fr-FR')} créneaux alignés)
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                            {dataAuditReport.pendingActionCount > 0
+                              ? `${dataAuditReport.pendingActionCount} question${dataAuditReport.pendingActionCount > 1 ? 's' : ''} restante${dataAuditReport.pendingActionCount > 1 ? 's' : ''} pour Jérôme`
+                              : 'Aucune contradiction à trancher'}
+                            {dataAuditReport.autoAlignCount > 0
+                              ? ` · ${dataAuditReport.autoAlignCount} alignement${dataAuditReport.autoAlignCount > 1 ? 's' : ''} auto en 1 clic`
+                              : ''}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                            {dataAuditReport.okCount.toLocaleString('fr-FR')} créneaux déjà cohérents masqués
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Barre d'action inférieure : Questionnaire Cohérence / Bouton QCM in-app / Bouton A4/Word + Marquer traitée */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                  {note.id === 'note-audit-coherence-donnees-c1-c2' && (() => {
+                    const pending = dataAuditReport.pendingActionCount;
+                    const autoCnt = dataAuditReport.autoAlignCount;
+                    const isAllClean = pending === 0 && autoCnt === 0;
+                    const btnLabel = isAllClean
+                      ? 'Tout est cohérent · Voir le récapitulatif'
+                      : pending > 0
+                      ? `Ouvrir le questionnaire (${pending} question${pending > 1 ? 's' : ''}${autoCnt > 0 ? ` + ${autoCnt} en 1 clic` : ''})`
+                      : `Aligner les ${autoCnt} anciens créneaux en 1 clic`;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setIsAuditModalOpen(true)}
+                        style={{
+                          width: '100%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          background: isAllClean ? '#16a34a' : '#0284c7',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '11px 14px',
+                          borderRadius: '8px',
+                          fontSize: '0.82rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span>{btnLabel}</span>
+                      </button>
+                    );
+                  })()}
 
                   {qcmDef && (
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'stretch' }}>

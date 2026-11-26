@@ -76,6 +76,8 @@ export interface AuditSlotEntry {
   issues: AuditIssue[];
   signOff?: DataAuditEntrySignOff;
   isVerified: boolean;
+  needsAction: boolean;
+  isAutoAlignableFromRex: boolean;
   summaryStatusLabel: string;
 }
 
@@ -87,6 +89,8 @@ export interface DataAuditReport {
   okCount: number;
   verifiedCount: number;
   unverifiedCount: number;
+  pendingActionCount: number;
+  autoAlignCount: number;
   daysAnalyzed: number;
 }
 
@@ -304,16 +308,9 @@ export const buildDataAuditReport = ({
         const c2 = getEffectiveCycle2Status(valItem, bookingSummary.totalChars);
         const valChars = getValidationItemChars(valItem);
 
-        // 2. Ancien format pré-Cycle 1/2 sans cycle1Status explicite
-        if (!valItem.cycle1Status) {
-          issues.push({
-            code: 'legacy_missing_c1_status',
-            level: 'warning',
-            label: 'Ancien enregistrement (avant la règle Cycle 1 / Cycle 2)',
-            detail:
-              'Créneau saisi avant la séparation Offre commerciale (C1) / Terrain (C2). L’outil devine son statut, mais clique « ✅ Valider » si c’est juste ou « ✏️ Corriger » pour le classer proprement.',
-          });
-        }
+        // 2. Ancien format pré-Cycle 1/2 : on ne signale plus de faux avertissements si
+        // Planning et REX racontent déjà la même histoire (ou si le motif est déjà explicite).
+        // Seuls les vrais conflits ou motifs génériques ambigus sont retenus plus bas.
 
         // 3. Créneau passé resté en attente ou confirmé sans bilan final
         if (
@@ -477,25 +474,24 @@ export const buildDataAuditReport = ({
                 label: 'Motif REX différent d’une fermeture école (Cycle 1)',
                 detail: `Le planning indique « À ne pas publier » (motif perso/école), mais le REX indique « ${obsReasonLabel} ». Aligne la vraie cause.`,
               });
+            } else if (isLegacyGenericRejection) {
+              // Ancien « Refusé » générique dont le REX contient déjà la vraie réponse enregistrée
+              issues.push({
+                code: 'legacy_rejection_to_align_with_rex',
+                level: 'warning',
+                label: `Ancien « ${valItem.rejectReason || 'Refusé'} » déjà renseigné au bilan (« ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} »)`,
+                detail: `Le planning indiquait simplement « ${valItem.rejectReason || 'Refusé'} », mais ton bilan terrain précise déjà « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Tu peux aligner automatiquement sur cette réponse enregistrée.`,
+              });
             } else if (
               c2 === 'cancelled_weather' &&
               (obsIsNoClients || (obsIsInstructor && !hasBookedClientsForCancel) || obsIsHorsOffre)
             ) {
-              if (isLegacyGenericRejection) {
-                issues.push({
-                  code: 'legacy_rejection_to_align_with_rex',
-                  level: 'warning',
-                  label: `Ancien « ${valItem.rejectReason || 'Refusé'} » à aligner sur le REX (« ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} »)`,
-                  detail: `L’ancienne fiche planning indiquait simplement « ${valItem.rejectReason || 'Refusé'} » sans préciser la cause (avant la règle Cycle 1/2), alors que le REX précise déjà « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Clique « ✏️ Corriger / Aligner » puis enregistre (la cause du REX est pré-sélectionnée).`,
-                });
-              } else {
-                issues.push({
-                  code: 'reason_mismatch_vie2',
-                  level: 'conflict',
-                  label: 'Motif REX incohérent avec Annulation Météo',
-                  detail: `Le planning indique « Annulé météo », mais le REX indique « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ». Choisis la vraie cause entre météo, manque d’inscrits, fermeture école ou hors offre.`,
-                });
-              }
+              issues.push({
+                code: 'reason_mismatch_vie2',
+                level: 'conflict',
+                label: 'Motif bilan différent du planning',
+                detail: `Le planning indique « ${valItem.rejectReason || 'Annulé météo'} », mais le bilan du soir indique « ${obsIsHorsOffre ? 'Hors offre' : obsReasonLabel} ».`,
+              });
             }
           }
 
@@ -633,11 +629,25 @@ export const buildDataAuditReport = ({
 
       const hasConflict = issues.some(i => i.level === 'conflict');
       const hasWarning = issues.some(i => i.level === 'warning');
-      const severity: AuditSeverity = hasConflict ? 'conflict' : hasWarning ? 'warning' : 'ok';
-
       const entryKey = `${ds}__${slotKey}`;
       const signOff = auditMap[entryKey];
       const isVerified = !hasConflict && Boolean(signOff?.verified);
+
+      // Si une entrée n'a qu'un avertissement mineur et a déjà été validée par Jérôme ou Benoît,
+      // on considère la réponse enregistrée comme cohérente pour ne plus la redemander.
+      const effectiveSeverity: AuditSeverity = hasConflict
+        ? 'conflict'
+        : hasWarning && !isVerified
+        ? 'warning'
+        : 'ok';
+      const isAutoAlignableFromRex =
+        !isVerified &&
+        !hasConflict &&
+        issues.length > 0 &&
+        issues.every(i => i.code === 'legacy_rejection_to_align_with_rex') &&
+        Boolean(obs);
+      const needsAction = effectiveSeverity !== 'ok' && !isAutoAlignableFromRex;
+      const severity: AuditSeverity = effectiveSeverity;
 
       // Libellé lisible du statut actuel
       let summaryStatusLabel = 'Non défini';
@@ -707,6 +717,8 @@ export const buildDataAuditReport = ({
         issues,
         signOff,
         isVerified,
+        needsAction,
+        isAutoAlignableFromRex,
         summaryStatusLabel,
       });
     }
@@ -749,8 +761,10 @@ export const buildDataAuditReport = ({
             });
             const hasC = target.issues.some(iss => iss.level === 'conflict');
             const hasW = target.issues.some(iss => iss.level === 'warning');
-            target.severity = hasC ? 'conflict' : hasW ? 'warning' : 'ok';
             if (hasC) target.isVerified = false;
+            target.severity = hasC ? 'conflict' : hasW && !target.isVerified ? 'warning' : 'ok';
+            target.isAutoAlignableFromRex = false;
+            target.needsAction = target.severity !== 'ok';
           };
           addOverlapIssue(a, b);
           addOverlapIssue(b, a);
@@ -769,6 +783,8 @@ export const buildDataAuditReport = ({
     okCount: entries.filter(e => e.severity === 'ok').length,
     verifiedCount: entries.filter(e => e.isVerified).length,
     unverifiedCount: entries.filter(e => !e.isVerified).length,
+    pendingActionCount: entries.filter(e => e.needsAction).length,
+    autoAlignCount: entries.filter(e => e.isAutoAlignableFromRex).length,
     daysAnalyzed: sortedDates.length,
   };
 };

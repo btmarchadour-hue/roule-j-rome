@@ -10,6 +10,7 @@ import { SlotObservationModal } from './components/SlotObservationModal';
 import { StatisticsTab } from './components/StatisticsTab';
 import { ClientsTab } from './components/ClientsTab';
 import { GpsWaterlineTab } from './components/GpsWaterlineTab';
+import { GpsVisualTestTab } from './components/GpsVisualTestTab';
 import { TableView } from './components/TableView';
 import { TideHeaderCard } from './components/TideHeaderCard';
 import { WindguruTable } from './components/WindguruTable';
@@ -153,11 +154,12 @@ const defaultSettings: AppSettings = {
 };
 
 export const App: React.FC = () => {
-  // Navigation tabs: 1 = Cycle 1 (Calendrier), 2 = Cycle 2 (Pilotage Terrain), 4 = Statistiques, 7 = Étalonnage GPS, 5 = Clients, 6 = Hypothèses & Notes
+  // Navigation tabs: 1 = Cycle 1 (Calendrier), 2 = Cycle 2 (Pilotage Terrain), 4 = Statistiques, 7 = Étalonnage GPS, 8 = Test visuel GPS, 5 = Clients, 6 = Hypothèses & Notes
   const [activeTab, setActiveTab] = useState<number>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === '8') return 8;
       if (tabParam === '7') return 7;
       if (tabParam === '6') return 6;
       if (tabParam === '5') return 5;
@@ -168,6 +170,14 @@ export const App: React.FC = () => {
     }
     return 2; // Démarrage direct sur Adaptation météo & prise de décisions (Cycle 2 avec calendrier)
   });
+
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState<boolean>(false);
+
+  useEffect(() => {
+    const onQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
 
   // Mode d'affichage : 'cockpit' par défaut (tous les graphes/onglets), bascule 1-clic vers 'terrain' (briefing épuré mobile)
   const [viewMode, setViewMode] = useState<'cockpit' | 'terrain'>('cockpit');
@@ -3229,6 +3239,36 @@ export const App: React.FC = () => {
 
   return (
     <>
+      {gmpQuotaExceeded && (
+        <div
+          className="noprint"
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 50,
+            background: '#fffbeb',
+            borderBottom: '1px solid #fde68a',
+            color: '#78350f',
+            padding: '8px 16px',
+            fontSize: '0.78rem',
+            textAlign: 'center',
+            boxShadow: '0 1px 4px rgba(15, 23, 42, 0.08)',
+          }}
+        >
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'underline', fontWeight: 700, color: '#451a03' }}
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
       <Header
         onOpenExchange={() => setIsExchangeModalOpen(true)}
         unreadExchangeCount={teamNotes.filter(n => !n.isResolved).length}
@@ -3253,7 +3293,7 @@ export const App: React.FC = () => {
         onLock={handleLock}
         onOpenUserManagement={() => setIsUserModalOpen(true)}
       />
-      <main className={viewMode === 'cockpit' && activeTab >= 3 && activeTab <= 7 ? 'agenda-wide' : ''}>
+      <main className={viewMode === 'cockpit' && activeTab >= 3 && activeTab <= 8 ? 'agenda-wide' : ''}>
         {/* Bascule rapide Mode Cockpit (complet) / Mode Terrain (briefing épuré mobile) */}
         <div
           className="noprint"
@@ -3403,6 +3443,13 @@ export const App: React.FC = () => {
             onClick={() => handleTabChange(5)}
           >
             👥 Répertoire Clients
+          </button>
+          <button
+            type="button"
+            className={activeTab === 8 ? 'on' : ''}
+            onClick={() => handleTabChange(8)}
+          >
+            🗺️ Test visuel GPS
           </button>
         </nav>
 
@@ -3571,6 +3618,21 @@ export const App: React.FC = () => {
               windList={windList}
               selectedDate={selectedDate}
               isReadOnly={isReadOnly}
+            />
+          </div>
+        )}
+
+        {/* Tab 8: Test visuel GPS (superposition expérimentale sur vue satellite Google Maps) */}
+        {activeTab === 8 && (
+          <div id="tab8">
+            <GpsVisualTestTab
+              settings={settings}
+              EX={EX}
+              W={tideW}
+              first={first}
+              last={last}
+              windList={windList}
+              selectedDate={focusDate}
             />
           </div>
         )}

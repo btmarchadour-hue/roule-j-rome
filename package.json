@@ -13,6 +13,8 @@
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/express": "^5.0.6",
+    "@types/google.maps": "^3.67.0",
+    "@vis.gl/react-google-maps": "^1.10.2",
     "eslint": "^10.15.0",
     "express": "^5.3.0",
     "firebase": "^13.2.0",

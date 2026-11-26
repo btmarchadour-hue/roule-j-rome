@@ -354,14 +354,48 @@ export function getObservationChars(obs?: SlotObservation | null): number {
 
 export function isNoBookingsReason(reason?: string): boolean {
   if (!reason) return false;
-  const lower = reason.toLowerCase();
+  const norm = stripReasonAccents(reason);
+  if (
+    norm.includes('vent') ||
+    norm.includes('rafale') ||
+    norm.includes('petole') ||
+    norm.includes('pluie') ||
+    norm.includes('orage') ||
+    norm.includes('houle') ||
+    norm.includes('bache') ||
+    norm.includes('plage') ||
+    norm.includes('meteo') ||
+    norm.includes('secteur') ||
+    norm.includes('devent') ||
+    norm.includes('ne se sont pas') ||
+    norm.includes('pas present') ||
+    norm.includes('absent') ||
+    norm.includes('no-show') ||
+    norm.includes('no show') ||
+    norm.includes('desistement')
+  ) {
+    return false;
+  }
   return (
-    lower.includes('inscr') ||
-    lower.includes('client') ||
-    lower.includes('réserv') ||
-    lower.includes('reserv') ||
-    lower.includes('vie 1') ||
-    lower.includes('aucun')
+    norm.includes("pas d'inscr") ||
+    norm.includes('pas d inscr') ||
+    norm.includes('sans inscr') ||
+    norm.includes("manque d'inscr") ||
+    norm.includes('manque d inscr') ||
+    norm.includes('aucun inscr') ||
+    norm.includes('0 inscr') ||
+    norm.includes('zero inscr') ||
+    norm.includes('faute d') ||
+    norm.includes('pas de client') ||
+    norm.includes('sans client') ||
+    norm.includes('aucun client') ||
+    norm.includes('0 client') ||
+    norm.includes('pas de reserv') ||
+    norm.includes('aucune reserv') ||
+    norm.includes('sans reserv') ||
+    norm.includes('vie 1') ||
+    norm.includes('no_clients') ||
+    norm === 'aucun'
   );
 }
 

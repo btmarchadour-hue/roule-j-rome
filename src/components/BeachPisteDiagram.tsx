@@ -306,7 +306,30 @@ export const BeachPisteDiagram: React.FC<BeachPisteDiagramProps> = ({
               strokeWidth="1.8"
               strokeDasharray="4 2"
             />
-            {aSoftX - aerialDuneW >= 34 && (
+            {aSoftX - aerialDuneW >= 110 ? (
+              <g>
+                <text
+                  x={(aerialDuneW + aSoftX) / 2}
+                  y="118"
+                  fill="#92400e"
+                  fontSize="9.5"
+                  fontWeight="800"
+                  textAnchor="middle"
+                >
+                  SABLE MOU
+                </text>
+                <text
+                  x={(aerialDuneW + aSoftX) / 2}
+                  y="132"
+                  fill="#b45309"
+                  fontSize="9.5"
+                  fontWeight="900"
+                  textAnchor="middle"
+                >
+                  {softSandMarginM} m
+                </text>
+              </g>
+            ) : aSoftX - aerialDuneW >= 34 ? (
               <text
                 x={(aerialDuneW + aSoftX) / 2}
                 y="123"
@@ -318,7 +341,7 @@ export const BeachPisteDiagram: React.FC<BeachPisteDiagramProps> = ({
               >
                 SABLE MOU ({softSandMarginM} m)
               </text>
-            )}
+            ) : null}
           </g>
         )}
 
@@ -504,7 +527,9 @@ export const BeachPisteDiagram: React.FC<BeachPisteDiagramProps> = ({
           </g>
         );
       })}
-      {softSandMarginM >= 25 && softSandMarginM <= 75 && (
+      {softSandMarginM >= 18 &&
+        softSandMarginM <= 240 &&
+        [0, 100, 200, 300, 400].every(t => Math.abs(t - softSandMarginM) >= 16) && (
         <g>
           <line x1={aSoftX} y1="204" x2={aSoftX} y2="211" stroke="#d97706" strokeWidth="1.4" />
           <text x={aSoftX} y="223" fill="#b45309" fontSize="8" fontWeight="800" textAnchor="middle">

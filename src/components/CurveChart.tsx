@@ -8,9 +8,15 @@ import {
 } from '../utils/beachOrientation';
 import { getStoredBeachCadreConfig } from '../utils/beachCadreEngine';
 import {
+  clearStoredDailyUpperLimit,
+  computePreviousHighTideUpperLimit,
+  DailyUpperLimitOverride,
   getOfflineGpsQueue,
+  getStoredDailyUpperLimit,
   getStoredWaterlineLogs,
   mergeOfflineQueueWithLogs,
+  resolveEffectiveUpperMargin,
+  saveStoredDailyUpperLimit,
 } from '../utils/waterlineGpsEngine';
 import { subscribeToWaterlineGpsLogs } from '../utils/firebaseSync';
 import { BeachPisteDiagram } from './BeachPisteDiagram';
@@ -179,6 +185,26 @@ export const CurveChart: React.FC<CurveChartProps> = ({
     );
     return () => unsub();
   }, []);
+
+  const [dayUpperOverride, setDayUpperOverride] = useState<DailyUpperLimitOverride | null>(() =>
+    getStoredDailyUpperLimit(dateStr)
+  );
+
+  useEffect(() => {
+    setDayUpperOverride(getStoredDailyUpperLimit(dateStr));
+  }, [dateStr]);
+
+  useEffect(() => {
+    const syncOverride = () => {
+      setDayUpperOverride(getStoredDailyUpperLimit(dateStr));
+    };
+    window.addEventListener('focus', syncOverride);
+    window.addEventListener('storage', syncOverride);
+    return () => {
+      window.removeEventListener('focus', syncOverride);
+      window.removeEventListener('storage', syncOverride);
+    };
+  }, [dateStr]);
 
   const activeCadre = useMemo(() => {
     const cfg = getStoredBeachCadreConfig();
@@ -671,7 +697,71 @@ export const CurveChart: React.FC<CurveChartProps> = ({
   } m · ${crosshairDeltaText}${crosshair.underThr ? ' · praticable' : ''}`;
 
   // Calculs temps réel synchronisés à `activeU` pour la Vue Piste Interactive
-  const softSandMarginM = activeCadre?.softSandMarginM ?? 50;
+  const dayGpsUpperLog = useMemo(() => {
+    const matching = gpsLogs.filter(
+      log =>
+        log &&
+        log.dateStr === dateStr &&
+        log.upperSoftMarginM != null &&
+        Number.isFinite(log.upperSoftMarginM) &&
+        (log.upperLimitSource === 'gps_high_mark' || log.upperLimitSource === 'manual_day')
+    );
+    if (!matching.length) return null;
+    return matching.reduce((latest, cur) => (cur.timestamp >= latest.timestamp ? cur : latest));
+  }, [gpsLogs, dateStr]);
+
+  const resolvedUpperMargin = useMemo(() => {
+    const refTsMs = activeU * 60000;
+    const basePrevPm = computePreviousHighTideUpperLimit(refTsMs, selectedZone, settings.les);
+    const prevPmWind =
+      windList.length > 0 && basePrevPm?.prevPmUtcMin != null
+        ? windAt(basePrevPm.prevPmUtcMin, windList)
+        : null;
+    const prevPmSurcoteCm = prevPmWind
+      ? predictEmpiricalAt(empiricalTerrainModel, prevPmWind).surcoteCm
+      : undefined;
+
+    return resolveEffectiveUpperMargin({
+      timestampMs: refTsMs,
+      zoneId: selectedZone,
+      storedUpperMarginM: !dayUpperOverride ? dayGpsUpperLog?.upperSoftMarginM : undefined,
+      storedUpperSource: !dayUpperOverride ? dayGpsUpperLog?.upperLimitSource : undefined,
+      storedPrevPmHeightM: !dayUpperOverride ? dayGpsUpperLog?.prevPmHeightM : undefined,
+      dailyOverride: dayUpperOverride,
+      activeCadre,
+      les: settings.les,
+      prevPmSurcoteCm,
+    });
+  }, [
+    activeU,
+    selectedZone,
+    settings.les,
+    windList,
+    empiricalTerrainModel,
+    dayUpperOverride,
+    dayGpsUpperLog,
+    activeCadre,
+  ]);
+
+  const softSandMarginM = resolvedUpperMargin.marginM;
+
+  const handleAdjustDaySoftMargin = (deltaM: number) => {
+    const nextMargin = Math.max(0, Math.min(220, Math.round(softSandMarginM + deltaM)));
+    const nextOverride: DailyUpperLimitOverride = {
+      dateStr,
+      marginM: nextMargin,
+      source: 'manual_day',
+      updatedAt: Date.now(),
+    };
+    saveStoredDailyUpperLimit(nextOverride);
+    setDayUpperOverride(nextOverride);
+  };
+
+  const handleResetDaySoftMargin = () => {
+    clearStoredDailyUpperLimit(dateStr);
+    setDayUpperOverride(null);
+  };
+
   const activeWind = useMemo(
     () => (windList.length > 0 ? windAt(activeU, windList) : null),
     [activeU, windList]
@@ -1293,10 +1383,69 @@ export const CurveChart: React.FC<CurveChartProps> = ({
                 color: '#64748b',
               }}
             >
-              <span>
-                Marge sable mou : <b>{softSandMarginM} m</b> · Profil IGN {BAY_ZONES_META[selectedZone].shortLabel}
-                {activeWaveHeightM != null ? ` · Houle ${activeWaveHeightM.toFixed(1).replace('.', ',')} m` : ''}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                <span>
+                  Sable mou : <b style={{ fontVariantNumeric: 'tabular-nums', color: '#92400e' }}>{softSandMarginM} m</b>{' '}
+                  <span style={{ color: '#64748b' }}>({resolvedUpperMargin.shortLabel})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleAdjustDaySoftMargin(-5)}
+                  title="Réduire la bande de sable mou de 5 m pour cette journée"
+                  style={{
+                    padding: '1px 6px',
+                    fontSize: '0.64rem',
+                    fontWeight: 800,
+                    borderRadius: '4px',
+                    border: '1px solid #fcd34d',
+                    background: '#fffbeb',
+                    color: '#92400e',
+                    cursor: 'pointer',
+                  }}
+                >
+                  −5 m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAdjustDaySoftMargin(5)}
+                  title="Augmenter la bande de sable mou de 5 m pour cette journée"
+                  style={{
+                    padding: '1px 6px',
+                    fontSize: '0.64rem',
+                    fontWeight: 800,
+                    borderRadius: '4px',
+                    border: '1px solid #fcd34d',
+                    background: '#fffbeb',
+                    color: '#92400e',
+                    cursor: 'pointer',
+                  }}
+                >
+                  +5 m
+                </button>
+                {dayUpperOverride && (
+                  <button
+                    type="button"
+                    onClick={handleResetDaySoftMargin}
+                    title="Revenir au calcul automatique depuis la pleine mer précédente"
+                    style={{
+                      padding: '1px 6px',
+                      fontSize: '0.64rem',
+                      fontWeight: 800,
+                      borderRadius: '4px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ↺ Auto
+                  </button>
+                )}
+                <span>
+                  · Profil IGN {BAY_ZONES_META[selectedZone].shortLabel}
+                  {activeWaveHeightM != null ? ` · Houle ${activeWaveHeightM.toFixed(1).replace('.', ',')} m` : ''}
+                </span>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                 {isToday && (
                   <button

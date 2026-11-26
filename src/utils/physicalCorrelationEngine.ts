@@ -16,6 +16,7 @@ import {
   computeTideCycleAt,
   computeTideCycleForSlot,
   convertBrestHeightToDouarnenezM,
+  resolveEffectiveUpperMargin,
 } from './waterlineGpsEngine';
 import { comp, tdy, toU, windAt } from './tides';
 
@@ -289,7 +290,6 @@ export function buildPhysicalObservationPoints(
   points: PhysicalObservationPoint[];
   excludedPreStartCount: number;
 } {
-  const softMarginM = activeCadre?.softSandMarginM ?? 50;
   const points: PhysicalObservationPoint[] = [];
   let excludedPreStartCount = 0;
 
@@ -316,14 +316,23 @@ export function buildPhysicalObservationPoints(
       dynEval?.lateralPosPct ?? log.lateralPosPct
     );
 
+    const logSoftMarginM = resolveEffectiveUpperMargin({
+      timestampMs: log.timestamp,
+      zoneId: bayZone.zoneId,
+      storedUpperMarginM: log.upperSoftMarginM,
+      storedUpperSource: log.upperLimitSource,
+      storedPrevPmHeightM: log.prevPmHeightM,
+      activeCadre,
+    }).marginM;
+
     const theoUsableM = estimateLitto3dUsableWidthM(
       log.theoreticalWaterHeightM,
-      softMarginM,
+      logSoftMarginM,
       bayZone.zoneId
     );
     const terrainUsableM =
       resolvedDune.widthFromDuneM != null
-        ? Math.max(0, Math.round(resolvedDune.widthFromDuneM - softMarginM))
+        ? Math.max(0, Math.round(resolvedDune.widthFromDuneM - logSoftMarginM))
         : null;
     const widthDeltaM =
       terrainUsableM != null ? Math.round(terrainUsableM - theoUsableM) : null;
