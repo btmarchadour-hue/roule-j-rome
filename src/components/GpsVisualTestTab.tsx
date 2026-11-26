@@ -19,11 +19,12 @@ import {
   TidePoint,
   WindPoint,
 } from '../types';
-import { build, hAt, lc, plan, tdy, toU, windAt } from '../utils/tides';
+import { build, comp, getNextTideInfo, getTideCoef, hAt, lc, plan, tdy, toU, windAt } from '../utils/tides';
 import {
   BAY_ZONES_META,
   BayZoneId,
   classifyBayZone,
+  classifyWindSector,
   estimateLitto3dWaterlineXExactM,
   measureDistanceFromBuiltInDuneM,
   resolveTerrainDuneWidthM,
@@ -400,7 +401,12 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
     activeCadre,
   ]);
 
-  const refSoftMargin = upperMarginByZone.lestrevet;
+  const activeMetricZone: BayZoneId =
+    activeZoneFocus === 'lieue_de_greve' || activeZoneFocus === 'pentrez'
+      ? activeZoneFocus
+      : 'lestrevet';
+  const activeZoneShortLabel = BAY_ZONES_META[activeMetricZone].shortLabel;
+  const refSoftMargin = upperMarginByZone[activeMetricZone];
 
   const handleAdjustSoftMargin = (deltaM: number) => {
     const nextMargin = Math.max(0, Math.min(220, Math.round(refSoftMargin.marginM + deltaM)));
@@ -684,6 +690,55 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
   const isWithinJerome = realWaterHeightM <= jeromeLimitH;
   const isSurcote = activeDeltaCm > 0;
 
+  // Rappel coefficient de marée + horaires PM/BM du jour
+  const tideInfo = useMemo(() => getNextTideInfo(EX, dateStr), [EX, dateStr]);
+  const activeCoef = useMemo(() => getTideCoef(activeU, dateStr), [activeU, dateStr]);
+  const coefHeadline = useMemo(() => {
+    const vals = tideInfo.pmCoefs.filter(c => Number.isFinite(c));
+    if (vals.length >= 2 && vals[0] !== vals[vals.length - 1]) {
+      return `${vals[0]} / ${vals[vals.length - 1]}`;
+    }
+    return String(vals[0] ?? tideInfo.coef ?? activeCoef);
+  }, [tideInfo, activeCoef]);
+  const coefCategory =
+    activeCoef >= 95
+      ? { label: 'Grande marée', color: '#b91c1c' }
+      : activeCoef >= 80
+        ? { label: 'Vives-eaux', color: '#c2410c' }
+        : activeCoef >= 55
+          ? { label: 'Moyenne', color: '#0369a1' }
+          : { label: 'Mortes-eaux', color: '#475569' };
+  const pmTimesStr = tideInfo.pmList.map(p => lc(p.t, y, m, d)).join(' · ');
+  const bmTimesStr = tideInfo.bmList.map(p => lc(p.t, y, m, d)).join(' · ');
+
+  // Rappel vent à l'heure simulée
+  const activeWindSector = useMemo(
+    () => (activeWind ? classifyWindSector(activeWind.a) : null),
+    [activeWind]
+  );
+  const activeWindComp = activeWind ? comp(activeWind.a) : null;
+  const activeWindKts = activeWind ? Math.round(activeWind.v) : null;
+  const activeGustKts =
+    activeWind?.g != null && Number.isFinite(activeWind.g) ? Math.round(activeWind.g) : null;
+
+  // Mètres perdus / gagnés sur la plage (Empirique vs SHOM, et marge vs limite Jérôme)
+  const activeZoneMetrics = zoneMetrics[activeMetricZone];
+  const deltaBeachM = Math.round(activeZoneMetrics.realX - activeZoneMetrics.theoX);
+  const jeromeMarginM = Math.round(activeZoneMetrics.realX - activeZoneMetrics.jeromeX);
+  const softMarginReason = dayUpperOverride
+    ? 'Ajustement manuel du jour'
+    : refSoftMargin.source === 'gps_high_mark'
+      ? 'Relevé GPS laisse PM'
+      : refSoftMargin.source === 'prev_pm_auto'
+        ? 'Auto d’après PM précédente'
+        : refSoftMargin.shortLabel;
+  const metersDeltaBadge =
+    deltaBeachM < 0
+      ? `−${Math.abs(deltaBeachM)} m perdus`
+      : deltaBeachM > 0
+        ? `+${deltaBeachM} m gagnés`
+        : '0 m perdu';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {/* En-tête de l'onglet expérimental */}
@@ -876,32 +931,102 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
             </div>
           </div>
 
-          {/* Synthèse chiffrée temps réel */}
+          {/* Synthèse chiffrée temps réel : Coeff · Vent · Mètres perdus · Sable mou · Piste utile */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))',
               gap: '8px',
             }}
           >
             <div style={metricBoxStyle}>
-              <div style={metricLabelStyle}>Hauteur d’eau (Empirique / SHOM)</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
-                {realWaterHeightM.toFixed(2).replace('.', ',')} m{' '}
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
-                  (SHOM {theoWaterHeightM.toFixed(2).replace('.', ',')} m ·{' '}
-                  <span style={{ color: activeDeltaCm > 0 ? '#c2410c' : activeDeltaCm < 0 ? '#047857' : '#64748b' }}>
-                    {activeDeltaCm > 0 ? `+${activeDeltaCm}` : activeDeltaCm} cm
-                  </span>
-                  )
+              <div style={metricLabelStyle}>Coeff de marée</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 900, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                  Coef {coefHeadline}
                 </span>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: coefCategory.color }}>
+                  {coefCategory.label}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.66rem', color: '#64748b', marginTop: '2px', fontVariantNumeric: 'tabular-nums' }}>
+                BM {bmTimesStr || '—'} · PM {pmTimesStr || '—'}
               </div>
             </div>
 
             <div style={metricBoxStyle}>
-              <div style={metricLabelStyle}>Sable mou haut de plage (Lestrevet)</div>
+              <div style={metricLabelStyle}>Vent à {lc(activeU, y, m, d)}</div>
+              {activeWind ? (
+                <>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                    {activeWindKts} nds {activeWindComp}
+                    {activeGustKts != null && activeGustKts > (activeWindKts ?? 0) && (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
+                        {' '}
+                        · raf. {activeGustKts}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', marginTop: '2px' }}>
+                    {activeWindSector && (
+                      <span
+                        style={{
+                          fontSize: '0.64rem',
+                          fontWeight: 800,
+                          color: activeWindSector.fg,
+                          background: activeWindSector.bg,
+                          border: `1px solid ${activeWindSector.bd}`,
+                          borderRadius: '4px',
+                          padding: '0 5px',
+                        }}
+                      >
+                        {activeWindSector.shortLabel}
+                      </span>
+                    )}
+                    {activeWind.wvh != null && Number.isFinite(activeWind.wvh) && (
+                      <span style={{ fontSize: '0.66rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                        Houle {activeWind.wvh.toFixed(1).replace('.', ',')} m
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#64748b' }}>
+                    Non disponible
+                  </div>
+                  <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: '2px' }}>
+                    Hors fenêtre de prévision météo
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={metricBoxStyle}>
+              <div style={metricLabelStyle}>Mètres perdus (Météo vs SHOM)</div>
+              <div
+                style={{
+                  fontSize: '0.9rem',
+                  fontWeight: 900,
+                  color: deltaBeachM < 0 ? '#c2410c' : deltaBeachM > 0 ? '#047857' : '#334155',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {deltaBeachM < 0
+                  ? `−${Math.abs(deltaBeachM)} m perdus`
+                  : deltaBeachM > 0
+                    ? `+${deltaBeachM} m gagnés`
+                    : '0 m perdu'}
+              </div>
+              <div style={{ fontSize: '0.66rem', color: '#64748b', marginTop: '2px', fontVariantNumeric: 'tabular-nums' }}>
+                Mer à {Math.round(activeZoneMetrics.realX)} m dune (SHOM {Math.round(activeZoneMetrics.theoX)} m)
+              </div>
+            </div>
+
+            <div style={metricBoxStyle}>
+              <div style={metricLabelStyle}>Sable mou haut ({activeZoneShortLabel})</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.88rem', fontWeight: 900, color: '#92400e', fontVariantNumeric: 'tabular-nums' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 900, color: '#92400e', fontVariantNumeric: 'tabular-nums' }}>
                   {refSoftMargin.marginM} m
                 </span>
                 <button
@@ -932,28 +1057,40 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
                 )}
               </div>
               <div style={{ fontSize: '0.66rem', color: '#64748b', marginTop: '2px' }}>
-                {refSoftMargin.shortLabel}
+                {softMarginReason}
               </div>
             </div>
 
             <div style={metricBoxStyle}>
-              <div style={metricLabelStyle}>Piste roulable utile projetée</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 900, color: isWithinJerome ? '#15803d' : '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>
-                {zoneMetrics.lestrevet.usableRealM} m{' '}
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
-                  Lestrevet · {zoneMetrics.pentrez.usableRealM} m Pentrez
-                </span>
+              <div style={metricLabelStyle}>Piste roulable utile ({activeZoneShortLabel})</div>
+              <div
+                style={{
+                  fontSize: '0.9rem',
+                  fontWeight: 900,
+                  color: isWithinJerome ? '#15803d' : '#b91c1c',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {activeZoneMetrics.usableRealM} m
               </div>
-              <div style={{ fontSize: '0.66rem', color: isWithinJerome ? '#15803d' : '#b91c1c', fontWeight: 700 }}>
-                {isWithinJerome
-                  ? `Sous limite Jérôme (${jeromeLimitH.toFixed(2).replace('.', ',')} m)`
-                  : `Au-dessus limite Jérôme (${jeromeLimitH.toFixed(2).replace('.', ',')} m)`}
+              <div
+                style={{
+                  fontSize: '0.66rem',
+                  color: isWithinJerome ? '#15803d' : '#b91c1c',
+                  fontWeight: 700,
+                  marginTop: '2px',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {jeromeMarginM >= 0
+                  ? `+${jeromeMarginM} m avant limite Jérôme`
+                  : `−${Math.abs(jeromeMarginM)} m au-delà limite Jérôme`}
               </div>
             </div>
 
             <div style={metricBoxStyle}>
-              <div style={metricLabelStyle}>Relevés GPS terrain affichés</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#0369a1', fontVariantNumeric: 'tabular-nums' }}>
+              <div style={metricLabelStyle}>Relevés GPS affichés</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#0369a1', fontVariantNumeric: 'tabular-nums' }}>
                 {visibleGpsLogs.length} point{visibleGpsLogs.length > 1 ? 's' : ''}
               </div>
               <label
@@ -1207,6 +1344,47 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
               >
                 {isViewLocked ? 'Déverrouiller' : 'Re-figer'}
               </button>
+            </div>
+
+            {/* Rappel compact Coeff · Vent · Mètres perdus directement sur la carte */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '10px',
+                right: '56px',
+                zIndex: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap',
+                maxWidth: 'calc(100% - 260px)',
+                padding: '5px 10px',
+                borderRadius: '7px',
+                background: 'rgba(15, 23, 42, 0.82)',
+                color: '#ffffff',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                fontVariantNumeric: 'tabular-nums',
+                boxShadow: '0 2px 8px rgba(15, 23, 42, 0.35)',
+                backdropFilter: 'blur(4px)',
+                pointerEvents: 'none',
+              }}
+            >
+              <span>Coef {coefHeadline}</span>
+              <span style={{ opacity: 0.45 }}>·</span>
+              <span>
+                {activeWind
+                  ? `${activeWindKts} nds ${activeWindComp}${activeWindSector ? ` (${activeWindSector.shortLabel})` : ''}`
+                  : 'Vent —'}
+              </span>
+              <span style={{ opacity: 0.45 }}>·</span>
+              <span
+                style={{
+                  color: deltaBeachM < 0 ? '#fdba74' : deltaBeachM > 0 ? '#6ee7b7' : '#e2e8f0',
+                }}
+              >
+                {metersDeltaBadge}
+              </span>
             </div>
 
             <APIProvider
@@ -1549,12 +1727,28 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
                           {resolvedDune.widthFromDuneM != null
                             ? `${resolvedDune.widthFromDuneM} m`
                             : 'N/A'}{' '}
-                          <span style={{ color: '#64748b' }}>(SHOM Litto3D : {theoXAtLog} m)</span>
+                          <span style={{ color: '#64748b' }}>(SHOM : {theoXAtLog} m)</span>
                         </div>
-                        <div>
-                          <b>Marée SHOM :</b> {selectedLog.theoreticalWaterHeightM.toFixed(2).replace('.', ',')} m
-                          {selectedLog.tideCycleLabel ? ` · ${selectedLog.tideCycleLabel}` : ''}
-                        </div>
+                        {resolvedDune.widthFromDuneM != null && (() => {
+                          const logDeltaM = Math.round(resolvedDune.widthFromDuneM - theoXAtLog);
+                          return (
+                            <div>
+                              <b>Écart plage vs SHOM :</b>{' '}
+                              <span
+                                style={{
+                                  fontWeight: 800,
+                                  color: logDeltaM < 0 ? '#c2410c' : logDeltaM > 0 ? '#047857' : '#334155',
+                                }}
+                              >
+                                {logDeltaM < 0
+                                  ? `−${Math.abs(logDeltaM)} m perdus`
+                                  : logDeltaM > 0
+                                    ? `+${logDeltaM} m gagnés`
+                                    : '0 m (conforme SHOM)'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         {selectedLog.upperSoftMarginM != null && (
                           <div>
                             <b>Sable mou retenu :</b> {selectedLog.upperSoftMarginM} m
@@ -1691,7 +1885,7 @@ export const GpsVisualTestTab: React.FC<GpsVisualTestTabProps> = ({
             </span>
             <span style={legendItemStyle}>
               <span style={{ ...legendSwatchStyle, background: '#ef4444', height: '3px' }} />
-              Limite Jérôme ({jeromeLimitH.toFixed(2).replace('.', ',')} m)
+              Limite Jérôme ({Math.round(activeZoneMetrics.jeromeX)} m dune)
             </span>
             <span style={legendItemStyle}>
               <span style={{ ...legendSwatchStyle, background: '#7c3aed', height: '3px' }} />
